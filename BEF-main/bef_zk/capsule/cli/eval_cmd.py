@@ -1,14 +1,14 @@
-"""Epistemic evaluation loop command - learn the safety boundary.
+"""Risk learning loop - learns which patches fail on your codebase.
 
-This command runs an epistemic learning loop that:
+This command runs a learning loop that:
 1. Scans the codebase with Semgrep to find potential issues
 2. Maps findings to a 5-dimensional feature grid (1024 points)
-3. Uses acquisition scoring to select the most informative targets
-4. Runs episodes (synthetic or real pipeline) to estimate p_fail
-5. Updates Beta posteriors: alpha=fails+1, beta=successes+1
-6. Generates receipt-bound artifacts for each round
+3. Uses smart sampling to select the most informative targets
+4. Runs episodes (synthetic or real) to estimate failure probability
+5. Updates the risk model based on results
+6. Generates cryptographic proofs for each round
 
-After evaluation, learned posteriors are saved to .capseal/models/beta_posteriors.npz
+After evaluation, the learned model is saved to .capseal/models/beta_posteriors.npz
 for use by `capseal review --gate`.
 """
 from __future__ import annotations
@@ -24,7 +24,7 @@ from pathlib import Path
 @click.option("--synthetic", is_flag=True, help="Use synthetic episodes (no LLM calls)")
 @click.option("--targets-per-round", "-k", default=64, help="Targets to select per round")
 @click.option("--episodes-per-target", "-e", default=1, help="Episodes per target")
-@click.option("--prove", is_flag=True, help="Generate ZK proof for the eval trace (proof-carrying)")
+@click.option("--prove", is_flag=True, help="Generate cryptographic proof for the learning run")
 def eval_command(
     path: str,
     rounds: int,
@@ -34,10 +34,10 @@ def eval_command(
     episodes_per_target: int,
     prove: bool,
 ) -> None:
-    """Epistemic evaluation loop - learn the safety boundary.
+    """Learn which patches fail on your codebase.
 
-    Runs an evaluation loop that estimates failure probabilities for different
-    patch characteristics. The learned posteriors can then be used by
+    Runs a learning loop that estimates failure probabilities for different
+    patch characteristics. The learned model can then be used by
     `capseal review --gate` to filter risky patches.
 
     \b
@@ -97,7 +97,7 @@ def eval_command(
         (run_path / "rounds").mkdir(exist_ok=True)
 
         click.echo(f"\n{CYAN}{'═' * 65}{RESET}")
-        click.echo(f"{CYAN}  EPISTEMIC EVALUATION LOOP{RESET}")
+        click.echo(f"{CYAN}  RISK LEARNING{RESET}")
         click.echo(f"{CYAN}{'═' * 65}{RESET}")
         click.echo(f"  Run ID:    {run_uuid}")
         click.echo(f"  Target:    {target_path}")
@@ -384,7 +384,7 @@ def eval_command(
             # Print round summary
             delta_str = f"Δ={tube_var_delta:+.6f}" if tube_var_delta is not None else ""
             status_color = GREEN if status == "IMPROVING" else (YELLOW if status in ["NO_CHANGE", "FIRST_ROUND"] else RED)
-            click.echo(f"    tube_var: {tube_var:.6f} {delta_str}  coverage: {tube_coverage:.3f}  {status_color}{status}{RESET}")
+            click.echo(f"    uncertainty: {tube_var:.6f} {delta_str}  coverage: {tube_coverage:.3f}  {status_color}{status}{RESET}")
             click.echo(f"    {GREEN}✓ {successes}{RESET} success  {RED}✗ {failures}{RESET} fail")
             click.echo()
 
@@ -395,7 +395,7 @@ def eval_command(
         # Generate proof if --prove flag is set
         capsule = None
         if prove:
-            click.echo(f"\n{DIM}[4/4] Generating ZK proof...{RESET}")
+            click.echo(f"\n{DIM}[4/4] Generating cryptographic proof...{RESET}")
             try:
                 from bef_zk.capsule.eval_adapter import (
                     EvalAdapter, build_eval_capsule, save_eval_capsule, verify_eval_capsule,
@@ -499,8 +499,8 @@ def eval_command(
         click.echo(f"{CYAN}{'═' * 65}{RESET}")
         click.echo(f"  Run ID:         {run_uuid}")
         click.echo(f"  Total rounds:   {rounds}")
-        click.echo(f"  Final tube_var: {prev_tube_var:.6f}")
-        click.echo(f"  Final coverage: {tube_coverage:.3f}")
+        click.echo(f"  Uncertainty:    {prev_tube_var:.6f}")
+        click.echo(f"  Coverage:       {tube_coverage:.3f}")
         click.echo(f"  Chain hash:     {run_receipt['chain_hash'][:16]}...")
         if prove and capsule:
             click.echo(f"  Capsule hash:   {capsule['capsule_hash'][:16]}...")
@@ -508,14 +508,14 @@ def eval_command(
             verified_str = f"{GREEN}Yes{RESET}" if verified else f"{RED}No{RESET}"
             click.echo(f"  Proof verified: {verified_str}")
             click.echo()
-            click.echo(f"  {DIM}The FRI proof attests that:{RESET}")
+            click.echo(f"  {DIM}The cryptographic proof attests that:{RESET}")
             click.echo(f"  {DIM}- All {rounds} rounds executed in sequence{RESET}")
-            click.echo(f"  {DIM}- Posteriors were correctly chained (no substitution){RESET}")
+            click.echo(f"  {DIM}- Model updates were correctly chained (no tampering){RESET}")
             click.echo(f"  {DIM}- Episode counts match declared totals{RESET}")
-            click.echo(f"  {DIM}- Final posteriors match the declared hash{RESET}")
-        click.echo(f"\n  {GREEN}Posteriors saved to:{RESET}")
+            click.echo(f"  {DIM}- Final model matches the declared hash{RESET}")
+        click.echo(f"\n  {GREEN}Model saved to:{RESET}")
         click.echo(f"    {final_posteriors_path}")
-        click.echo(f"\n  {DIM}Future 'capseal review --gate' will use these posteriors.{RESET}")
+        click.echo(f"\n  {DIM}Future 'capseal review --gate' will use this model.{RESET}")
         click.echo(f"{CYAN}{'═' * 65}{RESET}\n")
 
     except ImportError as e:

@@ -18,7 +18,7 @@ import click
 @click.option("--run", "-r", type=click.Path(), required=True, help="Output run directory")
 @click.option("--cache-dir", type=click.Path(), help="Cache directory for memoization")
 @click.option("--no-cache", is_flag=True, help="Disable memoization")
-@click.option("--prove", is_flag=True, help="Generate FRI proof over workflow execution")
+@click.option("--prove", is_flag=True, help="Generate cryptographic proof over workflow execution")
 def workflow_command(
     workflow_file: str,
     project_dir: str,
@@ -130,7 +130,7 @@ def verify_workflow_command(run_dir: str, verify_proof: bool) -> None:
     """Verify a workflow rollup.
 
     Checks all vertex receipts and merkle root consistency.
-    With --verify-proof, also verifies the FRI proof in workflow_capsule.json.
+    With --verify-proof, also verifies the cryptographic proof in workflow_capsule.json.
     """
     from bef_zk.capsule.workflow_engine import verify_workflow_rollup
 

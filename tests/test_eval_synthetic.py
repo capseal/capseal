@@ -27,7 +27,7 @@ class TestEvalSyntheticEndToEnd:
             text=True,
         )
         assert result.returncode == 0
-        assert "Epistemic evaluation loop" in result.stdout
+        assert "Learn which patches fail" in result.stdout
 
     def test_eval_synthetic_creates_artifacts(self, tmp_project):
         """Synthetic eval creates expected artifacts."""

@@ -1,0 +1,56 @@
+# CapSeal Gate - GitHub Action
+#
+# Add this to .github/workflows/capseal.yml in your repository.
+# Runs on every PR to gate risky changes.
+
+name: CapSeal Gate
+
+on:
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Need full history for diff
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install CapSeal
+        run: pip install capseal
+
+      - name: Run CapSeal Gate
+        run: |
+          capseal watch --json > capseal-report.json
+          capseal watch --comment pr-comment.md
+
+      - name: Verify Capsule
+        run: capseal verify-capsule .capseal/runs/watch/watch_capsule.json
+
+      - name: Upload Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: capseal-report
+          path: |
+            capseal-report.json
+            pr-comment.md
+            .capseal/
+
+      - name: Comment on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const comment = fs.readFileSync('pr-comment.md', 'utf8');
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });

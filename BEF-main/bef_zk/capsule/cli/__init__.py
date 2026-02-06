@@ -55,6 +55,7 @@ from .refactor_cmd import (
     apply_refactor_command,
 )
 from .eval_cmd import eval_command
+from .watch_cmd import watch_command
 from .trace_cmd import (
     trace_command,
     verify_trace_command,
@@ -158,8 +159,11 @@ cli.add_command(refactor_command, name="refactor")
 cli.add_command(show_diff_command, name="show-diff")
 cli.add_command(apply_refactor_command, name="apply-refactor")
 
-# Eval command (epistemic learning loop)
+# Eval command (risk learning loop)
 cli.add_command(eval_command, name="eval")
+
+# CI integration
+cli.add_command(watch_command, name="watch")
 
 
 def main() -> None:
