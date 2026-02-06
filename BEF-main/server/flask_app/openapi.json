@@ -1,0 +1,334 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "CapSeal Orchestrator API",
+    "version": "1.2.0",
+    "description": "HTTP surface area for the CapSeal CLI (fetch, run, emit, verify, replay, audit, sandbox, jobs)."
+  },
+  "servers": [
+    { "url": "http://localhost:5000" }
+  ],
+  "components": {
+    "securitySchemes": {
+      "ApiKeyAuth": {
+        "type": "apiKey",
+        "name": "X-API-Key",
+        "in": "header"
+      }
+    },
+    "schemas": {
+      "PolicyRef": {
+        "type": "object",
+        "properties": {
+          "policyId": { "type": "string" },
+          "policyVersion": { "type": "string" },
+          "policyPath": { "type": "string" },
+          "policy": { "type": "object", "additionalProperties": true }
+        },
+        "required": ["policyPath"],
+        "description": "Reference to a policy either by path or inline JSON."
+      },
+      "DatasetMapping": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "path": { "type": "string" },
+          "url": { "type": "string", "format": "uri" }
+        },
+        "required": ["id"],
+        "description": "Dataset identifier mapped to a server-visible path or remote URL."
+      },
+      "FetchRequest": {
+        "type": "object",
+        "properties": {
+          "url": { "type": "string", "format": "uri" },
+          "datasetId": { "type": "string" },
+          "outputDir": { "type": "string" },
+          "policy": { "$ref": "#/components/schemas/PolicyRef" },
+          "sandbox": { "type": "boolean" },
+          "sandboxAllowNetwork": { "type": "boolean" },
+          "datasetTreeArity": { "type": "integer", "minimum": 2, "maximum": 64 }
+        },
+        "required": ["url", "datasetId", "policy"]
+      },
+      "RunRequest": {
+        "type": "object",
+        "properties": {
+          "traceId": { "type": "string" },
+          "outputDir": { "type": "string" },
+          "policy": { "$ref": "#/components/schemas/PolicyRef" },
+          "policyId": { "type": "string" },
+          "backend": { "type": "string", "enum": ["geom", "risc0"] },
+          "steps": { "type": "integer", "minimum": 1 },
+          "queries": { "type": "integer", "minimum": 1 },
+          "challenges": { "type": "integer", "minimum": 1 },
+          "datasets": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/DatasetMapping" }
+          },
+          "profile": { "type": "string" },
+          "sandbox": { "type": "boolean" },
+          "sandboxAllowNetwork": { "type": "boolean" },
+          "sandboxMemory": { "type": "integer" },
+          "sandboxTimeout": { "type": "integer" }
+        },
+        "required": ["traceId", "policy", "policyId"]
+      },
+      "EmitRequest": {
+        "type": "object",
+        "properties": {
+          "source": { "type": "string" },
+          "capsulePath": { "type": "string" },
+          "outPath": { "type": "string" },
+          "artifactsDir": { "type": "string" },
+          "archiveDir": { "type": "string" },
+          "policyPath": { "type": "string" },
+          "manifestsDir": { "type": "string" },
+          "profile": { "type": "string", "enum": ["proof-only", "da", "replay"] }
+        },
+        "required": ["outPath"]
+      },
+      "VerifyRequest": {
+        "type": "object",
+        "properties": {
+          "capsulePath": { "type": "string" },
+          "mode": { "type": "string", "enum": ["proof-only", "da", "replay"] },
+          "policyPath": { "type": "string" },
+          "manifestsDir": { "type": "string" },
+          "datasets": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/DatasetMapping" }
+          },
+          "daProfileId": { "type": "string" },
+          "daProfilePath": { "type": "string" }
+        },
+        "required": ["capsulePath"]
+      },
+      "ReplayRequest": {
+        "type": "object",
+        "properties": {
+          "capsulePath": { "type": "string" },
+          "datasets": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/DatasetMapping" }
+          },
+          "tolerance": { "type": "number" },
+          "range": { "type": "string" },
+          "sample": { "type": "integer" },
+          "sampleSeed": { "type": "integer" },
+          "maxDivergences": { "type": "integer" },
+          "untilDiverge": { "type": "boolean" }
+        },
+        "required": ["capsulePath"]
+      },
+      "AuditRequest": {
+        "type": "object",
+        "properties": {
+          "capsulePath": { "type": "string" },
+          "format": { "type": "string", "enum": ["summary", "json", "jsonl", "csv"] },
+          "verifyChain": { "type": "boolean" },
+          "filterType": { "type": "string" },
+          "fromSeq": { "type": "integer" },
+          "toSeq": { "type": "integer" }
+        },
+        "required": ["capsulePath"]
+      },
+      "CommandResponse": {
+        "type": "object",
+        "properties": {
+          "requestId": { "type": "string" },
+          "status": { "type": "string" },
+          "exitCode": { "type": "integer" },
+          "errorCode": { "type": "string" },
+          "command": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "stdout": { "type": "string" },
+          "stderr": { "type": "string" },
+          "result": { "type": "object", "additionalProperties": true },
+          "artifacts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": { "type": "string" },
+                "hash": { "type": "string" },
+                "path": { "type": "string" },
+                "url": { "type": "string", "format": "uri" },
+                "size": { "type": "integer" }
+              }
+            }
+          }
+        }
+      },
+      "Job": {
+        "type": "object",
+        "properties": {
+          "jobId": { "type": "string" },
+          "description": { "type": "string" },
+          "status": { "type": "string" },
+          "enqueuedAt": { "type": "number" },
+          "startedAt": { "type": "number" },
+          "finishedAt": { "type": "number" },
+          "statusCode": { "type": "integer" },
+          "result": { "$ref": "#/components/schemas/CommandResponse" },
+          "error": { "type": "string" },
+          "location": { "type": "string" }
+        }
+      },
+      "JobSubmission": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string", "enum": ["SUBMITTED"] },
+          "jobId": { "type": "string" },
+          "location": { "type": "string" }
+        }
+      }
+    }
+  },
+  "security": [
+    { "ApiKeyAuth": [] }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Liveness probe",
+        "responses": { "200": { "description": "Service is reachable" } }
+      }
+    },
+    "/ready": {
+      "get": {
+        "summary": "Readiness probe",
+        "responses": { "200": { "description": "Detailed readiness report" } }
+      }
+    },
+    "/api/fetch": {
+      "post": {
+        "summary": "Governed dataset fetch",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/FetchRequest" } } }
+        },
+        "responses": {
+          "200": { "description": "Immediate result", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CommandResponse" } } } },
+          "202": { "description": "Async job accepted", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/JobSubmission" } } } }
+        }
+      }
+    },
+    "/api/run": {
+      "post": {
+        "summary": "Launch a CapSeal run",
+        "parameters": [
+          {
+            "name": "async",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "boolean" },
+            "description": "When true, enqueue the run and return a job handle"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RunRequest" } } }
+        },
+        "responses": {
+          "200": { "description": "Run finished synchronously", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CommandResponse" } } } },
+          "202": { "description": "Run enqueued", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/JobSubmission" } } } }
+        }
+      }
+    },
+    "/api/emit": {
+      "post": {
+        "summary": "Emit a .cap archive",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmitRequest" } } } },
+        "responses": {
+          "200": { "description": "Emit finished", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CommandResponse" } } } }
+        }
+      }
+    },
+    "/api/verify": {
+      "post": {
+        "summary": "Verify a capsule",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/VerifyRequest" } } } },
+        "responses": {
+          "200": { "description": "Verification response", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CommandResponse" } } } }
+        }
+      }
+    },
+    "/api/replay": {
+      "post": {
+        "summary": "Replay a capsule",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ReplayRequest" } } } },
+        "responses": {
+          "200": { "description": "Replay output", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CommandResponse" } } } }
+        }
+      }
+    },
+    "/api/audit": {
+      "post": {
+        "summary": "Audit logs",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AuditRequest" } } } },
+        "responses": {
+          "200": { "description": "Audit output", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CommandResponse" } } } }
+        }
+      }
+    },
+    "/api/runs/{runId}/events": {
+      "get": {
+        "summary": "Stream run events",
+        "parameters": [
+          { "name": "runId", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "after_seq", "in": "query", "required": false, "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "Events list" } }
+      }
+    },
+    "/api/sandbox/status": {
+      "get": {
+        "summary": "Sandbox posture",
+        "responses": { "200": { "description": "Sandbox status", "content": { "application/json": {} } } }
+      }
+    },
+    "/api/sandbox/test": {
+      "post": {
+        "summary": "Run sandbox self-test",
+        "responses": { "200": { "description": "Test output", "content": { "application/json": {} } } }
+      }
+    },
+    "/api/jobs": {
+      "get": {
+        "summary": "List recent jobs",
+        "parameters": [
+          { "name": "limit", "in": "query", "required": false, "schema": { "type": "integer", "default": 50 } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recent jobs",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "jobs": { "type": "array", "items": { "$ref": "#/components/schemas/Job" } } } } } }
+          }
+        }
+      }
+    },
+    "/api/jobs/{jobId}": {
+      "get": {
+        "summary": "Inspect a job",
+        "parameters": [ { "name": "jobId", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "responses": {
+          "200": { "description": "Job detail", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Job" } } } },
+          "404": { "description": "Job not found" }
+        }
+      }
+    },
+    "/api/jobs/{jobId}/cancel": {
+      "post": {
+        "summary": "Cancel a queued job",
+        "parameters": [ { "name": "jobId", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "responses": {
+          "200": { "description": "Cancellation acknowledged" },
+          "404": { "description": "Job missing or already complete" }
+        }
+      }
+    }
+  }
+}

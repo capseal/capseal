@@ -1,0 +1,30 @@
+{
+  "schema": "bef_trace_v1",
+  "trace_id": "vm_demo",
+  "field_modulus": 2305843009213693951,
+  "num_steps": 8,
+  "vector_length": 8,
+  "chunk_length": 4,
+  "chunks": [
+    {
+      "chunk_index": 0,
+      "offset": 0,
+      "values": [
+        2199123918849,
+        39582485708803,
+        72705374158852,
+        112150219587588
+      ]
+    },
+    {
+      "chunk_index": 1,
+      "offset": 4,
+      "values": [
+        149533648486403,
+        180457446572034,
+        222101382365186,
+        259484777709569
+      ]
+    }
+  ]
+}

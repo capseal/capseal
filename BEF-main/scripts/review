@@ -1,0 +1,25 @@
+#!/bin/bash
+# Capseal multi-agent diff review orchestrator
+# Usage: ./scripts/review [--repo-a PATH] [--repo-b PATH] [--dry-run]
+
+set -e
+
+cd /home/ryan/BEF-main
+source .venv/bin/activate
+export PYTHONPATH=/home/ryan/BEF-main
+export PATH="$HOME/.local/node_modules/.bin:$PATH"
+
+echo "╔═══════════════════════════════════════════════════════════════╗"
+echo "║       CapSeal Multi-Agent Diff Review Orchestrator            ║"
+echo "╠═══════════════════════════════════════════════════════════════╣"
+echo "║  Agents will:                                                 ║"
+echo "║    1. Generate diff bundle                                    ║"
+echo "║    2. Review changes                                          ║"
+echo "║    3. Propose solution                                        ║"
+echo "║                                                               ║"
+echo "║  All steps logged with hash-chained receipts.                 ║"
+echo "║  You just watch.                                              ║"
+echo "╚═══════════════════════════════════════════════════════════════╝"
+echo ""
+
+python -m bef_zk.capsule.orchestrator "$@"

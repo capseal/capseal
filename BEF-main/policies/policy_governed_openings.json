@@ -1,0 +1,48 @@
+{
+  "policy_id": "legal_discovery_openings_governed",
+  "policy_version": "v1",
+  "description": "Openings require co-signatures, fixed budget, DA-seed indices only.",
+  "enforcement": {"mode": "RUN_ENFORCED", "fail_closed": true},
+  "signing": {
+    "required": true,
+    "scheme": "ed25519",
+    "min_signatures": 1,
+    "authorized_signers": [
+      {"name": "Dataset Trustee", "role": "DATA_OWNER", "pubkey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}
+    ],
+    "signature_scope": "POLICY_HASH"
+  },
+  "rules": {
+    "openings_governance": {
+      "openings_enabled": true,
+      "require_opening_ticket": true,
+      "ticket_binding": "CAPSULE_HASH",
+      "openings_budget": {
+        "max_row_openings_total": 128,
+        "max_bytes_opened_total": 104857600,
+        "max_openings_per_request": 16
+      },
+      "openings_index_policy": {
+        "mode": "DA_SEED_ONLY",
+        "da_seed_source": "capsule.da_policy.deterministic_seed",
+        "allow_custom_indices": false
+      },
+      "redaction": {
+        "mode": "MASKED_FIELDS_ONLY",
+        "allowed_fields": ["row_index", "file_id", "chunk_id", "schema_hash", "policy_counters"],
+        "forbid_raw_payload_bytes": true
+      }
+    },
+    "co_signing": {
+      "required": true,
+      "scheme": "ed25519",
+      "min_signatures": 2,
+      "roles_required": ["DATA_OWNER", "CASE_ADMIN"],
+      "authorized_signers": [
+        {"name": "Dataset Trustee", "role": "DATA_OWNER", "pubkey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="},
+        {"name": "Case Admin", "role": "CASE_ADMIN", "pubkey": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE="}
+      ],
+      "signature_scope": "OPENING_TICKET"
+    }
+  }
+}

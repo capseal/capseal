@@ -1,0 +1,136 @@
+======================================================================
+ROUND 1 - REFACTOR TODO LIST
+Created: 2026-02-04 19:51
+======================================================================
+
+[ ] TASK 1: rename_provider_status
+--------------------------------------------------
+    Episode:   rename_provider_status_b874ccce_010292
+    Worktree:  /home/ryan/otherstuff/my_eval/harness/worktrees/rename_provider_status_b874ccce_010292
+    Prompt:    /home/ryan/otherstuff/my_eval/harness/episodes/rename_provider_status_b874ccce_010292/prompt.txt
+
+    STEP 1: cd /home/ryan/otherstuff/my_eval/harness/worktrees/rename_provider_status_b874ccce_010292
+    STEP 2: Read prompt.txt and do the refactor
+    STEP 3: Commit your changes
+
+    VERIFY COMMAND:
+    python -m agent_bench.refactor_harness_v1 verify \
+        --harness-dir /home/ryan/otherstuff/my_eval/harness \
+        --episode-id rename_provider_status_b874ccce_010292
+
+
+[ ] TASK 2: remove_pseudocode
+--------------------------------------------------
+    Episode:   remove_pseudocode_0efb20c2_c036bb
+    Worktree:  /home/ryan/otherstuff/my_eval/harness/worktrees/remove_pseudocode_0efb20c2_c036bb
+    Prompt:    /home/ryan/otherstuff/my_eval/harness/episodes/remove_pseudocode_0efb20c2_c036bb/prompt.txt
+
+    STEP 1: cd /home/ryan/otherstuff/my_eval/harness/worktrees/remove_pseudocode_0efb20c2_c036bb
+    STEP 2: Read prompt.txt and do the refactor
+    STEP 3: Commit your changes
+
+    VERIFY COMMAND:
+    python -m agent_bench.refactor_harness_v1 verify \
+        --harness-dir /home/ryan/otherstuff/my_eval/harness \
+        --episode-id remove_pseudocode_0efb20c2_c036bb
+
+
+[ ] TASK 3: minimal_diff_rename
+--------------------------------------------------
+    Episode:   minimal_diff_rename_6a167b6a_59a7ce
+    Worktree:  /home/ryan/otherstuff/my_eval/harness/worktrees/minimal_diff_rename_6a167b6a_59a7ce
+    Prompt:    /home/ryan/otherstuff/my_eval/harness/episodes/minimal_diff_rename_6a167b6a_59a7ce/prompt.txt
+
+    STEP 1: cd /home/ryan/otherstuff/my_eval/harness/worktrees/minimal_diff_rename_6a167b6a_59a7ce
+    STEP 2: Read prompt.txt and do the refactor
+    STEP 3: Commit your changes
+
+    VERIFY COMMAND:
+    python -m agent_bench.refactor_harness_v1 verify \
+        --harness-dir /home/ryan/otherstuff/my_eval/harness \
+        --episode-id minimal_diff_rename_6a167b6a_59a7ce
+
+
+[ ] TASK 4: make_deterministic
+--------------------------------------------------
+    Episode:   make_deterministic_518008c7_817d61
+    Worktree:  /home/ryan/otherstuff/my_eval/harness/worktrees/make_deterministic_518008c7_817d61
+    Prompt:    /home/ryan/otherstuff/my_eval/harness/episodes/make_deterministic_518008c7_817d61/prompt.txt
+
+    STEP 1: cd /home/ryan/otherstuff/my_eval/harness/worktrees/make_deterministic_518008c7_817d61
+    STEP 2: Read prompt.txt and do the refactor
+    STEP 3: Commit your changes
+
+    VERIFY COMMAND:
+    python -m agent_bench.refactor_harness_v1 verify \
+        --harness-dir /home/ryan/otherstuff/my_eval/harness \
+        --episode-id make_deterministic_518008c7_817d61
+
+
+[ ] TASK 5: rename_provider_status
+--------------------------------------------------
+    Episode:   rename_provider_status_e42171dd_24d69f
+    Worktree:  /home/ryan/otherstuff/my_eval/harness/worktrees/rename_provider_status_e42171dd_24d69f
+    Prompt:    /home/ryan/otherstuff/my_eval/harness/episodes/rename_provider_status_e42171dd_24d69f/prompt.txt
+
+    STEP 1: cd /home/ryan/otherstuff/my_eval/harness/worktrees/rename_provider_status_e42171dd_24d69f
+    STEP 2: Read prompt.txt and do the refactor
+    STEP 3: Commit your changes
+
+    VERIFY COMMAND:
+    python -m agent_bench.refactor_harness_v1 verify \
+        --harness-dir /home/ryan/otherstuff/my_eval/harness \
+        --episode-id rename_provider_status_e42171dd_24d69f
+
+
+[ ] TASK 6: remove_pseudocode
+--------------------------------------------------
+    Episode:   remove_pseudocode_6a4e920d_753b66
+    Worktree:  /home/ryan/otherstuff/my_eval/harness/worktrees/remove_pseudocode_6a4e920d_753b66
+    Prompt:    /home/ryan/otherstuff/my_eval/harness/episodes/remove_pseudocode_6a4e920d_753b66/prompt.txt
+
+    STEP 1: cd /home/ryan/otherstuff/my_eval/harness/worktrees/remove_pseudocode_6a4e920d_753b66
+    STEP 2: Read prompt.txt and do the refactor
+    STEP 3: Commit your changes
+
+    VERIFY COMMAND:
+    python -m agent_bench.refactor_harness_v1 verify \
+        --harness-dir /home/ryan/otherstuff/my_eval/harness \
+        --episode-id remove_pseudocode_6a4e920d_753b66
+
+
+[ ] TASK 7: minimal_diff_rename
+--------------------------------------------------
+    Episode:   minimal_diff_rename_4069ff79_86603b
+    Worktree:  /home/ryan/otherstuff/my_eval/harness/worktrees/minimal_diff_rename_4069ff79_86603b
+    Prompt:    /home/ryan/otherstuff/my_eval/harness/episodes/minimal_diff_rename_4069ff79_86603b/prompt.txt
+
+    STEP 1: cd /home/ryan/otherstuff/my_eval/harness/worktrees/minimal_diff_rename_4069ff79_86603b
+    STEP 2: Read prompt.txt and do the refactor
+    STEP 3: Commit your changes
+
+    VERIFY COMMAND:
+    python -m agent_bench.refactor_harness_v1 verify \
+        --harness-dir /home/ryan/otherstuff/my_eval/harness \
+        --episode-id minimal_diff_rename_4069ff79_86603b
+
+
+[ ] TASK 8: make_deterministic
+--------------------------------------------------
+    Episode:   make_deterministic_a3331cf7_336554
+    Worktree:  /home/ryan/otherstuff/my_eval/harness/worktrees/make_deterministic_a3331cf7_336554
+    Prompt:    /home/ryan/otherstuff/my_eval/harness/episodes/make_deterministic_a3331cf7_336554/prompt.txt
+
+    STEP 1: cd /home/ryan/otherstuff/my_eval/harness/worktrees/make_deterministic_a3331cf7_336554
+    STEP 2: Read prompt.txt and do the refactor
+    STEP 3: Commit your changes
+
+    VERIFY COMMAND:
+    python -m agent_bench.refactor_harness_v1 verify \
+        --harness-dir /home/ryan/otherstuff/my_eval/harness \
+        --episode-id make_deterministic_a3331cf7_336554
+
+
+======================================================================
+WHEN DONE: Run VERIFY + INGEST
+======================================================================

@@ -1,0 +1,5 @@
+{
+  "schema": "capsule_manifest_signature_v1",
+  "signer_id": "test_manifest",
+  "signature": "e83601432dfa9bac6cd3983cc24561b5db2af7a568377688ef256622147e6f3462fff705612cc765e7a7b814969e8a28c0bf32f8cf53e8ab983321a5695ca9fa01"
+}

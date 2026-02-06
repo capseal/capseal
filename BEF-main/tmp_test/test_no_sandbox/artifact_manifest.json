@@ -1,0 +1,83 @@
+{
+  "schema": "bef_artifacts_manifest_v1",
+  "version": 1,
+  "encoding_id": "dag_cbor_compact_fields_v1",
+  "path_index": {
+    "stats_digest.json": {
+      "encoding_id": "json_hex_v1"
+    },
+    "row_archive/chunk_roots.json": {
+      "encoding_id": "hex_json_v1"
+    },
+    "row_archive/chunk_roots.bin": {
+      "encoding_id": "raw32_v1"
+    },
+    "row_archive/chunk_manifest.json": {
+      "encoding_id": "json_hex_v1"
+    },
+    "events.jsonl": {
+      "encoding_id": "events_log_v1"
+    },
+    "adapter_proof.json": {
+      "encoding_id": "json_hex_v1"
+    },
+    "adapter_proof.bin": {
+      "encoding_id": "dag_cbor_compact_fields_v1"
+    },
+    "strategy_capsule.json": {
+      "encoding_id": "json_hex_v1"
+    },
+    "strategy_capsule.bin": {
+      "encoding_id": "dag_cbor_compact_fields_v1"
+    },
+    "artifact_manifest.json": {
+      "encoding_id": "json_manifest_v1"
+    }
+  },
+  "proofs": {
+    "primary": {
+      "default_format": "json",
+      "formats": {
+        "json": {
+          "path": "adapter_proof.json",
+          "encoding_id": "json_hex_v1",
+          "sha256_payload_hash": "df4f5862e837f7b137add03ca6d82145cdca3630b60a90c1e491abc73d409fc2"
+        },
+        "bin": {
+          "path": "adapter_proof.bin",
+          "encoding_id": "dag_cbor_compact_fields_v1",
+          "sha256_payload_hash": "329081b25bd54c327ab2f4962954a06b04855131e2709e782a6685378abf6eab"
+        }
+      },
+      "features": {
+        "chunk_leaf_multiproof": true
+      }
+    }
+  },
+  "chunk_roots": {
+    "default": "json",
+    "formats": {
+      "json": {
+        "path": "row_archive/chunk_roots.json",
+        "encoding_id": "hex_json_v1"
+      },
+      "bin": {
+        "path": "row_archive/chunk_roots.bin",
+        "encoding_id": "raw32_v1"
+      }
+    }
+  },
+  "capsule": {
+    "default_format": "json",
+    "formats": {
+      "json": {
+        "path": "strategy_capsule.json",
+        "encoding_id": "json_hex_v1"
+      },
+      "bin": {
+        "path": "strategy_capsule.bin",
+        "encoding_id": "dag_cbor_compact_fields_v1"
+      }
+    }
+  }
+}

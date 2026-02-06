@@ -1,0 +1,59 @@
+{
+  "schema": "fusion_pipeline_artifacts_v1",
+  "bicep": {
+    "bicep_version": "8c1558c6f1948b24fdb797e41c5fb060230ee2d6",
+    "dirty": true,
+    "integrator": "EulerMaruyama",
+    "model_params_hash": "4f38de7eea698e71df046d36abca9a5d7ce3f82f829f4b8c0f54a6334209985a",
+    "seed_spec_id": "seed_spec_v1",
+    "seed_spec_hash": "c3fe86864333eae706c8bf722ae45775837b652735dc6baefeb272393723ab84",
+    "trajectory_schema_hash": "ed36df944683aa9fc3acaa06cad37bf9b4a9b978212aaf39983e90ab5fac95a3",
+    "cargo_lock_hash": "d2d052430cad6c9bf904593d49b7d73cf8017ce94dabac3bbfa6b292d7b81acd"
+  },
+  "enn": {
+    "model_id": "demo",
+    "weights_hash": "a97ff7f4d5f6f7d24eafbe5bdcfa0f8a5c94c79664fb7b0bbd40dcea265828fb",
+    "config_hash": "c47b79c0d1720ab5231d2f4c0c9b833ddc5b36f9061474629240820f93696f41",
+    "compile_flags_hash": "4f38de7eea698e71df046d36abca9a5d7ce3f82f829f4b8c0f54a6334209985a",
+    "telemetry_schema_hash": "473c272a981ca1c0c0ae541f1ff8f1e5beefa7be00f983d22ece624e55bbf493",
+    "calibrator_id": "calibrator_platt",
+    "calibrator_hash": "56e7eecdd0e1367bee4477753fc2142d7edd2b7b82de09bae3524f33daf65bee"
+  },
+  "fusion": {
+    "fusion_version": "8c1558c6f1948b24fdb797e41c5fb060230ee2d6",
+    "dirty": true,
+    "cargo_lock_hash": "5c8f50081ab856c7ca98c8d343ba2ff697ec92a65b33d830f539327ad3a40355",
+    "graph_spec_id": "graph_spec_v1",
+    "graph_spec_hash": "78a6b037a85c548a6a1e87f6ddcbf88c9372a1e19712378456c5da2b3c934712",
+    "graph_hash": "45d4d86aa17783d0c623304a5467c66fda72c922496d4cb748b5c3b40c5b7d11",
+    "prop_config_hash": "4f38de7eea698e71df046d36abca9a5d7ce3f82f829f4b8c0f54a6334209985a"
+  },
+  "features": {
+    "feature_schema_hash": "89453b4c3b8c0f772b725b1d05daf65c43e6336e3ce34c8156bd5eac53ef6cec"
+  },
+  "toolchain": {
+    "compiler": "unknown",
+    "cxxflags": "unknown",
+    "ldflags": "unknown",
+    "os_fingerprint": "Linux",
+    "threads": {
+      "omp": 0,
+      "eigen": 0,
+      "mkl": 0
+    },
+    "versions": {
+      "python": "Python 3.13.11",
+      "gcc": "g++ (GCC) 15.2.1 20251112\nCopyright (C) 2025 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.",
+      "rustc": "rustc 1.92.0 (ded5c06cf 2025-12-08) (Arch Linux rust 1:1.92.0-1)",
+      "cargo": "cargo 1.92.0 (344c4567c 2025-10-21) (Arch Linux rust 1:1.92.0-1)"
+    }
+  },
+  "binaries": {
+    "bicep_to_enn": "73ac3573532b06c30f6c9a0984f5185c2855e608feec092799fbe23000e29216",
+    "libfusion_alpha": "8a6a1cdb0cbffad4e77ceb3315a055c382e29f1e4cef5ff944b34101216253e9"
+  },
+  "python": {
+    "requirements_hash": "e8a013d5145762848f7a07f05137c2cd7dd2f4023a92be17a9d708ce38544f2e"
+  },
+  "artifact_set_hash": "e20f922ea5ace68b28ad46fae0fbcd324ae4fc90842d309757f09af79f0a5bfe"
+}

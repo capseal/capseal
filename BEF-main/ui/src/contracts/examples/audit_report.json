@@ -1,0 +1,90 @@
+{
+  "run_id": "capsule_run_20240115_143022",
+  "chain_valid": true,
+  "chain_length": 8,
+  "genesis_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "head_hash": "a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456",
+  "event_counts": {
+    "run_started": 1,
+    "trace_simulated": 1,
+    "spec_locked": 1,
+    "statement_locked": 1,
+    "row_root_finalized": 1,
+    "proof_artifact": 1,
+    "capsule_sealed": 1,
+    "run_completed": 1
+  },
+  "timeline": [
+    {
+      "seq": 1,
+      "event_type": "run_started",
+      "event_hash": "880e1702abcd1234",
+      "prev_hash": "0000000000000000",
+      "timestamp": "2024-01-15T14:30:22.000Z"
+    },
+    {
+      "seq": 2,
+      "event_type": "trace_simulated",
+      "event_hash": "8222244cabcd5678",
+      "prev_hash": "880e1702abcd1234",
+      "timestamp": "2024-01-15T14:30:22.050Z"
+    },
+    {
+      "seq": 3,
+      "event_type": "spec_locked",
+      "event_hash": "3344556677889900",
+      "prev_hash": "8222244cabcd5678",
+      "timestamp": "2024-01-15T14:30:22.060Z"
+    },
+    {
+      "seq": 4,
+      "event_type": "statement_locked",
+      "event_hash": "aabbccdd11223344",
+      "prev_hash": "3344556677889900",
+      "timestamp": "2024-01-15T14:30:22.070Z"
+    },
+    {
+      "seq": 5,
+      "event_type": "row_root_finalized",
+      "event_hash": "5566778899aabbcc",
+      "prev_hash": "aabbccdd11223344",
+      "timestamp": "2024-01-15T14:30:22.100Z"
+    },
+    {
+      "seq": 6,
+      "event_type": "proof_artifact",
+      "event_hash": "ddeeff0011223344",
+      "prev_hash": "5566778899aabbcc",
+      "timestamp": "2024-01-15T14:30:22.300Z"
+    },
+    {
+      "seq": 7,
+      "event_type": "capsule_sealed",
+      "event_hash": "1122334455667788",
+      "prev_hash": "ddeeff0011223344",
+      "timestamp": "2024-01-15T14:30:22.310Z"
+    },
+    {
+      "seq": 8,
+      "event_type": "run_completed",
+      "event_hash": "a1b2c3d4e5f67890",
+      "prev_hash": "1122334455667788",
+      "timestamp": "2024-01-15T14:30:22.320Z"
+    }
+  ],
+  "first_event": {
+    "seq": 1,
+    "event_type": "run_started",
+    "event_hash": "880e1702abcd1234",
+    "prev_hash": "0000000000000000",
+    "timestamp": "2024-01-15T14:30:22.000Z"
+  },
+  "last_event": {
+    "seq": 8,
+    "event_type": "run_completed",
+    "event_hash": "a1b2c3d4e5f67890",
+    "prev_hash": "1122334455667788",
+    "timestamp": "2024-01-15T14:30:22.320Z"
+  },
+  "audited_at": "2024-01-15T14:35:00.000Z"
+}

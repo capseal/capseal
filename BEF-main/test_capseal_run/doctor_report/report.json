@@ -1,0 +1,101 @@
+{
+  "capsule_path": "/home/ryan/BEF-main/test_capseal_run/strategy_capsule.json",
+  "capsule_hash": "99f9a210735958ede1e5dcb7a433ad0c80724b9879c1f1669ee1e3043ecc14a8",
+  "report_timestamp": "2026-01-26T06:55:19.957166+00:00",
+  "overall_status": "FAIL",
+  "checks": [
+    {
+      "name": "inspect",
+      "status": "pass",
+      "duration_ms": 165.96917901188135,
+      "details": {
+        "format": "capsule.json",
+        "capsule_id": "fa75fca867b33f54",
+        "trace_id": "capsule_run",
+        "backend": "stark_fri",
+        "profile": "PROOF_ONLY",
+        "schema": "bef_capsule_v1",
+        "file_size": "56.0 KB"
+      },
+      "error": null
+    },
+    {
+      "name": "verify",
+      "status": "fail",
+      "duration_ms": 234.59770600311458,
+      "details": {
+        "raw": "VERIFIED (proof_only) in 2.0ms\n"
+      },
+      "error": null
+    },
+    {
+      "name": "audit",
+      "status": "pass",
+      "duration_ms": 162.830005021533,
+      "details": {
+        "total_events": "8",
+        "hash_chain": "VALID"
+      },
+      "error": null
+    },
+    {
+      "name": "row_open_0",
+      "status": "pass",
+      "duration_ms": 169.58782498841174,
+      "details": {
+        "row_index": 0,
+        "commitment": "3e20dd87336d0c3c...",
+        "proof_length": 2,
+        "values_count": 14
+      },
+      "error": null
+    },
+    {
+      "name": "row_open_1",
+      "status": "pass",
+      "duration_ms": 163.82254799827933,
+      "details": {
+        "row_index": 1,
+        "commitment": "3e20dd87336d0c3c...",
+        "proof_length": 2,
+        "values_count": 14
+      },
+      "error": null
+    },
+    {
+      "name": "row_open_2",
+      "status": "pass",
+      "duration_ms": 164.5148420066107,
+      "details": {
+        "row_index": 2,
+        "commitment": "3e20dd87336d0c3c...",
+        "proof_length": 2,
+        "values_count": 14
+      },
+      "error": null
+    }
+  ],
+  "summary": {
+    "capsule_id": "fa75fca867b33f54",
+    "trace_id": "capsule_run",
+    "backend": "stark_fri",
+    "schema": "bef_capsule_v1",
+    "trace_schema_id": null,
+    "checks_passed": 5,
+    "checks_total": 6,
+    "total_duration_ms": 1061.3221050298307
+  },
+  "index": {
+    "capsule_json": "/home/ryan/BEF-main/test_capseal_run/strategy_capsule.json",
+    "capsule_hash": "99f9a210735958ede1e5dcb7a433ad0c80724b9879c1f1669ee1e3043ecc14a8",
+    "capsule_id": "fa75fca867b33f54",
+    "trace_id": "capsule_run",
+    "events_log": "/home/ryan/BEF-main/test_capseal_run/events.jsonl",
+    "events_log_hash": "98d88b5d8033e41dac4481468d7f85926e8d3ab6b0b4b9088fbcb46693ffb964",
+    "row_0_commitment": "3e20dd87336d0c3cb319f85447974dec37a32a23f2e693db8026b3c34bf0209b",
+    "row_1_commitment": "3e20dd87336d0c3cb319f85447974dec37a32a23f2e693db8026b3c34bf0209b",
+    "row_2_commitment": "3e20dd87336d0c3cb319f85447974dec37a32a23f2e693db8026b3c34bf0209b",
+    "row_archive_dir": "/home/ryan/BEF-main/test_capseal_run/row_archive",
+    "row_archive_chunks": "66"
+  }
+}

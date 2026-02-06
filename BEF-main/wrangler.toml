@@ -1,0 +1,11 @@
+name = "capsuletech"
+pages_build_output_dir = "ui/dist"
+# Use a conservative, widely-supported Workers date to avoid deploy failures.
+compatibility_date = "2024-12-01"
+
+[vars]
+RELAY_BASE = "https://capsuletech.onrender.com"
+
+[[r2_buckets]]
+binding = "ARTIFACTS_BUCKET"
+bucket_name = "capsulebucket"

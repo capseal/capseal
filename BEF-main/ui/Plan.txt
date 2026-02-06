@@ -1,0 +1,505 @@
+Here’s the best “don’t waste money / don’t ship garbage” method for *this exact plan*.
+
+The core idea: use the expensive model only where it prevents expensive mistakes
+Expensive models are worth it when the task involves:
+
+* multi-file coherence (routes + shells + rail visibility + deep links)
+* API/schema contract design (VerifyReport/AuditReport/EvidenceIndex)
+* streaming protocols (SSE, reconnect, buffering)
+* governance semantics (token/oracle tracking, context packs, commitments)
+
+Cheaper models are fine when the task is:
+
+* isolated UI layout work in one file
+* straightforward refactors with explicit instructions and fixed acceptance tests
+* adding a new component that doesn’t change architecture
+
+So you don’t “buy Opus for everything.” You buy Opus for the *junction points*, and you buy Haiku for the *wiring*—but only when the wiring is constrained.
+
+A correctness-optimized spending plan (the sweet spot)
+This usually lands around “$10–18 that behaves like $30 quality,” and if you still want extra safety you add one final Opus pass.
+
+Phase 0 — Freeze the contracts first (Opus)
+Cost: moderate, huge ROI.
+
+Deliverables:
+
+1. Exact JSON schemas for:
+
+   * `RunSummary`
+   * `VerifyReport` (L0–L4 ladder)
+   * `AuditReport` (hash chain + counts)
+   * `EvidenceIndex` (openable items)
+2. Naming conventions (snake_case vs camelCase) and one canonical “source of truth” file in the repo (e.g. `contracts.ts` + `contracts.jsonschema`).
+
+Why Opus here: if this is wrong, everything else becomes rewrite soup.
+
+Phase 1 — Restructure routes + shells (Opus for design + review, Haiku for mechanical edits)
+You do NOT want five agents all reading the repo and touching routes. That’s how you pay $30 and still get drift.
+
+Best pattern:
+
+* Opus produces a **file-by-file patch plan** (exact files to touch, exact new routes, exact rail visibility rule).
+* Haiku applies the changes **diff-only** to those files.
+* Opus does a final review pass over the diff for coherence.
+
+This is the best ROI combo: Haiku is cheap labor; Opus is the architect + QA lead.
+
+Phase 2 — Local daemon + SSE streaming (Opus, or Haiku + strict harness)
+If you cheap out anywhere, don’t cheap out on SSE. SSE “works on my machine once” is a classic trap.
+
+If you want to keep cost down:
+
+* Use Haiku to implement *only if* you provide:
+
+  * exact endpoints
+  * exact response schemas (from Phase 0)
+  * exact DoD tests (see below)
+    Then use Opus to review.
+
+If you want max confidence:
+
+* Just use Opus for the daemon.
+
+Phase 3 — Token governance + ORACLE tracking (Opus only)
+This is your differentiator. Cheap models tend to “hand-wave” semantics here and accidentally break your trust story (e.g., logging after the fact instead of commitment-first).
+
+Phase 4 — Final integration + “no surprises” review (Opus)
+This pass is where Opus scans for:
+
+* route regressions
+* schema drift
+* “ghost endpoints”
+* inconsistent naming
+* missing error handling
+* rail showing up where it shouldn’t
+* deep-link behavior (`/p/:id/runs/:runId`)
+
+That final pass is the difference between “seems fine” and “actually stable.”
+
+How to keep costs low WITHOUT sacrificing correctness
+These are the levers that matter more than model choice:
+
+1. Never let agents re-read the whole repo
+   You pay for rereading. Use “context packs” even during development:
+
+* provide only the 3–8 files relevant to the change
+* plus the contract schema file
+* plus route table
+
+2. Force diff-only outputs
+   No essays. No “I would change X.” Output patches only.
+
+3. Enforce a Definition of Done per ticket
+   Example DoD you should literally paste into the agent prompt:
+
+UI Shell ticket DoD:
+
+* `/` shows Launchpad, no rail
+* `/workspace` shows recent projects, no rail
+* `/p/:projectId/runs` shows rail + list + detail
+* deep link `/p/:projectId/runs/:runId` loads detail correctly
+* `pnpm build` and `pnpm typecheck` pass
+
+Daemon ticket DoD:
+
+* `POST /run` returns `{run_id}` immediately and starts streaming
+* `GET /runs/:id/events` streams SSE reliably (refresh + reconnect works)
+* `POST /verify` returns VerifyReport exactly matching `contracts.ts`
+* CORS works for localhost UI
+* daemon doesn’t crash if events file doesn’t exist yet
+
+4. “One source of truth” for contracts
+   Put it in one place and generate the other side:
+
+* If frontend is TS: define types in TS + generate JSON schema for backend validation
+* Or define JSON schema and generate TS types
+  Either way: *one* canonical contract.
+
+So what should you do now (best correctness / optimized cost)
+Do this:
+
+1. Opus: freeze contracts + route/shell plan (Phase 0 + “Phase 1 patch plan”)
+2. Haiku: implement Launchpad + WorkspaceHome + ProjectShell wiring (diff-only)
+3. Opus: review and fix drift
+4. Opus: implement daemon SSE (or Haiku implement + Opus review if you want to gamble a little)
+5. Opus: token governance semantics
+6. Opus: final integration sweep
+
+That’s how you avoid both failure modes you named:
+
+* “paid $30 and still got something janky”
+* “paid $5 and it’s shit”
+
+Read below for  your multi-agent task prompts into “ticket-grade” prompts with DoD + file scope + contract references, so each agent is forced into the narrow lane where it performs well and can’t freestyle architecture.
+
+Below are “ticket-grade” agent prompts you can paste directly into Cline / your agent runner. They’re written to maximize correctness per dollar: tight scope, explicit file boundaries, strict contracts, and hard acceptance tests. Each ticket includes the exact output format the agent must return (diff + file list + test evidence).
+
+I’m assuming these are **pre-Rust** tickets (Rust is Section 9, additive). These tickets match your Launchpad → Workspace → ProjectShell plan, and the design notes (progressive disclosure, trust ladder, budgets, etc.).
+
+---
+
+## Ticket 0 — Freeze Contracts (Source of Truth)
+
+**Recommended model:** expensive (because this prevents “schema drift” everywhere)
+
+**Prompt to agent:**
+
+You are implementing **frozen UI↔backend contracts** for CapSeal. This is the source of truth that all later work must conform to.
+
+Read first:
+
+* `Layout_hierarchy.txt`
+* `Design_notes.txt`
+
+Goal:
+Create a canonical contract definition for these shapes:
+
+* `RunSummary`
+* `VerifyReport` (must include L0–L4 ladder status)
+* `AuditReport` (hash chain validity + counts + minimal timeline index)
+* `EvidenceIndex` (openable items)
+
+Constraints:
+
+* Choose **one** naming convention and enforce it everywhere. Prefer `snake_case` if backend is Python-heavy, OR `camelCase` if UI is TS-heavy—pick one and stick to it. No mixed case.
+* These contracts must be **stable** across the Rust rewrite later.
+* Add runtime validation: either JSON Schema or Zod validators, but it must be canonical and referenced everywhere.
+
+Deliverables:
+
+1. A single “source of truth” file, e.g. `src/contracts/contracts.ts` (or `contracts/schema.json` + generated TS types).
+2. Update any existing UI typing to use this source.
+3. Provide example JSON payloads for each contract in `contracts/examples/*.json`.
+
+Definition of Done:
+
+* Typecheck/build passes (`pnpm typecheck` and `pnpm build`, or whatever equivalents exist).
+* There is exactly one contract source of truth; no duplicated “shadow types.”
+* Examples validate against the schema/validators.
+
+Output format:
+
+* List of files changed/added.
+* A unified diff for each file.
+* Commands run + results (copy/paste output).
+* A short note: “Contract naming convention chosen: ____”.
+
+---
+
+## Ticket 1 — Launchpad + Routes + Rail Visibility (Steve Jobs first screen)
+
+**Recommended model:** medium/cheap is fine *if it only edits listed files*, otherwise expensive.
+
+**Prompt to agent:**
+
+Implement the **Jobs-like Launchpad** and hierarchical routing. Keep it minimal, aesthetic, and progressive-disclosure aligned.
+
+Read first:
+
+* `Layout_hierarchy.txt`
+* `Design_notes.txt`
+
+Goal:
+Routes must become:
+
+* `/` → Launchpad (4 buttons + Settings link; no rail)
+* `/workspace` → WorkspaceHome (project picker; no rail)
+* `/p/:projectId/*` → ProjectShell (rail visible here only)
+* `/trace` → QuickTrace (no rail preferred)
+* `/settings` → Settings (optional; if empty, keep route but don’t link prominently)
+
+Actions on Launchpad:
+
+* Start New Project → `/workspace?mode=new`
+* Continue Project → `/workspace?mode=recent`
+* Open Existing Project → `/workspace?mode=open`
+* Quick Trace → `/trace`
+* Settings link → `/settings`
+
+Constraints:
+
+* Do not invent new global state architecture. Use existing patterns.
+* Do not redesign internals—this is navigation + first impression only.
+* Rail must be hidden on `/`, `/workspace`, `/trace`.
+
+Allowed file scope (do not touch outside unless necessary):
+
+* `src/App.jsx` (or router entry)
+* `src/components/Welcome.jsx` (or equivalent)
+* Add: `src/components/WorkspaceHome.jsx`
+* Add: `src/components/ProjectShell.jsx` (shell wrapper only)
+* Optional: `src/components/QuickTraceShell.jsx`
+
+Definition of Done:
+
+* Opening `/` shows Launchpad. No rail. No admin dashboard vibe.
+* `/workspace` shows project picker. No rail.
+* `/p/default/runs` shows rail + list + detail (existing Runs UI intact).
+* Deep link works: `/p/default/runs/:runId` loads RunDetail correctly.
+* Build passes.
+
+Output format:
+
+* Files changed/added list.
+* Diffs.
+* Commands run + results.
+* Manual verification checklist: confirm each route behavior.
+
+---
+
+## Ticket 2 — WorkspaceHome Project Picker (Recent / New / Open)
+
+**Recommended model:** cheap/medium
+
+**Prompt to agent:**
+
+Implement `WorkspaceHome` as a simple project chooser that supports “continue/open/new” modes. This is intentionally minimalist; it’s not a dashboard.
+
+Read first:
+
+* `Layout_hierarchy.txt`
+* `Design_notes.txt`
+
+Goal:
+`/workspace` must support:
+
+* `?mode=recent`: show recent projects list (5–10)
+* `?mode=new`: New Project flow (even if minimal stub: name + folder + create manifest)
+* `?mode=open`: Open existing project (file picker if Tauri, otherwise text input path placeholder)
+
+Constraints:
+
+* If browser-only, file picker may be stubbed; do not fake local filesystem access.
+* Keep UI extremely calm: title + short list + 2–3 actions.
+* Project identity can be derived from `track_id`/manifest—don’t build a DB.
+
+Integration:
+
+* Selecting a project navigates to `/p/:projectId/runs`
+* Provide `default` fallback project if needed.
+
+Definition of Done:
+
+* WorkspaceHome works for all three modes (even if open/new have placeholders that are clearly labeled).
+* Navigation from Launchpad flows correctly.
+* No rail visible.
+
+Output format:
+
+* Files changed/added list.
+* Diffs.
+* Commands run + results.
+* Notes on how “recent projects” are stored (localStorage, manifest scan placeholder, etc.).
+
+---
+
+## Ticket 3 — ProjectShell Wiring (Runs list/detail + optional Circuits toggle)
+
+**Recommended model:** medium; expensive if the repo is messy.
+
+**Prompt to agent:**
+
+Build `ProjectShell` that wraps the existing Runs experience inside `/p/:projectId/*`, without breaking anything.
+
+Read first:
+
+* `Layout_hierarchy.txt`
+
+Goal:
+`ProjectShell` must:
+
+* Show rail (only here)
+* Left panel: project header + Runs list
+* Right panel: RunDetail
+* Deep link works: `/p/:projectId/runs/:runId`
+
+Optional:
+Add a segmented control for Runs/Circuits only if the Circuits list already exists or can be stubbed cleanly. If not, keep Runs only.
+
+Constraints:
+
+* Don’t rewrite RunsList or RunDetailPanel. Only adapt selection + routing.
+* Project scoping should be simple: filter by `track_id` or similar if present; otherwise “default project.”
+
+Definition of Done:
+
+* `/p/default/runs` behaves exactly like your current /runs page, but scoped and routed.
+* Selecting run updates the URL.
+* Refreshing on a run URL keeps the selected run shown.
+* Build passes.
+
+Output format:
+
+* Files changed/added list.
+* Diffs.
+* Commands run + results.
+* Manual checks: selection → URL sync, refresh retains selection, rail visibility correct.
+
+---
+
+## Ticket 4 — Local Daemon + SSE Streaming (Run → events.jsonl → contracts)
+
+**Recommended model:** expensive (SSE + contract correctness)
+
+**Prompt to agent:**
+
+Implement a **local execution daemon** for CapSeal with SSE streaming and contract-perfect responses.
+
+Read first:
+
+* `Layout_hierarchy.txt`
+* The canonical contracts file created in Ticket 0.
+
+Goal:
+Create a local daemon (Flask or FastAPI) with endpoints:
+
+1. `POST /run`
+   Input: `{ project_id, policy_path, input_path, mode }` (mode can be “local” only for now)
+   Behavior:
+
+* starts a CapSeal run (invokes CLI or calls internal Python function)
+* immediately returns `{ run_id }`
+
+2. `GET /runs/:run_id/events` (SSE)
+   Behavior:
+
+* streams events as they’re written (tail `events.jsonl`)
+* handles: file-not-yet-created, reconnect, and clean termination
+
+3. `POST /runs/:run_id/verify`
+   Returns: `VerifyReport` EXACTLY matching Ticket 0 contract.
+
+4. `GET /runs/:run_id/audit`
+   Returns: `AuditReport` EXACTLY matching contract.
+
+5. `GET /runs/:run_id/evidence`
+   Returns: `EvidenceIndex` EXACTLY matching contract.
+
+Constraints:
+
+* Must be CORS-safe for localhost UI.
+* Must not buffer SSE (flush output).
+* No invented fields. Contracts must match exactly.
+* Use a workspace layout compatible with your existing out/ structure.
+
+Definition of Done:
+
+* You can start daemon, hit `/run`, see `/events` stream live.
+* Verify/Audit/Evidence return valid JSON matching schema.
+* Daemon handles refresh/reconnect to SSE without freezing.
+* Provide a tiny `scripts/dev_daemon.sh` or `Makefile` target to run it.
+
+Output format:
+
+* Files changed/added list.
+* Diffs.
+* Commands run + results.
+* A `curl` demo sequence showing:
+
+  * run start
+  * SSE stream sample
+  * verify/audit/evidence responses
+
+---
+
+## Ticket 5 — Token Governance & ORACLE Tracking (Context Packs)
+
+**Recommended model:** expensive (this is core governance semantics)
+
+**Prompt to agent:**
+
+Implement “token governance” as **committed context packs** + **explicit ORACLE tracking**, aligned with the typed DAG model (ORACLE nodes consume budget and are auditable).
+
+Read first:
+
+* `Design_notes.txt`
+* Ticket 0 contracts
+* Your existing receipt/event log code paths
+
+Goal:
+When an ORACLE-like tool runs (Greptile/Cline calls, LLM calls, any external oracle):
+
+* produce a **Context Pack** artifact:
+
+  * list of included files/chunks
+  * deterministic selection metadata
+  * content root hash (`context_root`)
+* log an event with:
+
+  * `oracle_id`, `context_root`, token counts, and budget delta
+* ensure receipts can reference `context_root` (direct field or via events/evidence)
+
+Constraints:
+
+* Don’t over-engineer full DAG scheduling yet. This ticket is about making oracle usage commitment-bound.
+* “Context pack” must be reproducible: selection algorithm + root hash must be deterministic given the same inputs.
+* Use existing hash/Merkle primitives where possible.
+
+Definition of Done:
+
+* ORACLE invocation produces a context pack on disk with a stable root hash.
+* Event log includes oracle spend + context_root.
+* Verify/audit surfaces oracle spend in outputs (via EvidenceIndex or AuditReport additions only if contracts allow; otherwise include in events and reference them).
+* No silent oracle calls: all oracle usage must be logged.
+
+Output format:
+
+* Files changed/added list.
+* Diffs.
+* A single example run showing: context pack generated, event logged, budget fields updated.
+
+---
+
+## Ticket 6 — Integration Sweep (No drift, no ghosts, no jank)
+
+**Recommended model:** expensive (this is the “make it actually stable” pass)
+
+**Prompt to agent:**
+
+You are doing a final integration sweep to ensure the system is coherent: routes, shells, rail rules, daemon contracts, and UX sanity.
+
+Goal checks:
+
+* Launchpad is minimal and has correct actions.
+* Rail is hidden everywhere except inside `/p/:projectId/*`.
+* Deep links work and keep selection state.
+* Daemon endpoints match contract schemas exactly.
+* UI can consume VerifyReport/AuditReport/EvidenceIndex without adapters/hacks.
+* No invented endpoints or unused code paths.
+
+Deliverables:
+
+* Fix any mismatches discovered.
+* Add a short `docs/DEV_E2E.md` with:
+
+  * how to run UI
+  * how to run daemon
+  * how to execute one full run
+  * how to verify/audit/export
+
+Definition of Done:
+
+* A scripted local demo works end-to-end.
+* Build passes.
+* Contracts validated.
+
+Output format:
+
+* List of issues found + fixes applied.
+* Diffs.
+* Commands run + results.
+* E2E steps verified.
+
+---
+
+### One small operational rule that will save you money
+
+When you run these tickets with agents, feed them a “context pack” instead of the whole repo. For each ticket, include only:
+
+* the specific files listed in that ticket’s “Allowed file scope”
+* Ticket 0 contract source file (always)
+* any necessary config files (router entry, package.json scripts)
+
+This prevents “agent re-reading the world” and keeps cost down without reducing quality.
+

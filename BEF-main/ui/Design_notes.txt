@@ -1,0 +1,336 @@
+According to a document from your design notes (the file itself isn’t dated), the “closed-shell, no-drift” UI plan is: **Intent → Context → Shell → Details → Utilities** (Launchpad `/` → Workspace `/workspace` → ProjectShell `/p/:projectId/*` → Run detail tabs → optional utility shells like `/trace`). That’s the spine we’re building around. 
+
+Now here’s the **specific** Tauri-ready “Design truth → Code truth → Behavior truth” stack, but pinned to *your actual components* (Welcome/AppShell/RunsList/RunDetailPanel/Rail/etc.) so it’s not theory. 
+
+---
+
+### 1) Design truth (what the UI is “allowed” to be)
+
+**Single source of truth:** `tokens/` in the repo.
+
+You already wrote the “Steve Jobs-coded” constraints as hard numbers (8px grid, rail 56–64, list 320–360, one accent, near-black bg, lighter surfaces, hairline borders). We freeze those as tokens so they can’t drift without a diff. 
+
+Concrete setup:
+
+**Repo structure**
+
+```txt
+ui/
+  tokens/
+    core.json
+    semantic.json
+  style-dictionary/
+    config.mjs
+  src/
+    styles/
+      tokens.css          <-- generated (DO NOT EDIT)
+      app.css             <-- your authored layout glue
+```
+
+**Tokens authoring options**
+
+* If you want Figma as the authoring UI: **Tokens Studio → export JSON** (still commit JSON). ([Tokens Studio][1])
+* Then compile tokens to CSS variables with **Style Dictionary**. ([Style Dictionary][2])
+
+Minimal token shape (example)
+
+```json
+{
+  "color": {
+    "bg": { "value": "#0b0c0f" },
+    "surface1": { "value": "#11131a" },
+    "border": { "value": "rgba(255,255,255,0.08)" },
+    "text1": { "value": "rgba(255,255,255,0.92)" },
+    "accent": { "value": "#7c3aed" }
+  },
+  "space": {
+    "2": { "value": "8px" },
+    "3": { "value": "12px" },
+    "4": { "value": "16px" },
+    "6": { "value": "24px" },
+    "8": { "value": "32px" }
+  },
+  "radius": {
+    "card": { "value": "14px" }
+  }
+}
+```
+
+**Style Dictionary build**
+
+```js
+// style-dictionary/config.mjs
+import StyleDictionary from "style-dictionary";
+
+export default {
+  source: ["tokens/**/*.json"],
+  platforms: {
+    css: {
+      transformGroup: "css",
+      buildPath: "src/styles/",
+      files: [
+        {
+          destination: "tokens.css",
+          format: "css/variables",
+          options: { selector: ":root" }
+        }
+      ]
+    }
+  }
+};
+```
+
+Package scripts:
+
+```json
+{
+  "scripts": {
+    "tokens:build": "node -e \"import('./style-dictionary/config.mjs').then(m=>require('style-dictionary').extend(m.default).buildAllPlatforms())\""
+  }
+}
+```
+
+**Guardrail that prevents “AI vibe drift”:**
+
+* Rule: *No hex colors in components. No random padding numbers. Everything must be `var(--...)` or `space.*` tokens.*
+* Enforce with linting (stylelint) + a CI check that fails if `src/styles/tokens.css` differs from `tokens/**`.
+
+That’s the “design law.”
+
+---
+
+### 2) Code truth (what ships inside Tauri, deterministically)
+
+You’ve already got the right component split. The only “new” code truth is: **route shells + a locked component system**.
+
+#### A) Route shells (mapped to your codebase)
+
+This is literally the plan you already have written, using your existing parts: Welcome → WorkspaceHome → ProjectShell → RunDetailPanel. 
+
+**Routes**
+
+* `/` → `Welcome` (Launchpad, rail-free)
+* `/workspace` → `WorkspaceHome` hell appears here)
+* `/trace` → `QuickTraceShell` (single-purpose)
+* `/settings` → optional
+
+That’s the “hard shell boundary” that keeps the product from feeling like an admin dashboard on open. 
+
+#### B) Component system choice (two legit options)
+
+Option 1 (minimum rewrite): keep your current CSS approach, but **force
+Option 2 (stronger long-term constraints): **Tailwind + shadcn/ui**, wired to tokens, so “padding/font/radius” choices are basically pre-approved primitives. ([ui.shadcn.com][3])
+
+If your core goal is “AI dev stays consistent,” shadcn/ui is genuinely helpful because the agent stops inventing new UI elements and just composes. ([ui.shadcn.com][3])
+
+Either way, the key is the same: **components are the only place UI is allowed to exist**. No one-off screen styling.
+
+#### C) MCP/AI placement (dev-time only)
+
+You already nailed this: keep MCP tooling as **build-time brain**, not runtime dependency. That’s how the Tauri app stays a sealed shell.
+
+---
+
+### 3) Behavior truth (how drift gets caught automatically)
+
+This is where “closed shell” becomes real.
+
+#### A) Visual regression (local/offline gate)
+
+Use Storybook + **Loki** to snapshot components and catch pixel diffs when an agent “helpfully” changes spacing/radii/typography. Loki is explicitly built for visual regression on Storybook.
+
+Practical rule:
+
+* You only snapshot **primitives + key composite views** (Button, Card, Rail, RunsList row, RunHeader trust ladder, etc.).
+* Drift = CI fail.
+
+#### B) True desktop E2E (Tauri app, not browser tab)
+
+Tauri supports E2E testing via WebDriver using **tauri-driver**. ([ui.shadcn.com][4])
+Also note the platform caveat from Tauri’s docs: desktop WebDriver support is not equally smooth across all OSes (macOS limitations are a known issue). ([ui.shadcn.com][4])
+
+So your testing stack becomes:
+
+* Unit tests: normal Vite/React
+* Visual tests: Storybook+Loki
+* Desktop E2E: tauri-driver WebDriver tests on Linux/Windows in CI; macOS gets coverage via visual + unit unless/until the ecosystem catches up. ([ui.shadcn.com][4])
+
+---
+
+### 4) The “sealed shell” controls (Tauri-specific)
+
+This is the part that prevents “browser-tab-with-privileges” creep.
+
+1. **CSP + no remote scripts**
+   Tauri documents CSP as a security layer; in practice for “closed shell mode,” you ship assets locally and keep CSP tight. ([Loki][5])
+
+2. **Capabilities / permissions / scopes**
+   Tauri v2’s security model is explicit: you grant what the frontend can do (commands/plugins), and you can scope access (filesystem paths, allowed URLs, etc.). ([Tauri][6])
+
+Practical “closed mode” defaults:
+
+* Only allow filesystem access inside a **workspace root** directory (scoped).
+* If you have an HTTP client plugin, scope it to **localhost only** (or disable entirely if you’re using IPC to a local daemon).
+* No remote webview navigation.
+* No dynamic code loading.
+
+That’s your “sealed desktop instrument panel” story.
+
+---
+
+### 5) CapSeal-specific UX details that should be tokenized + componentized (so they can’t drift)
+
+Two things you explicitly want to feel like “the product” (not configs) are:
+
+1. **Trust ladder (L0–L4)**
+   Put it in the Run header as tiny badges with progressive disclosure. That’s in your notes as a core UX wedge. 
+
+2. **Budget meter (tokens/oracle calls/time/proof size)**
+   Also in Run header, minimal, expandable. 
+
+These should be first-class components (and Loki snapshots), because they’re exactly where “random UI drift” would silently destroy trust.
+
+---
+
+### 6) The shortest path from your current UI to this “no drift” Tauri system
+
+Do it in this order (fastest to “feels like a product” while staying deterministic):
+
+1. Implement the route shells (Launc
+2. Move your current CSS variables into `tokens/*.json` and geneary). ([Style Dictionary][2])
+3. Add Loki snapshots for primitives + Run header (trust ladder + budget meter).
+4. Wrap in Tauri and lock security (CSP + capabilities/scopes). ([Loki][5])
+5. Add tauri-driver E2E tests for the “main happy path” (Launchpad → open project → select run → verify). ([ui.shadcn.com][4])
+
+[![Raycast: The Must-Have Productivity App for macOS · Web UI Engineer from Hamburg, Germany](https://tse3.mm.bing.net/th/id/OIP._q5wJtGGiGC-J77zjVHpdwHaEy?pid=Api)](https://www.stefanimhoff.de/raycast/?utm_source=chatgpt.com)
+
+I am  feeling “functionality not tight” because the UI currently behaves like a set of screens, not like a single instrument with a clear state machine.
+
+The product flow has three leaks:
+
+1. **State ambiguity** (what should I do next?)
+2. **Layout ambiguity** (why is there so much dead space / why are the important controls skinny?)
+3. **System ambiguity** (is this local? remote? connected? what’s committed? what’s verified?)
+
+Here’s how to tighten it—concretely—without bloating the product.
+
+---
+
+### 1) Lock the app into 3 explicit “modes” (this is the real tightness)
+
+Everything should fall into one of these, and the UI should *visibly* reflect which one you’re in.
+
+**Mode A: Launchpad (no context) — `/`**
+Your last screenshot is the right direction. Make it behave like a launcher, not a homepage.
+
+* **Start New Project** → goes to the wizard (template → details → confirm)
+* **Continue Project** → opens *most recent project* and drops you into Runs with last run selected (or empty state that offers “New Run”)
+* **Open Existing Project** → goes to `/workspace` with a list + search
+* **Quick Trace** → goes to `/trace` (single-purpose flow)
+* Settings is fine as a subtle text link
+
+Key “tight” rule: buttons disable/enable deterministically. If there is no recent project, **Continue** is disabled with one-line hint.
+
+**Mode B: Workspace (project selection) — `/workspace`**
+This is just a chooser: recent projects, pinned projects, search, “New Project”. No rail.
+
+**Mode C: Project Shell (full power UI) — `/p/:projectId/*`**
+Only here do you show the rail + 2/3-pane layout. This is where complexity lives.
+
+This matches your earlier spec (“rail hidden until inside /p/...”) and makes the product feel intentional instead of “dashboard everywhere”.
+
+---
+
+### 2) Fix the dead-space problem with one layout rule
+
+Right now your pages feel “empty in the wrong places.” It’s not that whitespace is bad—Jobs-style UIs use tons of it—it’s that your *content column is too narrow and not optically centered.*
+
+Use one invariant across screens:
+
+* **Content container:** `max-w-5xl` (or `max-w-6xl`), centered
+* Inside it, do either:
+
+  * **One-column** (Launchpad, wizard steps), or
+  * **Two-column 2:1** (Quick Trace form left, explanation right), or
+  * **Three-pane** (ProjectShell: rail + list + detail)
+
+For your **Quick Trace** screenshot: keep the sidebar, but pull it into the same centered container so it doesn’t look stranded on the far right. Your main form also needs to be wider—right now it reads like a settings panel floating in space.
+
+---
+
+### 3) “Tight” is a state machine: define the empty states as first-class screens
+
+Your Runs view currently says both “No runs” *and* “Select a run.” That’s the UI contradicting itself.
+
+Make empty states exclusive:
+
+* **No runs yet:** hide the detail pane entirely; center one card:
+  “No runs for this project” + primary CTA “New Run” + secondary “Quick Trace”
+* **Runs exist but none selected:** show the 2-pane layout; detail pane shows “Select a run”
+* **Run selected:** show Inspect / Verify / Audit / Evidence / Export tabs
+
+Do the same for Circuits/Policies.
+
+---
+
+### 4) Make “local vs remote” a visible, single source of truth
+
+Right now “Local / Remote (Coming Soon)” exists, but the app doesn’t *feel* connected to an engine.
+
+Add one always-consistent indicator (in ProjectShell header and Quick Trace header):
+
+* **Engine: Local (Connected)** / **Engine: Local (Not running)**
+* If not running: one-click “Start Engine” (or instructions), and disable “Run & Seal”.
+
+When you move to Tauri, this becomes even more important because the whole point is “sealed desktop shell”. Tauri’s security model is built around explicit capabilities/permissions and a CSP mindset—don’t let the UI imply it’s “just a web app”. ([Tauri][1])
+
+---
+
+### 5) Steve Jobs-coded design preferences (specific, not vibes)
+
+Your current look is “dark dashboard.” Jobs-coded is “quiet instrument panel.”
+
+Do this:
+
+* **One accent color** (your purple is fine) used only for: primary CTA, active focus ring, selected item indicator
+* **Borders over shadows:** 1px borders, very soft shadow only for floating surfaces (dialogs, command palette)
+* **8pt spacing scale:** 8 / 12 / 16 / 24 / 32 / 48
+* **Radius:** 12–16 for cards/buttons (pick one and commit)
+* **Typography:** 14–15 body; 20–24 section headings; 28–32 page headline
+* **Contrast:** raise text contrast slightly; your gray-on-black is currently too timid in places
+
+And most importantly: **fewer surfaces**. Right now you have “background → slightly less dark background → card → input → border”, which can turn muddy. Drop one layer.
+
+---
+
+### 6) Copy + micro-interactions that make it feel “finished”
+
+Two tiny things that make it feel premium fast:
+
+1. **Command palette** (Cmd/Ctrl+K) for navigation + actions
+   Linear trains users into this muscle memory (“command bar Cmd/Ctrl K”). ([Linear][2])
+
+2. **Live timeline during runs** (even in Quick Trace)
+   When someone hits “Run & Seal”, the UI should immediately become a “run in progress” screen: streaming events, progress, and the L0–L4 ladder filling in.
+
+---
+
+### 7) Your “closed shell” Tauri discipline (keep it real)
+
+Your earlier write-up is directionally correct. The non-negotiables if you want “no drift, no surprises”:
+
+* Ship assets locally (fonts/icons/CSS), avoid remote scripts; enforce CSP. ([Tauri][1])
+* Use Tauri **capabilities/permissions/scopes** so the UI can’t quietly grow escape hatches. ([Tauri][1])
+* For correctness regression, Tauri supports WebDriver-based testing via tauri-driver.
+
+That’s how you keep the “desktop appliance” feeling.
+
+---
+
+### 8) Quick critique of your current screens (why they don’t feel tight yet)
+
+* **Launchpad:** looks good. Tightness comes from deterministic button behavior + where each routes.
+* **Quick Trace:** concept good, but the layout is too stretched; pull everything into a centered container and make the “Run” step transition into a live timeline/receipt view immediately.
+* **Runs page:** empty state logic is conflicting; collapse detail pane when empty and push the single next action.
+
+

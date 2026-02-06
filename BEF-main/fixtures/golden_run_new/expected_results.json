@@ -1,0 +1,33 @@
+{
+  "capsule_file": "fixtures/golden_run_new/capsule/strategy_capsule.json",
+  "copied": {
+    "da": false,
+    "manifests": true,
+    "proof": false,
+    "registries": false,
+    "row_archive": false
+  },
+  "fixture_version": 1,
+  "mutations": [],
+  "profiles": {
+    "FULL": {
+      "reason_codes": [
+        "E013_CAPSULE_HEADER_MISMATCH"
+      ],
+      "status": "REJECT"
+    },
+    "POLICY_ENFORCED": {
+      "reason_codes": [
+        "E013_CAPSULE_HEADER_MISMATCH"
+      ],
+      "status": "REJECT"
+    },
+    "PROOF_ONLY": {
+      "reason_codes": [
+        "E013_CAPSULE_HEADER_MISMATCH"
+      ],
+      "status": "REJECT"
+    }
+  },
+  "run_dir": "/home/ryan/BEF-main/out/capsule_runs/run_20251223_000934"
+}

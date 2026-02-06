@@ -1,0 +1,92 @@
+> Critical attack surfaces
+
+  - docs/security_model.md:24-30, scripts/verify_capsule.py:940-973 & 585-639 – “policy enforcement”
+  relies entirely on manifests shipped inside the capsule pack: _compute_manifest_anchor just re-
+  hashes hardware_manifest.json, os_fingerprint.json, etc. and compares the digest to the header; no
+  attestation, signatures, or TPM quotes exist. A malicious prover can edit those JSON blobs (e.g., mark
+  GPU “not detected”), recompute the anchor, and satisfy every rule while actually violating them. The
+  doc already concedes malicious provers control the filesystem (§1) yet still claims policy binding.
+  This is pure self-reporting and completely subverts “POLICY_ENFORCED/FULLY_VERIFIED.”
+  - scripts/verify_capsule.py:1262-1376 & 177-199 – DA chunk handles go straight through
+  _ensure_local_artifact with zero confinement; adversaries can point handles at arbitrary absolute
+  paths or ../.. escapes. During _run_da_audit the verifier opens and hashes every handle, leaking host
+  files or triggering privileged reads. This contradicts the “honest verifier host” assumption (docs/
+  security_model.md:12) and gives a trivial local attack regardless of cryptographic strength.
+  - docs/security_model.md:26-30 & scripts/verify_capsule.py:1113-1146 – Event logs are treated as part
+  of FULL verification even though the predicate only checks hash-chain consistency and presence of five
+  event types. Because the emitter is untrusted, an attacker can fabricate any narrative offline and
+  still satisfy events_ok. Marketing this as part of “FULLY_VERIFIED” conflates tamper evidence with
+  execution truth and lets provers lie about what happened during the run.
+  - docs/security_model.md:29-30 & scripts/verify_capsule.py:920-938 – DA challenges still trust
+  operator-supplied relay IDs/keys and only fail closed when required_level >= FULL. Capsules can
+  advertise verification_profile=FULL without any relay receipt, and consumers who don’t rerun
+  verification will accept it. The spec must treat FULL as verifier input only; otherwise profile
+  spoofing becomes trivial.
+
+  Subtle attack surfaces
+
+  - scripts/verify_capsule.py:958-973 – Chunk metadata hashing ties the header to the manifest but never
+  enforces that URIs resolve to immutable, content-addressed blobs; a prover can serve different data per
+  verifier and still pass because only hashes written into the capsule are checked.
+  - docs/security_model.md:22-25, scripts/verify_capsule.py:910-918 – instance_hash only includes
+  vk_hash, statement_hash, trace_spec_hash, and the row root. Backend-specific knobs (steps,
+  num_challenges, circuit IDs, Nova parameters) aren’t bound unless they happen to appear inside those
+  hashes, enabling backend modifications that reuse the same vk_hash but silently weaken constraints.
+  - scripts/verify_capsule.py:1031-1058 – Policy “attestation” requires an inclusion proof but never
+  states who signs or rotates the registry root. Any compromise of the operator’s CLI arguments gives the
+  attacker full control over what counts as “attested.”
+  - scripts/verify_capsule.py:1213-1299 – Row-commitment verification rebuilds the Merkle root but trusts
+  the capsule-provided chunk_handles ordering. There is no cross-check that the number of chunks matches
+  the declared trace dimensions, so a prover can pad or truncate while keeping the Merkle root identical.
+
+  Ambiguous areas
+
+  - docs/security_model.md:26-30 – The doc now admits event logs are “tamper-evident only,” but FULL
+  verification still requires them without clarifying what trust model applies. If the emitter isn’t
+  trusted, why does failing the event check reject FULL rather than emit a warning?
+  - docs/security_model.md:29-30 – Relay registry rooting uses “SHA-256 of the sorted id→pubkey map” yet
+  provides no mechanism for third parties to verify membership or see revocations. Is the root published
+  somewhere? Can two operators disagree on the map? The spec is silent.
+  - docs/security_model.md:32-44 – The verification predicate assumes policy_ok only when both the
+  policy document and ACL are valid. In code, policy_ok is just bool(policy_verified) (scripts/
+  verify_capsule.py:1403), which is set whenever a policy doc loads successfully (scripts/
+  verify_capsule.py:1168-1170). That conflation between “document authenticity” and “rules enforced”
+  needs clarification.
+
+  Missing assumptions
+
+  - There is no explicit statement about manifest provenance. If the design truly assumes “manifests are
+  honest,” docs/security_model.md must say so in §1 or §5 and downgrade policy claims accordingly.
+  - The adversary model never discusses malicious relays or key-distribution failures, yet the
+  correctness of DA challenges hinges entirely on trustworthy relay IDs supplied out-of-band.
+  - Multi-backend adapters are mentioned throughout the repo, but docs/security_model.md hardcodes
+  backend_id ∈ {geom_stc_fri, geom}. Security assumptions for other adapters (e.g., RISC0) are missing.
+
+  Suggested formal statements
+
+  1. ManifestAuthenticity Experiment: Challenger provides an oracle for attested manifests. Adversary
+  wins by producing two different manifest sets that hash to the same artifact_manifest_hash without
+  forging the attestation. Explicitly state the assumption needed (TPM, remote attestation, or signed
+  manifests).
+  2. ChunkHandleConfinement: Define an experiment where the adversary supplies chunk handles, and the
+  verifier must reject any capsule that causes file access outside the unpacked archive root. Current
+  implementation trivially fails; formalizing it makes the requirement obvious.
+  3. PolicyEnforcement vs Self-Reporting: State a theorem that “POLICY_ENFORCED implies manifests are
+  attested and policy rules hold.” Without a formal claim, the distinction between enforcement and self-
+  reporting remains marketing.
+
+  Suggested fixes or clarifications
+
+  - Constrain _ensure_local_artifact to the extraction root and reject absolute paths or ..
+  components before any IO; otherwise every capsule run is an arbitrary file read attack (scripts/
+  verify_capsule.py:177-199, 1262-1376).
+  - Introduce real manifest attestation (signatures, TPM quotes, or inclusion proofs in a registry)
+  and make policy_assurance default to SELF_REPORTED unless such evidence is present. Update docs/
+  security_model.md §2 accordingly.
+  - Treat event logs as optional tamper-evident artifacts; stop tying FULL verification to them unless
+  you can authenticate the emitter.
+  - Require DA relay selection to be verifier-driven with pinned registry roots plus inclusion proofs. If
+  the operator doesn’t supply a trusted root, verification at FULL must fail, not downgrade silently.
+  - Separate policy_verified (document authenticity) from policy_enforced (rules satisfied) in both code
+  (scripts/verify_capsule.py:1403-1414) and docs/security_model.md so downstream consumers can tell when
+  they are relying on self-reported compliance.

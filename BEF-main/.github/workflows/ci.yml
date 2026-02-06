@@ -1,0 +1,68 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy pandas pyarrow
+      - name: bicep_v2 equivalence (PYTHONHASHSEED=0)
+        env:
+          PYTHONHASHSEED: '0'
+        run: |
+          python verifier-independent/test_bicep_v2_equivalence.py
+      - name: bicep_v2 equivalence (PYTHONHASHSEED=random)
+        env:
+          PYTHONHASHSEED: random
+        run: |
+          python verifier-independent/test_bicep_v2_equivalence.py
+      - name: capsule run -> verify integration
+        env:
+          PYTHONHASHSEED: '0'
+        run: |
+          python verifier-independent/test_capsule_run_integration.py
+      - name: Build ENN deterministic
+        run: |
+          make deterministic
+        working-directory: ./enn-cpp
+      - name: Validate BICEP schema (repo sample)
+        run: |
+          python scripts/validate_bicep_schema.py data/bicep_samples/sample_bicep_demo.csv --metadata data/bicep_samples/sample_bicep_demo.meta.json
+      - name: Run ENN on repo sample
+        run: |
+          ./apps/bicep_to_enn ../data/bicep_samples/sample_bicep_demo.csv --telemetry /tmp/enn_ci.csv --metadata ../data/bicep_samples/sample_bicep_demo.meta.json
+        working-directory: ./enn-cpp
+      - name: Fit ENN calibrator (Platt)
+        run: |
+          python enn-cpp/scripts/fit_calibrator.py /tmp/enn_ci.csv /tmp/enn_calibrator.json --method platt --bins 10 --model-id demo --calibrator-id ci_platt
+      - name: Backtest policy v1 on sample
+        run: |
+          python policy/backtest.py --enn /tmp/enn_ci.csv --out /tmp/policy_ci.csv --costs half=1.0 fee=0.0 impact=0.0 --mode passive
+      - name: Collect artifact set (hard gate)
+        run: |
+          python scripts/collect_artifact_set.py --telemetry /tmp/enn_ci.csv --calibrator /tmp/enn_calibrator.json --output artifact_set_ci.json
+      - name: Replay test (requires sample CSV)
+      - name: Replay test (requires sample CSV)
+        env:
+          OMP_NUM_THREADS: 1
+          OPENBLAS_NUM_THREADS: 1
+          MKL_NUM_THREADS: 1
+        run: |
+          python scripts/run_replay_test.py --csv data/bicep_samples/sample_bicep_demo.csv || true
+      - name: Verify graph script import
+        run: |
+          python FusionAlpha/python/verify_graph_artifacts.py strict FusionAlpha/python/../docs/sample_graph_v1.json || true
+      - name: Artifact set
+        run: |
+          python scripts/collect_artifact_set.py || true

@@ -1,0 +1,13 @@
+{
+  "run_id": "capsule_run_20240115_143022",
+  "project_id": "backtest_q4",
+  "track_id": "momentum_strategy_v2",
+  "policy_id": "demo_policy_v1",
+  "policy_hash": "5228ce4fff1c8a9b",
+  "backend": "geom_stc_fri",
+  "capsule_hash": "e4a5b18c7a7f12d3891734de16cd8952c1070637",
+  "verification_status": "verified",
+  "created_at": "2024-01-15T14:30:22.000Z",
+  "last_event": "run_completed",
+  "event_count": 8
+}

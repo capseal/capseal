@@ -1,0 +1,97 @@
+{
+  "schema": "bef_artifacts_manifest_v1",
+  "version": 1,
+  "encoding_id": "dag_cbor_compact_fields_v1",
+  "path_index": {
+    "stats_digest.json": {
+      "encoding_id": "json_hex_v1"
+    },
+    "datasets/data/manifest.json": {
+      "encoding_id": "json_hex_v1"
+    },
+    "row_archive/chunk_roots.json": {
+      "encoding_id": "hex_json_v1"
+    },
+    "row_archive/chunk_roots.bin": {
+      "encoding_id": "raw32_v1"
+    },
+    "row_archive/chunk_manifest.json": {
+      "encoding_id": "json_hex_v1"
+    },
+    "events.jsonl": {
+      "encoding_id": "events_log_v1"
+    },
+    "adapter_proof.json": {
+      "encoding_id": "json_hex_v1"
+    },
+    "adapter_proof.bin": {
+      "encoding_id": "dag_cbor_compact_fields_v1"
+    },
+    "strategy_capsule.json": {
+      "encoding_id": "json_hex_v1"
+    },
+    "strategy_capsule.bin": {
+      "encoding_id": "dag_cbor_compact_fields_v1"
+    },
+    "artifact_manifest.json": {
+      "encoding_id": "json_manifest_v1"
+    },
+    "access/access_log.jsonl": {
+      "encoding_id": "json_lines_v1"
+    }
+  },
+  "proofs": {
+    "primary": {
+      "default_format": "json",
+      "formats": {
+        "json": {
+          "path": "adapter_proof.json",
+          "encoding_id": "json_hex_v1",
+          "sha256_payload_hash": "fb194961ed98e815cb74e0d86185298f264f04936c7b4dad03581431d62a7137"
+        },
+        "bin": {
+          "path": "adapter_proof.bin",
+          "encoding_id": "dag_cbor_compact_fields_v1",
+          "sha256_payload_hash": "ba593ee56945db2004d5fb1f5433ceb0c38321ee1661e3dd8a4b0151265d8de6"
+        }
+      },
+      "features": {
+        "chunk_leaf_multiproof": true
+      }
+    }
+  },
+  "datasets": {
+    "data": {
+      "manifest_path": "datasets/data/manifest.json",
+      "root": "81698f77845af466e0ea5f8954f074259c4d77a32d03ec1ae9d56448c6dd125f",
+      "tree_arity": 16,
+      "num_chunks": 2
+    }
+  },
+  "chunk_roots": {
+    "default": "json",
+    "formats": {
+      "json": {
+        "path": "row_archive/chunk_roots.json",
+        "encoding_id": "hex_json_v1"
+      },
+      "bin": {
+        "path": "row_archive/chunk_roots.bin",
+        "encoding_id": "raw32_v1"
+      }
+    }
+  },
+  "capsule": {
+    "default_format": "json",
+    "formats": {
+      "json": {
+        "path": "strategy_capsule.json",
+        "encoding_id": "json_hex_v1"
+      },
+      "bin": {
+        "path": "strategy_capsule.bin",
+        "encoding_id": "dag_cbor_compact_fields_v1"
+      }
+    }
+  }
+}

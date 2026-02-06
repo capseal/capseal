@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "mode": "L1_BLOB",
+  "sampling": {
+    "delta_min": 0.1,
+    "epsilon_max": 1e-6,
+    "k_min": 96
+  },
+  "provider": {
+    "chain_id": 1,
+    "blob_tx": "0xdeadbeef..."
+  }
+}

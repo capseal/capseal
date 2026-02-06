@@ -1,0 +1,16 @@
+{
+  "schema": "bef_benchmark_policy_v1",
+  "policy_id": "baseline_policy_v1",
+  "policy_version": "1.0",
+  "tracks": [
+    {
+      "track_id": "baseline_no_accel",
+      "description": "CPU-only baseline track",
+      "rules": {
+        "forbid_gpu": true,
+        "require_deterministic_build": true,
+        "required_public_outputs": ["final_cnt"]
+      }
+    }
+  ]
+}

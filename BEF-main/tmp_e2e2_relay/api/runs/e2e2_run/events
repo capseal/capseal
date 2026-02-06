@@ -1,0 +1,4 @@
+{"events": [
+  {"seq": 1, "type": "run_started", "prev_event_hash": "", "event_hash": "111", "payload": {"trace_id": "e2e2_run"}},
+  {"seq": 2, "type": "run_completed", "prev_event_hash": "111", "event_hash": "222", "payload": {"status": "ok"}}
+]}

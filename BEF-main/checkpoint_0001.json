@@ -1,0 +1,22 @@
+{
+  "schema": "checkpoint_v1",
+  "manifest_hash": "effb496d3f533189954947fd5d05c4639be6f3a9bb708e34ec89a1075d2d3090",
+  "policy_hash": "",
+  "inputs_hash": "",
+  "checkpoint_index": 1,
+  "step_start": 4,
+  "step_end": 8,
+  "head_at_start": "e97eaa518490565b74c56590da01eea40029dc986de0ba1716876f596e058309",
+  "head_at_end": "e7ef31ac42306e10913829865d24caa92d4c2875dd19d5f0a4bc2062307261bd",
+  "chunk_root": "70b3e6a2fe4c00129825c717331387352e36e1047e8feda4c2925c8e3fd6fabd",
+  "row_digests": [
+    "2c3a9abcde2d1b2675c35f2b31d88e0a82ba8c1c4112f2835c34f5f14cc42d2a",
+    "91ed750efce42e2283c4394b9f9918a6b3984fa7d50f869bcb0a6ef1dd9d5953",
+    "3aac2b5eb8b9e26bd246dd46e106fa5aeccd0369a734d681f0af52751da24efd",
+    "c40b229f123ac1f66e407757e18ea5a64869d5f598523bc26401a4805d424c76"
+  ],
+  "outputs_hash": "3be0416b3f25efc1ce6a6ae34c16fbe91f9f8a76a89b81883e85f4157084d06f",
+  "verifier_method_id": "replay_v1",
+  "created_at": "2026-01-27T06:02:14.292696+00:00",
+  "receipt_hash": "021e127b85704453ad7120654a64e099e5ed70a25acc3afd5a4218eb7ed599b9"
+}

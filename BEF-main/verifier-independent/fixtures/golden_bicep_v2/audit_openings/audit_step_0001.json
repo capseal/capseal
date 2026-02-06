@@ -1,0 +1,69 @@
+{
+  "audit_indices": [
+    0,
+    2
+  ],
+  "challenge_seed": "230862c28389093d7288f55ab707da6e1d443b0ff1186487a40e1ea6cda6497c",
+  "openings_post": [
+    {
+      "leaf_index": 0,
+      "merkle_proof": [
+        [
+          "233bbbbb14e04ed668e6496e997caa8f10e2c97ea389ea0d8dabf07c8dc17522",
+          "R"
+        ],
+        [
+          "e02bdad42ff6b3b8068a9bc8975ec3cc38d2979b8aa70ce39fd84bfc82f75102",
+          "R"
+        ]
+      ],
+      "value_q": 2754944
+    },
+    {
+      "leaf_index": 2,
+      "merkle_proof": [
+        [
+          "65d7c64bd61d7e64e0925ff8ab829db9291df20bcf19cc6a9a1b228b2f2eed0e",
+          "R"
+        ],
+        [
+          "5a00ea9f39453e705eb43fe1a9e1fb12c24c6a99cbcb281ab88f2c5157e463c2",
+          "L"
+        ]
+      ],
+      "value_q": 14181579
+    }
+  ],
+  "openings_pre": [
+    {
+      "leaf_index": 0,
+      "merkle_proof": [
+        [
+          "df7f0a99b6a5703728bc5b50888f005a2e0a88d502d4c9db8f1a254864ffea3c",
+          "R"
+        ],
+        [
+          "7dfe3242ea34c64b21fa6246a778be78e19172fda184f2bafc2f7c40c831db5b",
+          "R"
+        ]
+      ],
+      "value_q": 2835320
+    },
+    {
+      "leaf_index": 2,
+      "merkle_proof": [
+        [
+          "bfadf8964b94b92e950c7bf3c0388ca245de15e204cc89ad06ea21a31f8bc9ee",
+          "R"
+        ],
+        [
+          "af455d8d2194e4a05bfbf0a7efe38aed21da8f8338b5cee010fc4d9a53ad9734",
+          "L"
+        ]
+      ],
+      "value_q": 15291857
+    }
+  ],
+  "schema": "bicep_audit_v1",
+  "t": 1
+}

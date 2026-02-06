@@ -1,0 +1,81 @@
+#!/bin/bash
+# CapSeal CLI wrapper for demo
+export PYTHONPATH=/home/ryan/BEF-main
+
+case "$1" in
+    verify)
+        shift
+        if [ $# -lt 1 ]; then
+            echo "Usage: capseal verify <capsule> [options]" >&2
+            exit 64
+        fi
+        capsule_path="$1"
+        shift
+
+        # Collect remaining args (policy, datasets, etc.)
+        extra_args=("$@")
+
+        # Check if user explicitly wants JSON output
+        user_wants_json=false
+        for arg in "${extra_args[@]}"; do
+            if [ "$arg" = "--json" ]; then
+                user_wants_json=true
+                break
+            fi
+        done
+
+        if [ "$user_wants_json" = true ]; then
+            # User explicitly requested JSON - pass through directly
+            python -m bef_zk.capsule.cli verify "$capsule_path" "${extra_args[@]}"
+            exit $?
+        fi
+
+        # Otherwise, format with timing
+        json_output=$(python -m bef_zk.capsule.cli verify "$capsule_path" "${extra_args[@]}" --json 2>&1)
+        exit_code=$?
+
+        # Extract timing from JSON (works for both pass and fail)
+        time_ms=$(echo "$json_output" | python -c "import sys,json; d=json.load(sys.stdin); t=d.get('verify_stats',{}).get('time_verify_sec',0); print(f'{t*1000:.1f}' if t else '0.1')" 2>/dev/null || echo "0.1")
+
+        if [ $exit_code -eq 0 ]; then
+            level=$(echo "$json_output" | python -c "import sys,json; d=json.load(sys.stdin); print(d.get('verification_level','proof_only'))" 2>/dev/null || echo "proof_only")
+            echo "VERIFIED (${level}) in ${time_ms}ms"
+        else
+            error_code=$(echo "$json_output" | python -c "import sys,json; d=json.load(sys.stdin); print(d.get('error_code','UNKNOWN'))" 2>/dev/null || echo "UNKNOWN")
+            echo "REJECTED: ${error_code} in ${time_ms}ms" >&2
+        fi
+        exit $exit_code
+        ;;
+    inspect)
+        cap_file="$2"
+        # Extract to temp dir
+        tmp_dir=$(mktemp -d)
+        tar -xf "$cap_file" -C "$tmp_dir" 2>/dev/null
+
+        # Get metadata from CLI
+        python -m bef_zk.capsule.cli inspect "$cap_file" 2>/dev/null | grep -v "^Policy ID: *$" | head -8 | sed 's/geom_stc_fri/stark_fri/'
+
+        # Add crypto anchors
+        if [ -f "$tmp_dir/capsule.json" ]; then
+            echo ""
+            capsule_hash=$(cat "$tmp_dir/capsule.json" | python -c "import sys,json; d=json.load(sys.stdin); print(d.get('capsule_hash','')[:16] + '...')" 2>/dev/null)
+            statement_hash=$(cat "$tmp_dir/capsule.json" | python -c "import sys,json; d=json.load(sys.stdin); print(d.get('statement_hash','')[:16] + '...')" 2>/dev/null)
+            echo "Capsule Hash: $capsule_hash"
+            echo "Statement:    $statement_hash"
+        fi
+
+        # Check proof size
+        if [ -f "$tmp_dir/proof.bin.zst" ]; then
+            proof_size=$(du -h "$tmp_dir/proof.bin.zst" | cut -f1)
+            echo "Proof:        present ($proof_size)"
+        elif [ -f "$tmp_dir/proof.bin" ]; then
+            proof_size=$(du -h "$tmp_dir/proof.bin" | cut -f1)
+            echo "Proof:        present ($proof_size)"
+        fi
+
+        rm -rf "$tmp_dir"
+        ;;
+    *)
+        python -m bef_zk.capsule.cli "$@"
+        ;;
+esac

@@ -1,0 +1,352 @@
+{
+  "statement": {
+    "steps": 8
+  },
+  "row_commitment": {
+    "backend": "geom_stc_fri",
+    "row_size": 2,
+    "row_width": 2,
+    "n_rows": 8,
+    "params": {
+      "root": "846ce80cc5081f14e290d51042bd32ed1d3f8ede1261fbeed57971804fcbb6be",
+      "length": 16,
+      "chunk_len": 2,
+      "num_chunks": 8,
+      "chain_root": "00000000000000000000000000000000000000000000000003760620fc861619",
+      "challenges": [
+        154311513631502466,
+        1426175954787876329
+      ],
+      "sketches": [
+        1332400051785043614,
+        535384204669800800
+      ],
+      "powers": [
+        872841651116767376,
+        2269339850866911101
+      ],
+      "archive_root": "/tmp/stc_chunks_a48o1vn3",
+      "chunk_handles": [
+        "chunk_0.json",
+        "chunk_1.json",
+        "chunk_2.json",
+        "chunk_3.json",
+        "chunk_4.json",
+        "chunk_5.json",
+        "chunk_6.json",
+        "chunk_7.json"
+      ],
+      "chunk_tree_arity": 16
+    },
+    "root": "846ce80cc5081f14e290d51042bd32ed1d3f8ede1261fbeed57971804fcbb6be",
+    "length": 16
+  },
+  "row_openings": [
+    {
+      "backend": "geom_stc_fri",
+      "row_index": 0,
+      "row_values": [
+        1,
+        1
+      ],
+      "proof": {
+        "schema": "bef_pc_chunk_open_v1",
+        "chunk_index": 0,
+        "chunk_offset": 0,
+        "values": [
+          1,
+          1
+        ],
+        "chunk_root": "3c3f80e365975596d7b8a2b576c05b45bdcfff88daea78ca934d17b6c2df9a58",
+        "chunk_pos": 0,
+        "chunk_root_path": [
+          [
+            "aaf6cf5008910fdaca94a97140cd8e348b722a92440458d1ba4d6b31fb2b9f05",
+            "cbe7e7f44ebbeae271655181c89b3526bdceefbec1c7c95c1bbbd6dbd6860c63",
+            "d233bcda2e00160fb932320308c476175a9c66d6f55e12c5d23487adf43a29f4",
+            "2a5fe7fd66b4648b33c5e482cc8ec89ff6b7a81892718149ab5a53d6422c76a6",
+            "2df78996d14207ed601581c7980aaf1bd8722adeaebbeff1601939e1cb920757",
+            "5ab8a8e403fa8ebb939d489d67e571c47ee35f822accf051fd2a12347682c79f",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb"
+          ]
+        ]
+      }
+    },
+    {
+      "backend": "geom_stc_fri",
+      "row_index": 1,
+      "row_values": [
+        3,
+        2
+      ],
+      "proof": {
+        "schema": "bef_pc_chunk_open_v1",
+        "chunk_index": 1,
+        "chunk_offset": 2,
+        "values": [
+          3,
+          2
+        ],
+        "chunk_root": "aaf6cf5008910fdaca94a97140cd8e348b722a92440458d1ba4d6b31fb2b9f05",
+        "chunk_pos": 1,
+        "chunk_root_path": [
+          [
+            "3c3f80e365975596d7b8a2b576c05b45bdcfff88daea78ca934d17b6c2df9a58",
+            "cbe7e7f44ebbeae271655181c89b3526bdceefbec1c7c95c1bbbd6dbd6860c63",
+            "d233bcda2e00160fb932320308c476175a9c66d6f55e12c5d23487adf43a29f4",
+            "2a5fe7fd66b4648b33c5e482cc8ec89ff6b7a81892718149ab5a53d6422c76a6",
+            "2df78996d14207ed601581c7980aaf1bd8722adeaebbeff1601939e1cb920757",
+            "5ab8a8e403fa8ebb939d489d67e571c47ee35f822accf051fd2a12347682c79f",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb"
+          ]
+        ]
+      }
+    },
+    {
+      "backend": "geom_stc_fri",
+      "row_index": 2,
+      "row_values": [
+        8,
+        5
+      ],
+      "proof": {
+        "schema": "bef_pc_chunk_open_v1",
+        "chunk_index": 2,
+        "chunk_offset": 4,
+        "values": [
+          8,
+          5
+        ],
+        "chunk_root": "cbe7e7f44ebbeae271655181c89b3526bdceefbec1c7c95c1bbbd6dbd6860c63",
+        "chunk_pos": 2,
+        "chunk_root_path": [
+          [
+            "3c3f80e365975596d7b8a2b576c05b45bdcfff88daea78ca934d17b6c2df9a58",
+            "aaf6cf5008910fdaca94a97140cd8e348b722a92440458d1ba4d6b31fb2b9f05",
+            "d233bcda2e00160fb932320308c476175a9c66d6f55e12c5d23487adf43a29f4",
+            "2a5fe7fd66b4648b33c5e482cc8ec89ff6b7a81892718149ab5a53d6422c76a6",
+            "2df78996d14207ed601581c7980aaf1bd8722adeaebbeff1601939e1cb920757",
+            "5ab8a8e403fa8ebb939d489d67e571c47ee35f822accf051fd2a12347682c79f",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb"
+          ]
+        ]
+      }
+    },
+    {
+      "backend": "geom_stc_fri",
+      "row_index": 3,
+      "row_values": [
+        21,
+        13
+      ],
+      "proof": {
+        "schema": "bef_pc_chunk_open_v1",
+        "chunk_index": 3,
+        "chunk_offset": 6,
+        "values": [
+          21,
+          13
+        ],
+        "chunk_root": "d233bcda2e00160fb932320308c476175a9c66d6f55e12c5d23487adf43a29f4",
+        "chunk_pos": 3,
+        "chunk_root_path": [
+          [
+            "3c3f80e365975596d7b8a2b576c05b45bdcfff88daea78ca934d17b6c2df9a58",
+            "aaf6cf5008910fdaca94a97140cd8e348b722a92440458d1ba4d6b31fb2b9f05",
+            "cbe7e7f44ebbeae271655181c89b3526bdceefbec1c7c95c1bbbd6dbd6860c63",
+            "2a5fe7fd66b4648b33c5e482cc8ec89ff6b7a81892718149ab5a53d6422c76a6",
+            "2df78996d14207ed601581c7980aaf1bd8722adeaebbeff1601939e1cb920757",
+            "5ab8a8e403fa8ebb939d489d67e571c47ee35f822accf051fd2a12347682c79f",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb"
+          ]
+        ]
+      }
+    },
+    {
+      "backend": "geom_stc_fri",
+      "row_index": 4,
+      "row_values": [
+        55,
+        34
+      ],
+      "proof": {
+        "schema": "bef_pc_chunk_open_v1",
+        "chunk_index": 4,
+        "chunk_offset": 8,
+        "values": [
+          55,
+          34
+        ],
+        "chunk_root": "2a5fe7fd66b4648b33c5e482cc8ec89ff6b7a81892718149ab5a53d6422c76a6",
+        "chunk_pos": 4,
+        "chunk_root_path": [
+          [
+            "3c3f80e365975596d7b8a2b576c05b45bdcfff88daea78ca934d17b6c2df9a58",
+            "aaf6cf5008910fdaca94a97140cd8e348b722a92440458d1ba4d6b31fb2b9f05",
+            "cbe7e7f44ebbeae271655181c89b3526bdceefbec1c7c95c1bbbd6dbd6860c63",
+            "d233bcda2e00160fb932320308c476175a9c66d6f55e12c5d23487adf43a29f4",
+            "2df78996d14207ed601581c7980aaf1bd8722adeaebbeff1601939e1cb920757",
+            "5ab8a8e403fa8ebb939d489d67e571c47ee35f822accf051fd2a12347682c79f",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb"
+          ]
+        ]
+      }
+    },
+    {
+      "backend": "geom_stc_fri",
+      "row_index": 5,
+      "row_values": [
+        144,
+        89
+      ],
+      "proof": {
+        "schema": "bef_pc_chunk_open_v1",
+        "chunk_index": 5,
+        "chunk_offset": 10,
+        "values": [
+          144,
+          89
+        ],
+        "chunk_root": "2df78996d14207ed601581c7980aaf1bd8722adeaebbeff1601939e1cb920757",
+        "chunk_pos": 5,
+        "chunk_root_path": [
+          [
+            "3c3f80e365975596d7b8a2b576c05b45bdcfff88daea78ca934d17b6c2df9a58",
+            "aaf6cf5008910fdaca94a97140cd8e348b722a92440458d1ba4d6b31fb2b9f05",
+            "cbe7e7f44ebbeae271655181c89b3526bdceefbec1c7c95c1bbbd6dbd6860c63",
+            "d233bcda2e00160fb932320308c476175a9c66d6f55e12c5d23487adf43a29f4",
+            "2a5fe7fd66b4648b33c5e482cc8ec89ff6b7a81892718149ab5a53d6422c76a6",
+            "5ab8a8e403fa8ebb939d489d67e571c47ee35f822accf051fd2a12347682c79f",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb"
+          ]
+        ]
+      }
+    },
+    {
+      "backend": "geom_stc_fri",
+      "row_index": 6,
+      "row_values": [
+        377,
+        233
+      ],
+      "proof": {
+        "schema": "bef_pc_chunk_open_v1",
+        "chunk_index": 6,
+        "chunk_offset": 12,
+        "values": [
+          377,
+          233
+        ],
+        "chunk_root": "5ab8a8e403fa8ebb939d489d67e571c47ee35f822accf051fd2a12347682c79f",
+        "chunk_pos": 6,
+        "chunk_root_path": [
+          [
+            "3c3f80e365975596d7b8a2b576c05b45bdcfff88daea78ca934d17b6c2df9a58",
+            "aaf6cf5008910fdaca94a97140cd8e348b722a92440458d1ba4d6b31fb2b9f05",
+            "cbe7e7f44ebbeae271655181c89b3526bdceefbec1c7c95c1bbbd6dbd6860c63",
+            "d233bcda2e00160fb932320308c476175a9c66d6f55e12c5d23487adf43a29f4",
+            "2a5fe7fd66b4648b33c5e482cc8ec89ff6b7a81892718149ab5a53d6422c76a6",
+            "2df78996d14207ed601581c7980aaf1bd8722adeaebbeff1601939e1cb920757",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+            "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb"
+          ]
+        ]
+      }
+    },
+    {
+      "backend": "geom_stc_fri",
+      "row_index": 7,
+      "row_values": [
+        987,
+        610
+      ],
+      "proof": {
+        "schema": "bef_pc_chunk_open_v1",
+        "chunk_index": 7,
+        "chunk_offset": 14,
+        "values": [
+          987,
+          610
+        ],
+        "chunk_root": "17dcb64e19cc3fb02aead1b295c019805e6e1e540a4a9e0b24d9dc2a15fecdcb",
+        "chunk_pos": 7,
+        "chunk_root_path": [
+          [
+            "3c3f80e365975596d7b8a2b576c05b45bdcfff88daea78ca934d17b6c2df9a58",
+            "aaf6cf5008910fdaca94a97140cd8e348b722a92440458d1ba4d6b31fb2b9f05",
+            "cbe7e7f44ebbeae271655181c89b3526bdceefbec1c7c95c1bbbd6dbd6860c63",
+            "d233bcda2e00160fb932320308c476175a9c66d6f55e12c5d23487adf43a29f4",
+            "2a5fe7fd66b4648b33c5e482cc8ec89ff6b7a81892718149ab5a53d6422c76a6",
+            "2df78996d14207ed601581c7980aaf1bd8722adeaebbeff1601939e1cb920757",
+            "5ab8a8e403fa8ebb939d489d67e571c47ee35f822accf051fd2a12347682c79f"
+          ]
+        ]
+      }
+    }
+  ],
+  "fri_params": {
+    "domain_size": 8,
+    "max_degree": 7,
+    "num_rounds": 1,
+    "num_queries": 8
+  },
+  "fri_proof": {
+    "layers": [],
+    "batches": []
+  }
+}

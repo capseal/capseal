@@ -1,0 +1,26 @@
+{
+  "schema": "policy_registry_v1",
+  "root": "004651b6c83a9e3b987f872eeb6f4ae937cc9de1d8bd511c56eae1a8a7630447",
+  "policies": [
+    {
+      "path": "policies/policy1.txt",
+      "hash": "be208932041f3928beae2b24683cc7765497816dd98dcdec22b877d0a08ee42b",
+      "proof": [
+        {
+          "position": "right",
+          "hash": "7e70a4a679b7e1ad301f0d61ed76ea5277ba83ab0ed5a2c22f4251c5dd88a902"
+        }
+      ]
+    },
+    {
+      "path": "policies/policy2.txt",
+      "hash": "7e70a4a679b7e1ad301f0d61ed76ea5277ba83ab0ed5a2c22f4251c5dd88a902",
+      "proof": [
+        {
+          "position": "left",
+          "hash": "be208932041f3928beae2b24683cc7765497816dd98dcdec22b877d0a08ee42b"
+        }
+      ]
+    }
+  ]
+}

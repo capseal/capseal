@@ -1,0 +1,13 @@
+{
+  "capsule_json": "/home/ryan/BEF-main/test_capseal_run/strategy_capsule.json",
+  "capsule_hash": "99f9a210735958ede1e5dcb7a433ad0c80724b9879c1f1669ee1e3043ecc14a8",
+  "capsule_id": "fa75fca867b33f54",
+  "trace_id": "capsule_run",
+  "events_log": "/home/ryan/BEF-main/test_capseal_run/events.jsonl",
+  "events_log_hash": "98d88b5d8033e41dac4481468d7f85926e8d3ab6b0b4b9088fbcb46693ffb964",
+  "row_0_commitment": "3e20dd87336d0c3cb319f85447974dec37a32a23f2e693db8026b3c34bf0209b",
+  "row_1_commitment": "3e20dd87336d0c3cb319f85447974dec37a32a23f2e693db8026b3c34bf0209b",
+  "row_2_commitment": "3e20dd87336d0c3cb319f85447974dec37a32a23f2e693db8026b3c34bf0209b",
+  "row_archive_dir": "/home/ryan/BEF-main/test_capseal_run/row_archive",
+  "row_archive_chunks": "66"
+}

@@ -1,0 +1,21 @@
+{
+  "schema": "dataset_manifest_v1",
+  "dataset_id": "data",
+  "tree_arity": 16,
+  "num_chunks": 2,
+  "root": "81698f77845af466e0ea5f8954f074259c4d77a32d03ec1ae9d56448c6dd125f",
+  "entries": [
+    {
+      "uri": "config.json",
+      "size": 16,
+      "sha256": "bcd8970a0dc991ad16aecbb9a53cbb9aabbb4978ee888cca2c2982320905928c",
+      "id": 0
+    },
+    {
+      "uri": "prices.csv",
+      "size": 43,
+      "sha256": "a8cf97733b4b7b6e6d76b7e77c960e1a0ca555b952c27b56eb53fe0914ae900b",
+      "id": 1
+    }
+  ]
+}

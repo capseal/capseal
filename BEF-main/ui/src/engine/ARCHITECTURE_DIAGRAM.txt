@@ -1,0 +1,322 @@
+================================================================================
+CAPSULETECH ENGINE ADAPTER - ARCHITECTURE DIAGRAM
+================================================================================
+
+┌──────────────────────────────────────────────────────────────────────────┐
+│                         UI COMPONENTS LAYER                              │
+│                                                                          │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐│
+│  │  Launchpad   │  │  RunsList    │  │ RunDetail    │  │ NewRunDrawer ││
+│  │              │  │              │  │   Panel      │  │              ││
+│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘│
+│         │                 │                 │                 │        │
+│         └─────────────────┴─────────────────┴─────────────────┘        │
+│                                   │                                     │
+│                                   │ import { getEngine }                │
+│                                   │                                     │
+└───────────────────────────────────┼─────────────────────────────────────┘
+                                    │
+                                    ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│                      ENGINE ADAPTER INTERFACE                            │
+│                                                                          │
+│  ┌────────────────────────────────────────────────────────────────────┐ │
+│  │                    ExecutionEngine                                 │ │
+│  │                                                                    │ │
+│  │  • getHealth() → HealthStatus                                     │ │
+│  │  • startRun(req) → RunStartResponse                               │ │
+│  │  • streamEvents(runId, onEvent) → cleanup()                       │ │
+│  │  • getRun(runId) → RunRecord                                      │ │
+│  │  • listRuns(query) → RunSummary[]                                 │ │
+│  │  • verify(req) → VerifyReport                                     │ │
+│  │  • audit(req) → AuditReport                                       │ │
+│  │  • evidence(req) → EvidenceIndex                                  │ │
+│  │  • exportCapsule(req) → ExportResult                              │ │
+│  │                                                                    │ │
+│  └────────────────────────────────────────────────────────────────────┘ │
+│                                                                          │
+│  Configuration Resolution:                                               │
+│    1. Explicit: createEngine({ baseUrl: '...' })                        │
+│    2. Runtime: window.API_BASE                                          │
+│    3. Env:     VITE_API_BASE                                            │
+│    4. Default: http://localhost:5001                                    │
+│                                                                          │
+└───────────────────────────────────┬────────────────────────────────────┬─┘
+                                    │                                    │
+                    ┌───────────────┴─────────────┐                     │
+                    │                               │                     │
+                    ▼                               ▼                     ▼
+        ┌───────────────────┐         ┌───────────────────┐   ┌──────────────────┐
+        │   FlaskEngine     │         │   RustEngine      │   │  RemoteEngine    │
+        │  (impl/flask.js)  │         │  (impl/rust.js)   │   │ (impl/remote.js) │
+        │                   │         │                   │   │                  │
+        │   CURRENT         │         │   FUTURE          │   │    FUTURE        │
+        └─────────┬─────────┘         └─────────┬─────────┘   └────────┬─────────┘
+                  │                             │                      │
+                  │                             │                      │
+                  ▼                             ▼                      ▼
+        ┌──────────────────┐        ┌───────────────────┐   ┌─────────────────────┐
+        │  Flask Backend   │        │  Rust Daemon      │   │ Cloudflare Workers  │
+        │  (localhost:5001)│        │  (Unix socket)    │   │  (api.capseal.io)   │
+        │                  │        │                   │   │                     │
+        │  POST /run       │        │  Native IPC       │   │  OAuth + Multi-user │
+        │  POST /verify    │        │  Faster verify    │   │  Cloud storage      │
+        │  POST /audit     │        │  Local store      │   │  Collaborative      │
+        │  GET  /events    │        │                   │   │                     │
+        └──────────────────┘        └───────────────────┘   └─────────────────────┘
+
+================================================================================
+DATA FLOW - EXAMPLE: List Runs
+================================================================================
+
+Component                   Engine                     FlaskEngine
+────────────────────────────────────────────────────────────────────────
+
+  RunsList.jsx
+     │
+     │  useEffect(() => {
+     │    const engine = getEngine()
+     │    engine.listRuns()
+     │  })
+     │
+     ├──────────►  getEngine()
+     │                │
+     │                │  Returns singleton
+     │                │  FlaskEngine instance
+     │                │
+     │                ▼
+     │            ExecutionEngine
+     │                │
+     │                │  interface defines
+     │                │  listRuns() method
+     │                │
+     │                ▼
+     ├──────────►  listRuns()  ──────────►  FlaskEngine.listRuns()
+     │                                          │
+     │                                          │  1. Check localStorage
+     │                                          │  2. Parse cached runs
+     │                                          │  3. Apply filters
+     │                                          │
+     │                                          ▼
+     │                                      localStorage
+     │                                      "capseal_runs_cache"
+     │                                          │
+     │  [RunSummary[]] ◄─────────────────────────┘
+     │
+     │  setRuns(runs)
+     ▼
+
+  <ul>
+    {runs.map(...)}
+  </ul>
+
+Result: ~0ms (no network), survives page refresh
+
+================================================================================
+DATA FLOW - EXAMPLE: Verify Run
+================================================================================
+
+Component                   Engine                     FlaskEngine
+────────────────────────────────────────────────────────────────────────
+
+  RunDetailPanel.jsx
+     │
+     │  handleVerify = async () => {
+     │    const engine = getEngine()
+     │    const report = await engine.verify({ run_id })
+     │  }
+     │
+     ├──────────►  verify({ run_id })  ──────►  FlaskEngine.verify()
+     │                                              │
+     │                                              │  Transform request:
+     │                                              │  {
+     │                                              │    capsulePath: run_id,
+     │                                              │    mode: 'proof-only',
+     │                                              │    ...
+     │                                              │  }
+     │                                              │
+     │                                              ▼
+     │                                          POST /verify
+     │                                          Flask Backend
+     │                                              │
+     │                                              │  Python capseal CLI
+     │                                              │  L0-L4 verification
+     │                                              │  STARK proof check
+     │                                              │
+     │                                              ▼
+     │                                          Response:
+     │                                          {
+     │                                            exitCode: 0,
+     │                                            result: {...}
+     │                                          }
+     │                                              │
+     │                                              │  Transform to
+     │                                              │  VerifyReport:
+     │                                              │  {
+     │                                              │    ok: true,
+     │                                              │    layers: [L0..L4],
+     │                                              │    ...
+     │                                              │  }
+     │                                              │
+     │  VerifyReport ◄────────────────────────────────┘
+     │
+     │  setVerification(report)
+     ▼
+
+  <div className="verify-report">
+    {report.layers.map(...)}
+  </div>
+
+Result: ~500-5000ms (network + proof verification)
+
+================================================================================
+DATA FLOW - EXAMPLE: Stream Events
+================================================================================
+
+Component                   Engine                     FlaskEngine
+────────────────────────────────────────────────────────────────────────
+
+  RunDetailPanel.jsx
+     │
+     │  useEffect(() => {
+     │    const engine = getEngine()
+     │    const cleanup = engine.streamEvents(
+     │      runId,
+     │      (evt) => setEvents(prev => [...prev, evt])
+     │    )
+     │    return cleanup
+     │  }, [runId])
+     │
+     ├──────────►  streamEvents(runId, onEvent)
+     │                     │
+     │                     │  No SSE in Flask,
+     │                     │  use polling
+     │                     │
+     │                     ▼
+     │              FlaskEngine.streamEvents()
+     │                     │
+     │                     │  Start poll loop:
+     │                     │  setInterval(() => {
+     │                     │    fetch(`/runs/${runId}/events?after_seq=${lastSeq}`)
+     │                     │  }, 2000)
+     │                     │
+     │                     │  ┌───────────────────────────┐
+     │                     │  │   Poll every 2 seconds    │
+     │                     │  │                           │
+     │                     ▼  ▼                           │
+     │              GET /runs/:id/events                  │
+     │              Flask Backend                         │
+     │                     │                              │
+     │                     │  Return new events           │
+     │                     │  since lastSeq               │
+     │                     │                              │
+     │                     ▼                              │
+     │              [new events]                          │
+     │                     │                              │
+     │                     │  For each new event:         │
+     │                     │    onEvent(event)            │
+     │                     │    lastSeq = event.seq       │
+     │                     │                              │
+     │  onEvent() ◄────────┘                             │
+     │     │                                              │
+     │     │  setEvents(prev => [...prev, evt])          │
+     │     │                                              │
+     │     └───────────────────────────────────────────────┘
+     │
+     ▼
+
+  <Timeline events={events} />
+
+Cleanup on unmount stops polling
+
+Result: Real-time updates (2s latency)
+
+================================================================================
+CACHING STRATEGY
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         localStorage                                    │
+│                    "capseal_runs_cache"                                 │
+│                                                                         │
+│  [                                                                      │
+│    {                                                                    │
+│      run_id: "abc123",                                                  │
+│      project_id: "my-project",                                          │
+│      status: "verified",                                                │
+│      started_at: "2026-01-25T10:00:00Z",                                │
+│      capsule_hash: "0x1234...",                                         │
+│      ...                                                                │
+│    },                                                                   │
+│    ...                                                                  │
+│  ]                                                                      │
+│                                                                         │
+│  Max: 100 runs (FIFO)                                                   │
+│  Survives: Page refresh, browser restart                               │
+│  Updates: On startRun(), getRun(), verify()                             │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+
+Why cache?
+  1. Flask has no GET /api/runs endpoint
+  2. Instant load on page refresh
+  3. Offline-first UX
+  4. Treats receipts as durable evidence
+
+================================================================================
+TYPE SYSTEM FLOW
+================================================================================
+
+types.js                   components                  runtime
+────────────────────────────────────────────────────────────────
+
+@typedef RunSummary    →   JSDoc annotation    →    IDE autocomplete
+@typedef RunRecord     →   Type checking       →    Error prevention
+@typedef VerifyReport  →   IntelliSense        →    Safe refactoring
+
+Example:
+
+/**
+ * @typedef {import('./engine').RunSummary} RunSummary
+ *
+ * @param {Object} props
+ * @param {RunSummary} props.run  ← IDE knows all fields
+ */
+function RunCard({ run }) {
+  return <div>
+    {run.run_id}        ← Autocomplete
+    {run.status}        ← Autocomplete
+    {run.capsule_hash}  ← Autocomplete
+  </div>
+}
+
+No TypeScript needed, pure JSDoc!
+
+================================================================================
+MIGRATION TIMELINE
+================================================================================
+
+                    Components Rewritten
+                    ────────────────────
+Phase 1  Flask      0
+         FlaskEng   ↓
+
+Phase 2  Flask      0  ← Still zero!
+         Rust       ↓
+         Both       ↓
+
+Phase 3  Rust       0  ← Still zero!
+         (default)  ↓
+
+Phase 4  Rust       0  ← STILL ZERO!
+         (only)     ↓
+
+         ───────────────────►
+              Time
+
+The adapter absorbs ALL backend changes.
+Components remain 100% stable.
+
+================================================================================
+END OF DIAGRAM
+================================================================================

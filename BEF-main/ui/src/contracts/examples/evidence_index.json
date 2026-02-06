@@ -1,0 +1,58 @@
+{
+  "run_id": "capsule_run_20240115_143022",
+  "capsule_hash": "e4a5b18c7a7f12d3891734de16cd8952c1070637",
+  "row_root": "3e20dd87336d0c3c1234567890abcdef12345678",
+  "events_root": "f0e1d2c3b4a596870123456789abcdef01234567",
+  "openable_rows": [
+    { "row_index": 0, "chunk_file": "row_archive/chunk_0.json", "has_proof": true },
+    { "row_index": 1, "chunk_file": "row_archive/chunk_0.json", "has_proof": true },
+    { "row_index": 2, "chunk_file": "row_archive/chunk_0.json", "has_proof": true },
+    { "row_index": 63, "chunk_file": "row_archive/chunk_63.json", "has_proof": true }
+  ],
+  "row_count": 64,
+  "tree_arity": 16,
+  "artifacts": [
+    {
+      "name": "strategy_capsule.json",
+      "path": "out/demo_test_run/strategy_capsule.json",
+      "hash": "e4a5b18c7a7f12d3",
+      "size_bytes": 57344,
+      "artifact_type": "receipt"
+    },
+    {
+      "name": "adapter_proof.bin",
+      "path": "out/demo_test_run/adapter_proof.bin",
+      "hash": "abcd1234efgh5678",
+      "size_bytes": 45056,
+      "artifact_type": "proof"
+    },
+    {
+      "name": "events.jsonl",
+      "path": "out/demo_test_run/events.jsonl",
+      "hash": "1234abcd5678efgh",
+      "size_bytes": 2048,
+      "artifact_type": "events"
+    },
+    {
+      "name": "stc_trace.json",
+      "path": "out/demo_test_run/stc_trace.json",
+      "hash": "5678efgh1234abcd",
+      "size_bytes": 8192,
+      "artifact_type": "trace"
+    },
+    {
+      "name": "artifact_manifest.json",
+      "path": "out/demo_test_run/artifact_manifest.json",
+      "hash": "efgh5678abcd1234",
+      "size_bytes": 1024,
+      "artifact_type": "manifest"
+    }
+  ],
+  "evidence_status": {
+    "binding": "pass",
+    "availability": "pass",
+    "enforcement": "pass",
+    "determinism": "pass",
+    "replayable": "unknown"
+  }
+}

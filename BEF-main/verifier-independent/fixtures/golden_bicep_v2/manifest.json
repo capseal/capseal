@@ -1,0 +1,22 @@
+{
+  "audit_k": 2,
+  "output_fn_id": "bicep_features_v1",
+  "sampling_scheme_id": "standard_v1",
+  "sde_params": {
+    "dt": 0.01,
+    "jump_rate": 0.0,
+    "jump_scale": 0.0,
+    "mu0": 0.0,
+    "sigma": 0.5,
+    "theta": 2.0
+  },
+  "seed_commitment": "96370c83c0e4d3b8912cc658e34419b5f61118b23003b8dbc25c3dcd62aefb44",
+  "state_layout_id": "flat_path_channel_v1",
+  "state_num_channels": 2,
+  "state_num_paths": 2,
+  "state_view_schema_id": "bicep_state_v2",
+  "transition_fn_id": "bicep_sde_em_v1",
+  "transition_spec_id": "bicep_v2",
+  "x_quant_precision_bits": 24,
+  "x_quant_scheme_id": "fixed_point_v1"
+}

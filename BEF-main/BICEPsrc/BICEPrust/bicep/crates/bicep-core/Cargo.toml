@@ -1,0 +1,20 @@
+[package]
+name = "bicep-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+nalgebra = { workspace = true, features = ["serde-serialize"] }
+rand = { workspace = true }
+rand_chacha = { workspace = true }
+rand_distr = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+blake3 = { workspace = true }
+
+[dev-dependencies]
+approx = "0.5"
+bicep-models = { path = "../bicep-models" }
+serde_json = "1.0"

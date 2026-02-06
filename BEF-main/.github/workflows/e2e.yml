@@ -1,0 +1,98 @@
+name: e2e
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'server/**'
+      - 'scripts/e2e_verify.mjs'
+      - 'ui/src/engine/**'
+      - 'ui/src/contracts/**'
+      - 'docker-compose.yml'
+      - 'Dockerfile'
+      - '.github/workflows/e2e.yml'
+
+jobs:
+  api-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Start stack
+        run: docker compose up -d redis capseal-api worker
+
+      - name: Wait for /ready
+        run: |
+          for i in {1..60}; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:5000/ready) || true
+            if [ "$code" = "200" ]; then
+              echo "API ready"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Timed out waiting for API" >&2
+          docker compose logs capseal-api
+          exit 1
+
+      - name: Run E2E contract verification
+        env:
+          E2E_BASE: http://127.0.0.1:5000
+          E2E_CAPSULE: momentum_strategy_v2.cap
+          E2E_MODE: proof-only
+          E2E_API_KEY: demo-key
+        run: node scripts/e2e_verify.mjs
+
+      - name: Verify sample capsule (legacy)
+        run: |
+          curl -sSf -X POST "http://127.0.0.1:5000/api/verify" \
+            -H 'Content-Type: application/json' \
+            -H 'X-API-Key: demo-key' \
+            -d '{"capsulePath": "momentum_strategy_v2.cap", "mode": "proof-only"}' |
+            jq '.status'
+
+      - name: Audit sample capsule
+        run: |
+          curl -sSf -X POST "http://127.0.0.1:5000/api/audit" \
+            -H 'Content-Type: application/json' \
+            -H 'X-API-Key: demo-key' \
+            -d '{"capsulePath": "momentum_strategy_v2.cap", "format": "summary"}' |
+            jq '.status'
+
+      - name: Tear down
+        if: always()
+        run: docker compose down --volumes
+
+  # Local contract test (no Docker, faster feedback)
+  contract-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Validate E2E script syntax
+        run: node --check scripts/e2e_verify.mjs
+
+      - name: Validate contract definitions
+        run: |
+          # Ensure contracts file exists and has required exports
+          if [ -f "ui/src/contracts/contracts.ts" ]; then
+            echo "Contract definitions found"
+            grep -q "VerifyReport" ui/src/contracts/contracts.ts && echo "  - VerifyReport defined"
+            grep -q "LayerCheck" ui/src/contracts/contracts.ts && echo "  - LayerCheck defined"
+            grep -q "EXIT_CODES" ui/src/contracts/contracts.ts && echo "  - EXIT_CODES defined"
+          else
+            echo "Warning: contracts.ts not found"
+          fi

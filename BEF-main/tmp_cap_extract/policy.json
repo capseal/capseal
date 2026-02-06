@@ -1,0 +1,30 @@
+{
+  "schema": "bef_benchmark_policy_v1",
+  "policy_id": "demo_policy_v1",
+  "policy_version": "1.0",
+  "tracks": [
+    {
+      "track_id": "demo_geom_fast",
+      "description": "Demo track (GPU allowed, no deterministic build enforcement).",
+      "rules": {
+        "forbid_gpu": false,
+        "require_deterministic_build": false,
+        "required_public_outputs": ["final_cnt"],
+        "min_final_cnt": 0,
+        "max_final_cnt": 1000000,
+        "execution_limits": {
+          "max_rows_total": 1000000,
+          "max_bytes_read_total": 5000000000,
+          "max_access_events": 1000000,
+          "max_wall_time_sec": 7200
+        },
+        "network_access": {
+          "enabled": false,
+          "allowed_domains": [],
+          "max_bytes_total": 0,
+          "require_tls": true
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "name": "capsuletech-ui",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "e2e:verify": "node ../scripts/e2e_verify.mjs",
+    "e2e:verify:local": "E2E_BASE=http://127.0.0.1:5001 node ../scripts/e2e_verify.mjs",
+    "test:contracts": "node ../scripts/e2e_verify.mjs"
+  },
+  "dependencies": {
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "react-router-dom": "6.28.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.9.6",
+    "@vitejs/plugin-react": "4.2.1",
+    "vite": "5.4.12"
+  }
+}

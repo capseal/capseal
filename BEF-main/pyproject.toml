@@ -1,0 +1,117 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "capseal"
+version = "0.2.0"
+description = "Cryptographic receipt generation and verification for reproducible computations"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [{name = "CapSeal Contributors"}]
+keywords = ["cryptography", "verification", "receipts", "reproducibility", "zkp"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security :: Cryptography",
+    "Topic :: Software Development :: Testing",
+    "Typing :: Typed",
+]
+
+# Core dependencies - minimal for basic operation
+dependencies = [
+    "click>=8.1",
+]
+
+[project.optional-dependencies]
+# Development
+dev = [
+    "pytest>=9.0",
+    "pytest-cov>=4.0",
+    "mypy>=1.8",
+    "ruff>=0.2",
+]
+
+# Server components
+server = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.23",
+    "websocket-client>=1.6",
+]
+
+# Database
+db = [
+    "psycopg[binary]>=3.1",
+]
+
+# Cloud storage (R2/S3)
+cloud = [
+    "boto3>=1.35",
+]
+
+# Cryptographic signatures (secp256k1)
+# Note: coincurve requires Python <3.14
+crypto = [
+    "coincurve>=18.0",
+]
+
+# AI/Agent integration
+agent = [
+    "openai>=1.0",
+    "httpx>=0.25",
+]
+
+# Full installation
+all = [
+    "capseal[server,db,cloud,crypto,agent]",
+]
+
+[project.urls]
+Homepage = "https://github.com/capseal/capseal"
+Documentation = "https://capseal.dev/docs"
+Repository = "https://github.com/capseal/capseal"
+Changelog = "https://github.com/capseal/capseal/blob/main/CHANGELOG.md"
+
+[project.scripts]
+capseal = "bef_zk.capsule.cli:main"
+capsule = "bef_zk.capsule.cli:main"
+# Legacy alias
+capsule-bench = "capsule_bench.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["bef_zk*", "backends*", "capsule_bench*", "server*"]
+namespaces = true
+
+[tool.setuptools]
+package-dir = {"" = "."}
+
+# =============================================================================
+# Tool Configuration
+# =============================================================================
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-v --tb=short"
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501"]  # Line too long - handled by formatter

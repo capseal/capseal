@@ -1,0 +1,6 @@
+{
+  "schema_version": "bicep_schema_v1",
+  "std_ddof": 1,
+  "quantile_method": "type7",
+  "windowing": "per-sequence-final"
+}

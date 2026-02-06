@@ -1,0 +1,219 @@
+{
+  "runs": [
+    {
+      "run_id": 0,
+      "challenge_count": 2,
+      "num_chunks": 8,
+      "chunk_len": 8,
+      "seed": 7,
+      "timings_ms": {
+        "plain": 2.1405220000000003,
+        "pp": 26559.077663,
+        "base": 276.082544,
+        "prove_total": 6110.409723,
+        "prove_avg": 763.801215375,
+        "verify": 626.9670349999999
+      },
+      "proof_bytes": 1766776,
+      "compressed": null,
+      "final_n": "0x0000000000000000000000000000000000000000000000000000000000000040",
+      "final_root": "0x39daee645470c304cbb8173cc97b02b0f32fae3f932ed89b804968dbf96ea79c",
+      "pp_cache_hit": false
+    },
+    {
+      "run_id": 1,
+      "challenge_count": 4,
+      "num_chunks": 8,
+      "chunk_len": 8,
+      "seed": 8,
+      "timings_ms": {
+        "plain": 2.149594,
+        "pp": 30404.163043,
+        "base": 265.79895,
+        "prove_total": 4113.005887,
+        "prove_avg": 514.125735875,
+        "verify": 652.125701
+      },
+      "proof_bytes": 1770616,
+      "compressed": null,
+      "final_n": "0x0000000000000000000000000000000000000000000000000000000000000040",
+      "final_root": "0x09ec3633933a006cba2bda65bb48359899eec5f8c273e42e687749b83bdc3276",
+      "pp_cache_hit": false
+    },
+    {
+      "run_id": 2,
+      "challenge_count": 8,
+      "num_chunks": 8,
+      "chunk_len": 8,
+      "seed": 9,
+      "timings_ms": {
+        "plain": 5.7307690000000004,
+        "pp": 33172.572871,
+        "base": 284.581622,
+        "prove_total": 4272.841683000001,
+        "prove_avg": 534.1052103750001,
+        "verify": 683.162772
+      },
+      "proof_bytes": 1877752,
+      "compressed": null,
+      "final_n": "0x0000000000000000000000000000000000000000000000000000000000000040",
+      "final_root": "0x1084bb91c50fc17bee6a5aa382ed96f1ed684222def6aa54b8e7da3cb8ee3799",
+      "pp_cache_hit": false
+    }
+  ],
+  "summary": [
+    {
+      "challenge_count": 2,
+      "num_chunks": 8,
+      "chunk_len": 8,
+      "repeats": 1,
+      "constraints_primary": 12078,
+      "constraints_secondary": 10349,
+      "plain_ms": {
+        "mean": 2.1405220000000003,
+        "stddev": 0.0,
+        "min": 2.1405220000000003,
+        "max": 2.1405220000000003
+      },
+      "pp_ms": {
+        "mean": 26559.077663,
+        "stddev": 0.0,
+        "min": 26559.077663,
+        "max": 26559.077663
+      },
+      "base_ms": {
+        "mean": 276.082544,
+        "stddev": 0.0,
+        "min": 276.082544,
+        "max": 276.082544
+      },
+      "prove_total_ms": {
+        "mean": 6110.409723,
+        "stddev": 0.0,
+        "min": 6110.409723,
+        "max": 6110.409723
+      },
+      "prove_avg_ms": {
+        "mean": 763.801215375,
+        "stddev": 0.0,
+        "min": 763.801215375,
+        "max": 763.801215375
+      },
+      "verify_ms": {
+        "mean": 626.9670349999999,
+        "stddev": 0.0,
+        "min": 626.9670349999999,
+        "max": 626.9670349999999
+      },
+      "proof_bytes": {
+        "mean": 1766776.0,
+        "stddev": 0.0,
+        "min": 1766776.0,
+        "max": 1766776.0
+      },
+      "compressed": null
+    },
+    {
+      "challenge_count": 4,
+      "num_chunks": 8,
+      "chunk_len": 8,
+      "repeats": 1,
+      "constraints_primary": 12130,
+      "constraints_secondary": 10349,
+      "plain_ms": {
+        "mean": 2.149594,
+        "stddev": 0.0,
+        "min": 2.149594,
+        "max": 2.149594
+      },
+      "pp_ms": {
+        "mean": 30404.163043,
+        "stddev": 0.0,
+        "min": 30404.163043,
+        "max": 30404.163043
+      },
+      "base_ms": {
+        "mean": 265.79895,
+        "stddev": 0.0,
+        "min": 265.79895,
+        "max": 265.79895
+      },
+      "prove_total_ms": {
+        "mean": 4113.005887,
+        "stddev": 0.0,
+        "min": 4113.005887,
+        "max": 4113.005887
+      },
+      "prove_avg_ms": {
+        "mean": 514.125735875,
+        "stddev": 0.0,
+        "min": 514.125735875,
+        "max": 514.125735875
+      },
+      "verify_ms": {
+        "mean": 652.125701,
+        "stddev": 0.0,
+        "min": 652.125701,
+        "max": 652.125701
+      },
+      "proof_bytes": {
+        "mean": 1770616.0,
+        "stddev": 0.0,
+        "min": 1770616.0,
+        "max": 1770616.0
+      },
+      "compressed": null
+    },
+    {
+      "challenge_count": 8,
+      "num_chunks": 8,
+      "chunk_len": 8,
+      "repeats": 1,
+      "constraints_primary": 13788,
+      "constraints_secondary": 10349,
+      "plain_ms": {
+        "mean": 5.7307690000000004,
+        "stddev": 0.0,
+        "min": 5.7307690000000004,
+        "max": 5.7307690000000004
+      },
+      "pp_ms": {
+        "mean": 33172.572871,
+        "stddev": 0.0,
+        "min": 33172.572871,
+        "max": 33172.572871
+      },
+      "base_ms": {
+        "mean": 284.581622,
+        "stddev": 0.0,
+        "min": 284.581622,
+        "max": 284.581622
+      },
+      "prove_total_ms": {
+        "mean": 4272.841683000001,
+        "stddev": 0.0,
+        "min": 4272.841683000001,
+        "max": 4272.841683000001
+      },
+      "prove_avg_ms": {
+        "mean": 534.1052103750001,
+        "stddev": 0.0,
+        "min": 534.1052103750001,
+        "max": 534.1052103750001
+      },
+      "verify_ms": {
+        "mean": 683.162772,
+        "stddev": 0.0,
+        "min": 683.162772,
+        "max": 683.162772
+      },
+      "proof_bytes": {
+        "mean": 1877752.0,
+        "stddev": 0.0,
+        "min": 1877752.0,
+        "max": 1877752.0
+      },
+      "compressed": null
+    }
+  ]
+}

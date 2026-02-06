@@ -1,0 +1,15 @@
+{
+  "schema": "dataset_manifest_v1",
+  "dataset_id": "Python.gitignore",
+  "tree_arity": 16,
+  "num_chunks": 1,
+  "root": "f4bfccb8f13b6ad2060e2a29c3915d9cb2fb0e22bafafb3a0c061cee7638c5ad",
+  "entries": [
+    {
+      "uri": "Python.gitignore",
+      "size": 4562,
+      "sha256": "f4bfccb8f13b6ad2060e2a29c3915d9cb2fb0e22bafafb3a0c061cee7638c5ad",
+      "id": 0
+    }
+  ]
+}

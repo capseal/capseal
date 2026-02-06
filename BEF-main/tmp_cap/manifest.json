@@ -1,0 +1,14 @@
+{
+  "schema": "cap_manifest_v1",
+  "capsule_id": "684afa3df1572104",
+  "trace_id": "archive2_capsule",
+  "policy_id": "",
+  "policy_hash": "",
+  "backend": "geom_stc_fri",
+  "verification_profile": "PROOF_ONLY",
+  "root_hex": "",
+  "num_chunks": 1,
+  "proof_size": 89560,
+  "archive_format": "json",
+  "created_at": "2026-01-20T13:05:20.822259+00:00"
+}

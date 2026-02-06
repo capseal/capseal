@@ -1,0 +1,746 @@
+{
+  "schema": "bef_capsule_v1",
+  "vm_id": "geom",
+  "trace_id": "test_run_sandbox",
+  "prev_capsule_hash": null,
+  "trace_spec": {
+    "spec_version": "1.0",
+    "trace_format_id": "GEOM_AIR_V1",
+    "record_schema_ref": "sha256:4a0c53a5472d1ef9feefebe2cce81cc53329f3be633714565842168b169d4853",
+    "encoding_id": "dag_cbor_compact_fields_v1",
+    "field_modulus_id": "goldilocks_61"
+  },
+  "trace_spec_hash": "5641d97771f67bcd91d149ba74b4d20f670a83bec2726110ae48a2a72a1faf46",
+  "policy": {
+    "policy_id": "demo_policy_v1",
+    "policy_version": "1.0",
+    "policy_hash": "3c90debf8a203799bb8541245e8b6e5a455ca3237b92327ca9705dc7591d6139",
+    "track_id": "unspecified",
+    "policy_path": "/home/ryan/BEF-main/policies/demo_policy_v1.json"
+  },
+  "params": {
+    "row_width": 14
+  },
+  "da_policy": {
+    "policy_id": "light_sampling_local_v1",
+    "k_samples": 139,
+    "provider_timeout_ms": 5000,
+    "provider_retry_count": 2,
+    "verification_level": "probabilistic_da_sampling",
+    "provider": {
+      "mode": "LOCAL_FILE",
+      "archive_root": "/home/ryan/BEF-main/tmp_test/test_run_output/row_archive"
+    },
+    "deterministic_seed": "f17eb153998471ba449cdf64939d2a4a70d7422282f343411e46a4834edf1fa4"
+  },
+  "chunk_meta": {
+    "num_chunks": 16,
+    "chunk_len": 14,
+    "chunk_size_bytes": 112,
+    "data_length_bytes": 1792,
+    "chunking_rule_id": "fixed_range_v1"
+  },
+  "row_index_ref": {
+    "commitment_type": "merkle_root",
+    "commitment": "c52304ef344fac2dba060abcb93886f2e3412629b48cb316246a74c91f9d4c04",
+    "tree_arity": 16,
+    "proof_fetch_rule_id": "proof_attached_to_chunk_v1",
+    "pointer": {
+      "path": "row_archive",
+      "provider_root": "/home/ryan/BEF-main/tmp_test/test_run_output/row_archive"
+    }
+  },
+  "hashing": {
+    "hash_fn_id": "sha256",
+    "encoding_id": "dag_cbor_compact_fields_v1"
+  },
+  "proof_system": {
+    "scheme_id": "geom",
+    "backend_id": "geom_stc_fri",
+    "circuit_id": "GEOM_AIR_V1",
+    "hash_fn_id": "sha256",
+    "air_params_hash": "4263ba9355bb77c1c4e101d987368d3d8578ce12e376d66c12c742888905cdcf",
+    "fri_params_hash": "feaa644cb3173c38e0ddb57c57a51e49df71a5c0077aaa46ce338f545470175c",
+    "program_hash": "d9ae17ab6cccac69c15c97138fcb344589fbbf5e384cd24bc5a028ad674b803b",
+    "vk_hash": "0d9deec8751256c45cf76bafc092b66a1a8a27fd2c75b6ff63b1db93cbf93987",
+    "hash": "e03313380895709b38f9e4b89df4f9a342e3b3d121047d29d38afa5a86cd12ac",
+    "instance_hash": "04386a92fc5d4837327705ee54f105a2a0f1a3af43e42f46c26d6423ab075130"
+  },
+  "anchor": {
+    "anchor_rule_id": "unspecified",
+    "anchor_ref": null,
+    "track_id": "unspecified",
+    "event_chain_head": "6e492cc8e38d9675723d220fa12d2a023a571efe0d762afa5ae148ff83ff27ba",
+    "events_log_hash": "sha256:475a5fed27a7e275810427ce70247fb232ee065e3d891beb25f617c20c215083",
+    "events_log_len": 2781
+  },
+  "proofs": {
+    "primary": {
+      "path": "/home/ryan/BEF-main/tmp_test/test_run_output/adapter_proof.json",
+      "rel_path": "proofs/primary/adapter_proof.json",
+      "size_bytes": 52333,
+      "row_openings": 8,
+      "row_backend": "geom_stc_fri",
+      "row_archive": {
+        "mode": "LOCAL_FILE",
+        "abs_path": "/home/ryan/BEF-main/tmp_test/test_run_output/row_archive",
+        "num_chunks": 16,
+        "chunk_tree_arity": 16,
+        "chunk_roots_path": "row_archive/chunk_roots.json",
+        "chunk_roots_format": "hex_json_v1",
+        "chunk_roots_bin_path": "row_archive/chunk_roots.bin",
+        "chunk_roots_bin_format": "raw32_v1",
+        "chunk_roots_digest": "c52304ef344fac2dba060abcb93886f2e3412629b48cb316246a74c91f9d4c04",
+        "chunk_handles": [
+          {
+            "id": 0,
+            "uri": "chunk_0.json",
+            "sha256": "16723784084ddf35cca6f27ac43fddf22daba556ebb0a6a434fd0c976af64b29",
+            "size": 281,
+            "content_type": "application/octet-stream"
+          },
+          {
+            "id": 1,
+            "uri": "chunk_1.json",
+            "sha256": "38fd2148702f39fac4e90ea05e80115852ade6983497ef8c97b35769cded7705",
+            "size": 289,
+            "content_type": "application/octet-stream"
+          },
+          {
+            "id": 2,
+            "uri": "chunk_2.json",
+            "sha256": "992dbd1292657ea0b27d4075d0fa02678b875fbc291b48c6a08835c053d8b37e",
+            "size": 288,
+            "content_type": "application/octet-stream"
+          },
+          {
+            "id": 3,
+            "uri": "chunk_3.json",
+            "sha256": "cba939383156bd9d91b0ba5ca4c86ff64731bb7ef226941623f9065c754c0ad1",
+            "size": 286,
+            "content_type": "application/octet-stream"
+          },
+          {
+            "id": 4,
+            "uri": "chunk_4.json",
+            "sha256": "341d79e744386193dd2baeb32a8dedd81bf805230f74125a6770fb61a81e2090",
+            "size": 286,
+            "content_type": "application/octet-stream"
+          },
+          {
+            "id": 5,
+            "uri": "chunk_5.json",
+            "sha256": "23c0d493dd2c2ddeeeb7faee957f2126b4118dd13ce203903143aaa0f64390eb",
+            "size": 286,
+            "content_type": "application/octet-stream"
+          },
+          {
+            "id": 6,
+            "uri": "chunk_6.json",
+            "sha256": "857b6e124de5930d4822c2ae987fd6b98d9d3e0cec988a38fbe1857d4363ed20",
+            "size": 290,
+            "content_type": "application/octet-stream"
+          },
+          {
+            "id": 7,
+            "uri": "chunk_7.json",
+            "sha256": "d49fb2d0add105ce0cb9189fc4889ba9df28479246919741273c104603766a6b",
+            "size": 287,
+            "content_type": "application/octet-stream"
+          },
+          {
+            "id": 8,
+            "uri": "chunk_8.json",
+            "sha256": "bdcb03d45262c0223602e3858269bb5cfcaf7bb9d0c5cf34eb511f329d916eaa",
+            "size": 289,
+            "content_type": "application/octet-stream"
+          },
+          {
+            "id": 9,
+            "uri": "chunk_9.json",
+            "sha256": "c723af74ddb59a6ea0173230f4d60247699860c1a405de72de560470a98ded14",
+            "size": 289,
+            "content_type": "application/octet-stream"
+          },
+          {
+            "id": 10,
+            "uri": "chunk_10.json",
+            "sha256": "c2a64fee2e04580cdbf68a8fcc2c8a4212fc6fcdcef34c80006446fb73e4f304",
+            "size": 285,
+            "content_type": "application/octet-stream"
+          },
+          {
+            "id": 11,
+            "uri": "chunk_11.json",
+            "sha256": "cf1c69a33c99a7d9d6e33be6872a7aea1ce97ff24e5b66c0b8c1a3697dac4515",
+            "size": 287,
+            "content_type": "application/octet-stream"
+          },
+          {
+            "id": 12,
+            "uri": "chunk_12.json",
+            "sha256": "c614d3867c2d4b4561f1c907dcebee827d6e305acc0d029b5856d11d75e43b96",
+            "size": 289,
+            "content_type": "application/octet-stream"
+          },
+          {
+            "id": 13,
+            "uri": "chunk_13.json",
+            "sha256": "8c09a998b7d2184adf0474151de7a71965c9cdbe0a9fef3848eb77e8bfff9911",
+            "size": 287,
+            "content_type": "application/octet-stream"
+          },
+          {
+            "id": 14,
+            "uri": "chunk_14.json",
+            "sha256": "7a51119486ea0b41889e010d56ebc3a473184b875293050dea004c040c5419f5",
+            "size": 289,
+            "content_type": "application/octet-stream"
+          },
+          {
+            "id": 15,
+            "uri": "chunk_15.json",
+            "sha256": "6fe7bdcf489ea386f7a1ce94696db354cf44d000ade491831caad14499c35053",
+            "size": 290,
+            "content_type": "application/octet-stream"
+          }
+        ],
+        "path": "row_archive",
+        "rel_path": "row_archive",
+        "chunk_roots_abs": "/home/ryan/BEF-main/tmp_test/test_run_output/row_archive/chunk_roots.json",
+        "chunk_roots_bin_abs": "/home/ryan/BEF-main/tmp_test/test_run_output/row_archive/chunk_roots.bin",
+        "chunk_roots_rel_path": "row_archive/chunk_roots.json",
+        "chunk_roots_bin_rel_path": "row_archive/chunk_roots.bin",
+        "chunk_manifest_path": "row_archive/chunk_manifest.json"
+      },
+      "formats": {
+        "json": {
+          "path": "/home/ryan/BEF-main/tmp_test/test_run_output/adapter_proof.json",
+          "rel_path": "proofs/primary/adapter_proof.json",
+          "size_bytes": 52333,
+          "sha256_payload_hash": "8a67545d9f31e1ca6871e25400d096452098aba4cc5d38b74d899fc33727f00f"
+        },
+        "bin": {
+          "path": "/home/ryan/BEF-main/tmp_test/test_run_output/adapter_proof.bin",
+          "rel_path": "proofs/primary/adapter_proof.bin",
+          "size_bytes": 27249,
+          "sha256_payload_hash": "bb192dab2bfe39a0d88aebebc401c18e9acc7287cd0385fd37f17f1ba90326cb"
+        }
+      }
+    }
+  },
+  "row_archive": {
+    "mode": "LOCAL_FILE",
+    "abs_path": "/home/ryan/BEF-main/tmp_test/test_run_output/row_archive",
+    "num_chunks": 16,
+    "chunk_tree_arity": 16,
+    "chunk_roots_path": "row_archive/chunk_roots.json",
+    "chunk_roots_format": "hex_json_v1",
+    "chunk_roots_bin_path": "row_archive/chunk_roots.bin",
+    "chunk_roots_bin_format": "raw32_v1",
+    "chunk_roots_digest": "c52304ef344fac2dba060abcb93886f2e3412629b48cb316246a74c91f9d4c04",
+    "chunk_handles": [
+      {
+        "id": 0,
+        "uri": "chunk_0.json",
+        "sha256": "16723784084ddf35cca6f27ac43fddf22daba556ebb0a6a434fd0c976af64b29",
+        "size": 281,
+        "content_type": "application/octet-stream"
+      },
+      {
+        "id": 1,
+        "uri": "chunk_1.json",
+        "sha256": "38fd2148702f39fac4e90ea05e80115852ade6983497ef8c97b35769cded7705",
+        "size": 289,
+        "content_type": "application/octet-stream"
+      },
+      {
+        "id": 2,
+        "uri": "chunk_2.json",
+        "sha256": "992dbd1292657ea0b27d4075d0fa02678b875fbc291b48c6a08835c053d8b37e",
+        "size": 288,
+        "content_type": "application/octet-stream"
+      },
+      {
+        "id": 3,
+        "uri": "chunk_3.json",
+        "sha256": "cba939383156bd9d91b0ba5ca4c86ff64731bb7ef226941623f9065c754c0ad1",
+        "size": 286,
+        "content_type": "application/octet-stream"
+      },
+      {
+        "id": 4,
+        "uri": "chunk_4.json",
+        "sha256": "341d79e744386193dd2baeb32a8dedd81bf805230f74125a6770fb61a81e2090",
+        "size": 286,
+        "content_type": "application/octet-stream"
+      },
+      {
+        "id": 5,
+        "uri": "chunk_5.json",
+        "sha256": "23c0d493dd2c2ddeeeb7faee957f2126b4118dd13ce203903143aaa0f64390eb",
+        "size": 286,
+        "content_type": "application/octet-stream"
+      },
+      {
+        "id": 6,
+        "uri": "chunk_6.json",
+        "sha256": "857b6e124de5930d4822c2ae987fd6b98d9d3e0cec988a38fbe1857d4363ed20",
+        "size": 290,
+        "content_type": "application/octet-stream"
+      },
+      {
+        "id": 7,
+        "uri": "chunk_7.json",
+        "sha256": "d49fb2d0add105ce0cb9189fc4889ba9df28479246919741273c104603766a6b",
+        "size": 287,
+        "content_type": "application/octet-stream"
+      },
+      {
+        "id": 8,
+        "uri": "chunk_8.json",
+        "sha256": "bdcb03d45262c0223602e3858269bb5cfcaf7bb9d0c5cf34eb511f329d916eaa",
+        "size": 289,
+        "content_type": "application/octet-stream"
+      },
+      {
+        "id": 9,
+        "uri": "chunk_9.json",
+        "sha256": "c723af74ddb59a6ea0173230f4d60247699860c1a405de72de560470a98ded14",
+        "size": 289,
+        "content_type": "application/octet-stream"
+      },
+      {
+        "id": 10,
+        "uri": "chunk_10.json",
+        "sha256": "c2a64fee2e04580cdbf68a8fcc2c8a4212fc6fcdcef34c80006446fb73e4f304",
+        "size": 285,
+        "content_type": "application/octet-stream"
+      },
+      {
+        "id": 11,
+        "uri": "chunk_11.json",
+        "sha256": "cf1c69a33c99a7d9d6e33be6872a7aea1ce97ff24e5b66c0b8c1a3697dac4515",
+        "size": 287,
+        "content_type": "application/octet-stream"
+      },
+      {
+        "id": 12,
+        "uri": "chunk_12.json",
+        "sha256": "c614d3867c2d4b4561f1c907dcebee827d6e305acc0d029b5856d11d75e43b96",
+        "size": 289,
+        "content_type": "application/octet-stream"
+      },
+      {
+        "id": 13,
+        "uri": "chunk_13.json",
+        "sha256": "8c09a998b7d2184adf0474151de7a71965c9cdbe0a9fef3848eb77e8bfff9911",
+        "size": 287,
+        "content_type": "application/octet-stream"
+      },
+      {
+        "id": 14,
+        "uri": "chunk_14.json",
+        "sha256": "7a51119486ea0b41889e010d56ebc3a473184b875293050dea004c040c5419f5",
+        "size": 289,
+        "content_type": "application/octet-stream"
+      },
+      {
+        "id": 15,
+        "uri": "chunk_15.json",
+        "sha256": "6fe7bdcf489ea386f7a1ce94696db354cf44d000ade491831caad14499c35053",
+        "size": 290,
+        "content_type": "application/octet-stream"
+      }
+    ],
+    "path": "row_archive",
+    "rel_path": "row_archive",
+    "chunk_roots_abs": "/home/ryan/BEF-main/tmp_test/test_run_output/row_archive/chunk_roots.json",
+    "chunk_roots_bin_abs": "/home/ryan/BEF-main/tmp_test/test_run_output/row_archive/chunk_roots.bin",
+    "chunk_roots_rel_path": "row_archive/chunk_roots.json",
+    "chunk_roots_bin_rel_path": "row_archive/chunk_roots.bin",
+    "chunk_manifest_path": "row_archive/chunk_manifest.json"
+  },
+  "artifacts": {
+    "trace": {
+      "path": "/home/ryan/BEF-main/tmp_test/test_run_output/stc_trace.json",
+      "rel_path": "artifacts/stc_trace.json"
+    },
+    "proof": {
+      "path": "/home/ryan/BEF-main/tmp_test/test_run_output/adapter_proof.json",
+      "rel_path": "proofs/primary/adapter_proof.json"
+    },
+    "row_archive": {
+      "mode": "LOCAL_FILE",
+      "abs_path": "/home/ryan/BEF-main/tmp_test/test_run_output/row_archive",
+      "num_chunks": 16,
+      "chunk_tree_arity": 16,
+      "chunk_roots_path": "row_archive/chunk_roots.json",
+      "chunk_roots_format": "hex_json_v1",
+      "chunk_roots_bin_path": "row_archive/chunk_roots.bin",
+      "chunk_roots_bin_format": "raw32_v1",
+      "chunk_roots_digest": "c52304ef344fac2dba060abcb93886f2e3412629b48cb316246a74c91f9d4c04",
+      "chunk_handles": [
+        {
+          "id": 0,
+          "uri": "chunk_0.json",
+          "sha256": "16723784084ddf35cca6f27ac43fddf22daba556ebb0a6a434fd0c976af64b29",
+          "size": 281,
+          "content_type": "application/octet-stream"
+        },
+        {
+          "id": 1,
+          "uri": "chunk_1.json",
+          "sha256": "38fd2148702f39fac4e90ea05e80115852ade6983497ef8c97b35769cded7705",
+          "size": 289,
+          "content_type": "application/octet-stream"
+        },
+        {
+          "id": 2,
+          "uri": "chunk_2.json",
+          "sha256": "992dbd1292657ea0b27d4075d0fa02678b875fbc291b48c6a08835c053d8b37e",
+          "size": 288,
+          "content_type": "application/octet-stream"
+        },
+        {
+          "id": 3,
+          "uri": "chunk_3.json",
+          "sha256": "cba939383156bd9d91b0ba5ca4c86ff64731bb7ef226941623f9065c754c0ad1",
+          "size": 286,
+          "content_type": "application/octet-stream"
+        },
+        {
+          "id": 4,
+          "uri": "chunk_4.json",
+          "sha256": "341d79e744386193dd2baeb32a8dedd81bf805230f74125a6770fb61a81e2090",
+          "size": 286,
+          "content_type": "application/octet-stream"
+        },
+        {
+          "id": 5,
+          "uri": "chunk_5.json",
+          "sha256": "23c0d493dd2c2ddeeeb7faee957f2126b4118dd13ce203903143aaa0f64390eb",
+          "size": 286,
+          "content_type": "application/octet-stream"
+        },
+        {
+          "id": 6,
+          "uri": "chunk_6.json",
+          "sha256": "857b6e124de5930d4822c2ae987fd6b98d9d3e0cec988a38fbe1857d4363ed20",
+          "size": 290,
+          "content_type": "application/octet-stream"
+        },
+        {
+          "id": 7,
+          "uri": "chunk_7.json",
+          "sha256": "d49fb2d0add105ce0cb9189fc4889ba9df28479246919741273c104603766a6b",
+          "size": 287,
+          "content_type": "application/octet-stream"
+        },
+        {
+          "id": 8,
+          "uri": "chunk_8.json",
+          "sha256": "bdcb03d45262c0223602e3858269bb5cfcaf7bb9d0c5cf34eb511f329d916eaa",
+          "size": 289,
+          "content_type": "application/octet-stream"
+        },
+        {
+          "id": 9,
+          "uri": "chunk_9.json",
+          "sha256": "c723af74ddb59a6ea0173230f4d60247699860c1a405de72de560470a98ded14",
+          "size": 289,
+          "content_type": "application/octet-stream"
+        },
+        {
+          "id": 10,
+          "uri": "chunk_10.json",
+          "sha256": "c2a64fee2e04580cdbf68a8fcc2c8a4212fc6fcdcef34c80006446fb73e4f304",
+          "size": 285,
+          "content_type": "application/octet-stream"
+        },
+        {
+          "id": 11,
+          "uri": "chunk_11.json",
+          "sha256": "cf1c69a33c99a7d9d6e33be6872a7aea1ce97ff24e5b66c0b8c1a3697dac4515",
+          "size": 287,
+          "content_type": "application/octet-stream"
+        },
+        {
+          "id": 12,
+          "uri": "chunk_12.json",
+          "sha256": "c614d3867c2d4b4561f1c907dcebee827d6e305acc0d029b5856d11d75e43b96",
+          "size": 289,
+          "content_type": "application/octet-stream"
+        },
+        {
+          "id": 13,
+          "uri": "chunk_13.json",
+          "sha256": "8c09a998b7d2184adf0474151de7a71965c9cdbe0a9fef3848eb77e8bfff9911",
+          "size": 287,
+          "content_type": "application/octet-stream"
+        },
+        {
+          "id": 14,
+          "uri": "chunk_14.json",
+          "sha256": "7a51119486ea0b41889e010d56ebc3a473184b875293050dea004c040c5419f5",
+          "size": 289,
+          "content_type": "application/octet-stream"
+        },
+        {
+          "id": 15,
+          "uri": "chunk_15.json",
+          "sha256": "6fe7bdcf489ea386f7a1ce94696db354cf44d000ade491831caad14499c35053",
+          "size": 290,
+          "content_type": "application/octet-stream"
+        }
+      ],
+      "path": "row_archive",
+      "rel_path": "row_archive",
+      "chunk_roots_abs": "/home/ryan/BEF-main/tmp_test/test_run_output/row_archive/chunk_roots.json",
+      "chunk_roots_bin_abs": "/home/ryan/BEF-main/tmp_test/test_run_output/row_archive/chunk_roots.bin",
+      "chunk_roots_rel_path": "row_archive/chunk_roots.json",
+      "chunk_roots_bin_rel_path": "row_archive/chunk_roots.bin",
+      "chunk_manifest_path": "row_archive/chunk_manifest.json"
+    },
+    "stats_digest": {
+      "path": "/home/ryan/BEF-main/tmp_test/test_run_output/stats_digest.json",
+      "rel_path": "artifacts/stats_digest.json"
+    },
+    "events_log": {
+      "path": "/home/ryan/BEF-main/tmp_test/test_run_output/events.jsonl",
+      "rel_path": "events/events.jsonl"
+    },
+    "manifest": {
+      "path": "/home/ryan/BEF-main/tmp_test/test_run_output/artifact_manifest.json",
+      "rel_path": "manifests/artifact_manifest.json"
+    }
+  },
+  "stats_digest": {
+    "schema": "trace_stats_v1",
+    "row_count": 16,
+    "fields": {
+      "pc": {
+        "count": 16,
+        "min": "1",
+        "max": "16",
+        "sum": "136",
+        "sum_squares": "1496"
+      },
+      "opcode": {
+        "count": 16,
+        "min": "0",
+        "max": "3",
+        "sum": "25",
+        "sum_squares": "53"
+      },
+      "gas": {
+        "count": 16,
+        "min": "68",
+        "max": "98",
+        "sum": "1323",
+        "sum_squares": "110749"
+      },
+      "acc": {
+        "count": 16,
+        "min": "100",
+        "max": "461175944485",
+        "sum": "1402460605772",
+        "sum_squares": "638166290812959558064758"
+      },
+      "x1": {
+        "count": 16,
+        "min": "0",
+        "max": "0",
+        "sum": "0",
+        "sum_squares": "0"
+      },
+      "x2": {
+        "count": 16,
+        "min": "0",
+        "max": "0",
+        "sum": "0",
+        "sum_squares": "0"
+      },
+      "cnt": {
+        "count": 16,
+        "min": "1",
+        "max": "16",
+        "sum": "136",
+        "sum_squares": "1496"
+      },
+      "m11": {
+        "count": 16,
+        "min": "0",
+        "max": "0",
+        "sum": "0",
+        "sum_squares": "0"
+      },
+      "m12": {
+        "count": 16,
+        "min": "0",
+        "max": "0",
+        "sum": "0",
+        "sum_squares": "0"
+      },
+      "m22": {
+        "count": 16,
+        "min": "0",
+        "max": "0",
+        "sum": "0",
+        "sum_squares": "0"
+      },
+      "s[0]": {
+        "count": 16,
+        "min": "140794396672",
+        "max": "2060964066354064763",
+        "sum": "16540622144118260341",
+        "sum_squares": "23030372952414132740479869233202786225"
+      },
+      "s[1]": {
+        "count": 16,
+        "min": "140794396672",
+        "max": "2302657003981851079",
+        "sum": "17393412595604613056",
+        "sum_squares": "29309258390666468110502546164181276130"
+      },
+      "pow[0]": {
+        "count": 16,
+        "min": "31200186894762713",
+        "max": "1988686166856838225",
+        "sum": "16646553767966549144",
+        "sum_squares": "23815540029869131180836060094730091538"
+      },
+      "pow[1]": {
+        "count": 16,
+        "min": "22216331930236287",
+        "max": "2077402220641004239",
+        "sum": "15780406148901971759",
+        "sum_squares": "20732609750780857706886417219498524577"
+      }
+    }
+  },
+  "policy_telemetry": {
+    "schema": "policy_telemetry_v1",
+    "counters": {
+      "rows_total": 16,
+      "bytes_read_total": 0,
+      "access_events": 0,
+      "wall_time_sec": 0.017694,
+      "network_bytes_total": 0,
+      "pii_hits": 0,
+      "pii_hits_per_row_max": 0,
+      "filtered_rows": 0
+    }
+  },
+  "da_sampling": {
+    "fn_id": "sha256_mod_v1",
+    "domain": "row_chunks",
+    "unique": true,
+    "k": 139,
+    "seed_hex": "f17eb153998471ba449cdf64939d2a4a70d7422282f343411e46a4834edf1fa4",
+    "population_size": 16,
+    "seed_source": "da_policy.deterministic_seed"
+  },
+  "statement": {
+    "statement_version": "1.0",
+    "trace_spec_hash": "5641d97771f67bcd91d149ba74b4d20f670a83bec2726110ae48a2a72a1faf46",
+    "policy_hash": "3c90debf8a203799bb8541245e8b6e5a455ca3237b92327ca9705dc7591d6139",
+    "trace_root": "c52304ef344fac2dba060abcb93886f2e3412629b48cb316246a74c91f9d4c04",
+    "public_inputs": [
+      {
+        "name": "final_m11",
+        "value": 0
+      },
+      {
+        "name": "final_m12",
+        "value": 0
+      },
+      {
+        "name": "final_m22",
+        "value": 0
+      },
+      {
+        "name": "final_cnt",
+        "value": 16
+      }
+    ],
+    "anchors": [
+      {
+        "anchor_rule_id": "unspecified",
+        "anchor_ref": null,
+        "track_id": "unspecified",
+        "event_chain_head": "6e492cc8e38d9675723d220fa12d2a023a571efe0d762afa5ae148ff83ff27ba"
+      }
+    ]
+  },
+  "statement_hash": "4d0aa4a631089acab9dfd1ffd946a6f38d1e2acf7d4cb85f1e710374d7f04d9a",
+  "verification_profile": "PROOF_ONLY",
+  "payload_hash": "c9de6f5a8bd122031e5b1cb1f43a993e7b28568781e8608a73160a6b17af9597",
+  "header": {
+    "schema": "capsule_header_v2",
+    "verification_profile": "PROOF_ONLY",
+    "profile": "default",
+    "profile_claims_hash": null,
+    "vm_id": "geom",
+    "backend_id": "geom_stc_fri",
+    "circuit_id": "GEOM_AIR_V1",
+    "trace_id": "test_run_sandbox",
+    "prev_capsule_hash": null,
+    "trace_spec_hash": "5641d97771f67bcd91d149ba74b4d20f670a83bec2726110ae48a2a72a1faf46",
+    "statement_hash": "4d0aa4a631089acab9dfd1ffd946a6f38d1e2acf7d4cb85f1e710374d7f04d9a",
+    "params_hash": "2ef7cf1e36934ff01e0dfdf0885e85975352e7f92ee5aabb50184150cff451b3",
+    "row_commitment": {
+      "root": "c52304ef344fac2dba060abcb93886f2e3412629b48cb316246a74c91f9d4c04",
+      "tree_arity": 16,
+      "row_index_ref_hash": "546739614a2d330a352238ff0917792f45f70ad2a84a81dbe42bac46633c7b57",
+      "chunk_meta_hash": "b6ceb67363ab0dab204ac2ed168c1a2d443834cb22f0b8c96d1edff32bac79c2",
+      "chunk_handles_root": "ee75c4860c30cf7d8e118850420759abc5ea6945b30c45fd53a76c31785a9800",
+      "chunk_manifest_hash": "ee75c4860c30cf7d8e118850420759abc5ea6945b30c45fd53a76c31785a9800"
+    },
+    "policy_ref": {
+      "policy_id": "demo_policy_v1",
+      "policy_version": "1.0",
+      "policy_hash": "3c90debf8a203799bb8541245e8b6e5a455ca3237b92327ca9705dc7591d6139",
+      "track_id": "unspecified"
+    },
+    "da_ref": {
+      "policy_hash": "afc8466802bafe9717f3bc1c0dc75b66d084b1c767d0c7cc74c7d7a63e8448da",
+      "challenge_hash": "8f8ca1e6a71a71e99f2d46649c0bcfb32310ad85b4453d7dd02a7d8ed8f7a99e"
+    },
+    "proof_system": {
+      "scheme_id": "geom",
+      "backend_id": "geom_stc_fri",
+      "circuit_id": "GEOM_AIR_V1",
+      "hash_fn_id": "sha256",
+      "air_params_hash": "4263ba9355bb77c1c4e101d987368d3d8578ce12e376d66c12c742888905cdcf",
+      "fri_params_hash": "feaa644cb3173c38e0ddb57c57a51e49df71a5c0077aaa46ce338f545470175c",
+      "program_hash": "d9ae17ab6cccac69c15c97138fcb344589fbbf5e384cd24bc5a028ad674b803b",
+      "vk_hash": "0d9deec8751256c45cf76bafc092b66a1a8a27fd2c75b6ff63b1db93cbf93987",
+      "hash": "e03313380895709b38f9e4b89df4f9a342e3b3d121047d29d38afa5a86cd12ac",
+      "instance_hash": "04386a92fc5d4837327705ee54f105a2a0f1a3af43e42f46c26d6423ab075130"
+    },
+    "artifact_manifest_hash": "178a0f6ed3f746436a0ec36c45d04f1e43867896852730995ca95596b1383459",
+    "anchor": {
+      "anchor_rule_id": "unspecified",
+      "anchor_ref": null,
+      "track_id": "unspecified",
+      "event_chain_head": "6e492cc8e38d9675723d220fa12d2a023a571efe0d762afa5ae148ff83ff27ba",
+      "events_log_hash": "sha256:475a5fed27a7e275810427ce70247fb232ee065e3d891beb25f617c20c215083",
+      "events_log_len": 2781
+    },
+    "payload_hash": "c9de6f5a8bd122031e5b1cb1f43a993e7b28568781e8608a73160a6b17af9597"
+  },
+  "header_hash": "e95b365371c19151d120eb2edf5e1141238b8df577791d8a91b26dc4d5106955",
+  "header_commit_hash": "bcd5f79ca4ad621b06ef07c3372d02a4d2265450556372399ca5caffd618c269",
+  "capsule_hash": "a5d81682d9c6f39e7f34eda09ba146fe16fa53353aeab0baac1a63ff8d20c0a2",
+  "da_challenge": {
+    "schema": "capsule_da_challenge_v1",
+    "challenge_id": "87ff1c8c-0834-4e16-8b6e-22ce77e72937",
+    "capsule_commit_hash": "bcd5f79ca4ad621b06ef07c3372d02a4d2265450556372399ca5caffd618c269",
+    "verifier_nonce": "2372da351582bdaa086bfab351e6cbb7",
+    "relay_pubkey_id": "local_insecure",
+    "issued_at_ms": 1769096604030,
+    "expires_at_ms": 1769097204030,
+    "relay_signature": null
+  }
+}

@@ -1,0 +1,175 @@
+#!/bin/bash
+# Capseal rolling logs viewer - modular log streaming
+# Usage: ./scripts/logs [log_type] [options]
+#
+# Log types:
+#   mcp         - MCP tool invocations (default)
+#   orchestrator - Agent orchestration events
+#   session     - Specific session logs
+#   all         - All capseal logs interleaved
+#
+# Options:
+#   -f, --follow    Follow mode (like tail -f)
+#   -n, --lines N   Show last N lines (default: 20)
+#   -j, --json      Pretty print JSON
+#   -s, --session ID  Filter by session ID
+
+set -e
+
+CAPSEAL_ROOT="${CAPSEAL_ROOT:-/home/ryan/BEF-main/.capseal}"
+
+# Handle --help first
+if [[ "$1" == "-h" || "$1" == "--help" ]]; then
+    echo "Usage: logs [log_type] [options]"
+    echo ""
+    echo "Log types:"
+    echo "  mcp           MCP tool invocations (default)"
+    echo "  orchestrator  Agent orchestration events"
+    echo "  session       Session-specific logs"
+    echo "  all           All logs interleaved"
+    echo ""
+    echo "Options:"
+    echo "  -f, --follow     Follow mode (tail -f)"
+    echo "  -n, --lines N    Show last N lines (default: 20)"
+    echo "  -j, --json       Pretty print JSON"
+    echo "  -s, --session ID Filter by session ID"
+    echo ""
+    echo "Examples:"
+    echo "  logs mcp -f              # Stream MCP events"
+    echo "  logs orchestrator -n 50  # Last 50 orchestrator events"
+    echo "  logs all -f -j           # Stream all, pretty JSON"
+    exit 0
+fi
+
+LOG_TYPE="${1:-mcp}"
+shift 2>/dev/null || true
+
+# Defaults
+FOLLOW=false
+LINES=20
+PRETTY_JSON=false
+SESSION_FILTER=""
+
+# Parse options
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -f|--follow)
+            FOLLOW=true
+            shift
+            ;;
+        -n|--lines)
+            LINES="$2"
+            shift 2
+            ;;
+        -j|--json)
+            PRETTY_JSON=true
+            shift
+            ;;
+        -s|--session)
+            SESSION_FILTER="$2"
+            shift 2
+            ;;
+        *)
+            echo "Unknown option: $1" >&2
+            exit 1
+            ;;
+    esac
+done
+
+# Determine log file(s)
+case $LOG_TYPE in
+    mcp)
+        LOG_FILES="$CAPSEAL_ROOT/mcp_events.jsonl"
+        ;;
+    orchestrator|orch)
+        LOG_FILES="$CAPSEAL_ROOT/orchestrator_events.jsonl"
+        ;;
+    session|sessions)
+        if [ -n "$SESSION_FILTER" ]; then
+            LOG_FILES="$CAPSEAL_ROOT/sessions/$SESSION_FILTER/*.txt"
+        else
+            LOG_FILES="$CAPSEAL_ROOT/sessions/*/summary.json"
+        fi
+        ;;
+    all)
+        LOG_FILES="$CAPSEAL_ROOT/mcp_events.jsonl $CAPSEAL_ROOT/orchestrator_events.jsonl"
+        ;;
+    *)
+        # Treat as custom path
+        LOG_FILES="$LOG_TYPE"
+        ;;
+esac
+
+# Check if files exist
+for f in $LOG_FILES; do
+    if [ ! -e "$f" ] && [[ "$f" != *"*"* ]]; then
+        echo "Log file not found: $f" >&2
+        echo "Available logs:" >&2
+        ls -1 "$CAPSEAL_ROOT"/*.jsonl 2>/dev/null | sed 's/^/  /' >&2
+        exit 1
+    fi
+done
+
+# Format function
+format_line() {
+    if $PRETTY_JSON; then
+        python3 -c "
+import sys, json
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        obj = json.loads(line)
+        # Compact important fields
+        ts = obj.get('ts_ms', 0)
+        tool = obj.get('tool', obj.get('event_type', '?'))
+        ok = obj.get('result_ok', obj.get('data', {}).get('status', ''))
+        session = obj.get('session_id', '')[:12] if obj.get('session_id') else ''
+
+        # Color coding
+        if ok == True or ok == 'success':
+            status = '\033[32m✓\033[0m'
+        elif ok == False or ok == 'failed':
+            status = '\033[31m✗\033[0m'
+        else:
+            status = '\033[33m•\033[0m'
+
+        # Timestamp
+        from datetime import datetime
+        dt = datetime.fromtimestamp(ts/1000).strftime('%H:%M:%S') if ts else '??:??:??'
+
+        print(f'{status} [{dt}] {tool:<20} {session}')
+
+        # Show args/data on verbose
+        if 'args' in obj:
+            args_str = json.dumps(obj['args'], ensure_ascii=False)
+            if len(args_str) > 80:
+                args_str = args_str[:77] + '...'
+            print(f'   └─ {args_str}')
+    except json.JSONDecodeError:
+        print(line)
+" 2>/dev/null || cat
+    else
+        cat
+    fi
+}
+
+# Filter function
+filter_session() {
+    if [ -n "$SESSION_FILTER" ]; then
+        grep "\"session_id\":\"$SESSION_FILTER\"" || cat
+    else
+        cat
+    fi
+}
+
+# Main logic
+if $FOLLOW; then
+    echo "Streaming logs from: $LOG_FILES"
+    echo "Press Ctrl+C to stop"
+    echo "---"
+    tail -n "$LINES" -f $LOG_FILES 2>/dev/null | filter_session | format_line
+else
+    tail -n "$LINES" $LOG_FILES 2>/dev/null | filter_session | format_line
+fi

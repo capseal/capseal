@@ -1,0 +1,10 @@
+{
+  "schema": "capsule_da_challenge_v1",
+  "challenge_id": "87ff1c8c-0834-4e16-8b6e-22ce77e72937",
+  "capsule_commit_hash": "bcd5f79ca4ad621b06ef07c3372d02a4d2265450556372399ca5caffd618c269",
+  "verifier_nonce": "2372da351582bdaa086bfab351e6cbb7",
+  "relay_pubkey_id": "local_insecure",
+  "issued_at_ms": 1769096604030,
+  "expires_at_ms": 1769097204030,
+  "relay_signature": null
+}

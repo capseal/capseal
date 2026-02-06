@@ -1,0 +1,80 @@
+{
+  "schema": "bef_artifacts_manifest_v1",
+  "version": 1,
+  "encoding_id": "dag_cbor_compact_fields_v1",
+  "path_index": {
+    "row_archive/chunk_roots.json": {
+      "encoding_id": "hex_json_v1"
+    },
+    "row_archive/chunk_roots.bin": {
+      "encoding_id": "raw32_v1"
+    },
+    "row_archive/chunk_manifest.json": {
+      "encoding_id": "json_hex_v1"
+    },
+    "events.jsonl": {
+      "encoding_id": "events_log_v1"
+    },
+    "adapter_proof.json": {
+      "encoding_id": "json_hex_v1"
+    },
+    "adapter_proof.bin": {
+      "encoding_id": "dag_cbor_compact_fields_v1"
+    },
+    "strategy_capsule.json": {
+      "encoding_id": "json_hex_v1"
+    },
+    "strategy_capsule.bin": {
+      "encoding_id": "dag_cbor_compact_fields_v1"
+    },
+    "artifact_manifest.json": {
+      "encoding_id": "json_manifest_v1"
+    }
+  },
+  "proofs": {
+    "primary": {
+      "default_format": "json",
+      "formats": {
+        "json": {
+          "path": "adapter_proof.json",
+          "encoding_id": "json_hex_v1",
+          "sha256_payload_hash": "f80fdebbe16558d2a707dc016d8087d6bd97b39f52e9425933c57cc674b79c24"
+        },
+        "bin": {
+          "path": "adapter_proof.bin",
+          "encoding_id": "dag_cbor_compact_fields_v1",
+          "sha256_payload_hash": "670b39e86c0f40257fd990e77a7efb7f464cfc0cd3398fdfef9b56db7590c424"
+        }
+      },
+      "features": {
+        "chunk_leaf_multiproof": true
+      }
+    }
+  },
+  "chunk_roots": {
+    "default": "json",
+    "formats": {
+      "json": {
+        "path": "row_archive/chunk_roots.json",
+        "encoding_id": "hex_json_v1"
+      },
+      "bin": {
+        "path": "row_archive/chunk_roots.bin",
+        "encoding_id": "raw32_v1"
+      }
+    }
+  },
+  "capsule": {
+    "default_format": "json",
+    "formats": {
+      "json": {
+        "path": "strategy_capsule.json",
+        "encoding_id": "json_hex_v1"
+      },
+      "bin": {
+        "path": "strategy_capsule.bin",
+        "encoding_id": "dag_cbor_compact_fields_v1"
+      }
+    }
+  }
+}

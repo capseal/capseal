@@ -1,0 +1,4 @@
+{"events": [
+  {"seq": 1, "type": "demo_event", "prev_event_hash": "", "event_hash": "abcd", "payload": {"message": "hello"}},
+  {"seq": 2, "type": "demo_event", "prev_event_hash": "abcd", "event_hash": "efgh", "payload": {"message": "world"}}
+]}

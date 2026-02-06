@@ -1,0 +1,20 @@
+[package]
+name = "nova_stc"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+nova-snark = { git = "https://github.com/microsoft/Nova" }
+ark-ff = "0.4"
+ark-std = { version = "0.4", features = ["std"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+color-eyre = "0.6"
+clap = { version = "4.5", features = ["derive"] }
+hex = "0.4"
+typenum = "1.17"
+rand = "0.8"
+rand_chacha = "0.3"
+bincode = "1.3"
+ff = "0.13"

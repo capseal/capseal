@@ -1,0 +1,38 @@
+{
+  "run_id": "capsule_run_20240115_143022",
+  "status": "verified",
+  "exit_code": 0,
+  "layers": {
+    "l0_hash": {
+      "status": "pass",
+      "message": "All artifact hashes match commitments"
+    },
+    "l1_commitment": {
+      "status": "pass",
+      "message": "Merkle root verified (arity=16, depth=2)"
+    },
+    "l2_constraint": {
+      "status": "pass",
+      "message": "Policy demo_policy_v1 enforced"
+    },
+    "l3_proximity": {
+      "status": "pass",
+      "message": "FRI low-degree test passed"
+    },
+    "l4_receipt": {
+      "status": "pass",
+      "message": "Capsule format valid (schema=bef_capsule_v1)"
+    }
+  },
+  "errors": [],
+  "timings": {
+    "total_ms": 2.7,
+    "parse_ms": 0.3,
+    "proof_verify_ms": 1.8,
+    "merkle_verify_ms": 0.6
+  },
+  "proof_size_bytes": 45056,
+  "backend_id": "geom_stc_fri",
+  "proof_system_id": "stark_fri",
+  "verified_at": "2024-01-15T14:35:00.000Z"
+}

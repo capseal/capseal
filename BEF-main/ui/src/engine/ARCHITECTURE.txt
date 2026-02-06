@@ -1,0 +1,364 @@
+================================================================================
+CAPSULETECH UI ENGINE ADAPTER - ARCHITECTURE SUMMARY
+================================================================================
+
+CRITICAL INFRASTRUCTURE - Backend Abstraction Layer
+
+This is the MOST IMPORTANT piece of the UI architecture. It completely
+abstracts the backend so components never know or care if they're talking
+to Flask, Rust, or a remote service.
+
+================================================================================
+DIRECTORY STRUCTURE
+================================================================================
+
+ui/src/engine/
+├── types.js           - Frozen JSON contracts (all data types)
+├── engine.js          - ExecutionEngine interface + factory
+├── impl/
+│   └── flask.js       - Flask backend implementation
+├── index.js           - Public API exports
+├── README.md          - Architecture documentation
+├── EXAMPLES.md        - Usage examples
+├── INTEGRATION.md     - Migration guide
+└── ARCHITECTURE.txt   - This file
+
+Total: ~1,200 lines of production code + documentation
+
+================================================================================
+KEY CONCEPTS
+================================================================================
+
+1. SINGLE INTERFACE
+   - Components ONLY talk to ExecutionEngine
+   - Backend implementation is transparent
+   - Switching Flask → Rust requires ZERO component changes
+
+2. FROZEN CONTRACTS
+   - All types defined in types.js
+   - Can be extended but never broken
+   - Stable across backend implementations
+
+3. LOCAL-FIRST PERSISTENCE
+   - Runs cached in localStorage
+   - Survives page refresh
+   - No unnecessary backend round-trips
+
+4. EXPLICIT ERRORS
+   - No silent fallbacks
+   - Components show clear offline states
+   - Users always know what's happening
+
+5. L0-L4 TRUST LADDER
+   - Verification is not binary pass/fail
+   - Five layers: Hash, Commitment, Constraint, Proximity, Receipt
+   - Each layer provides evidence pointers
+
+================================================================================
+CORE INTERFACE (ExecutionEngine)
+================================================================================
+
+class ExecutionEngine {
+  // Health & Status
+  async getHealth() → HealthStatus
+
+  // Run Execution
+  async startRun(req) → RunStartResponse
+  streamEvents(runId, onEvent, onError) → cleanup()
+  async getRun(runId) → RunRecord
+  async listRuns(query) → RunSummary[]
+
+  // Verification
+  async verify(req) → VerifyReport
+
+  // Audit
+  async audit(req) → AuditReport
+
+  // Evidence
+  async evidence(req) → EvidenceIndex
+
+  // Export
+  async exportCapsule(req) → ExportResult
+}
+
+================================================================================
+FLASK ADAPTER - KEY MAPPINGS
+================================================================================
+
+Frontend Method       Flask Endpoint           Transformation
+─────────────────────────────────────────────────────────────────────
+startRun()         → POST /run              Request shape + job polling
+streamEvents()     → GET /runs/:id/events   Polling (no SSE)
+getRun()           → GET /runs/:id/events   Construct from events
+listRuns()         → Local cache            No backend endpoint exists
+verify()           → POST /verify           Request shape transform
+audit()            → POST /audit            Request shape transform
+evidence()         → Construct              From run artifacts
+exportCapsule()    → POST /emit             Request shape transform
+getHealth()        → GET /sandbox/status    Capability mapping
+
+================================================================================
+DATA FLOW
+================================================================================
+
+Component → getEngine() → ExecutionEngine → FlaskEngine → Flask API
+                                                         ↓
+                                           localStorage cache
+                                                         ↓
+                                           Component receives data
+
+Local cache survives:
+- Page refresh
+- Browser restart
+- Flask server restart
+
+Cache stores:
+- Run summaries
+- Verification reports
+- Audit results
+- Last 100 runs
+
+================================================================================
+CONFIGURATION RESOLUTION
+================================================================================
+
+Priority order:
+1. Explicit config passed to createEngine(config)
+2. window.API_BASE (runtime)
+3. VITE_API_BASE (environment)
+4. Default: http://localhost:5001
+
+Example:
+  const engine = createEngine({
+    mode: 'local',
+    baseUrl: 'http://localhost:5001'
+  })
+
+================================================================================
+USAGE IN COMPONENTS
+================================================================================
+
+Basic pattern:
+
+  import { getEngine } from './engine'
+
+  function MyComponent() {
+    const [runs, setRuns] = useState([])
+
+    useEffect(() => {
+      const engine = getEngine()
+      engine.listRuns().then(setRuns)
+    }, [])
+
+    return <div>...</div>
+  }
+
+Event streaming:
+
+  useEffect(() => {
+    const engine = getEngine()
+    const cleanup = engine.streamEvents(runId, handleEvent, handleError)
+    return cleanup  // IMPORTANT: cleanup on unmount
+  }, [runId])
+
+================================================================================
+MIGRATION PATH
+================================================================================
+
+PHASE 1 (Current):
+  - Flask backend @ localhost:5001
+  - FlaskEngine adapter
+  - Components use getEngine()
+  - Local cache in localStorage
+
+PHASE 2 (Rust Available):
+  - Add impl/rust.js
+  - Update createEngine() to support mode: 'rust'
+  - Users toggle in settings
+  - Components unchanged
+
+PHASE 3 (Rust Default):
+  - Default to Rust
+  - Flask deprecated
+  - Components still unchanged
+
+PHASE 4 (Flask Removed):
+  - Delete impl/flask.js
+  - Components STILL unchanged
+
+Zero component rewrites throughout entire migration.
+
+================================================================================
+KEY FILES TO INTEGRATE
+================================================================================
+
+1. ui/src/RunsList.jsx
+   - Replace: fetch(`${API}/api/runs`)
+   - With: engine.listRuns()
+
+2. ui/src/RunDetailPanel.jsx
+   - Replace: fetch(`${API}/api/runs/${runId}`)
+   - With: engine.getRun(runId)
+   - Replace: fetch(`${API}/api/runs/${runId}/events`)
+   - With: engine.streamEvents(runId, onEvent)
+   - Replace: fetch(`${API}/api/runs/${runId}/verify`)
+   - With: engine.verify({ run_id: runId })
+
+3. ui/src/components/NewRunDrawer.jsx
+   - Add: engine.startRun(request)
+
+4. ui/src/Launchpad.jsx
+   - Add: engine.getHealth() for status badge
+
+================================================================================
+TESTING STRATEGY
+================================================================================
+
+Unit Tests:
+  - Mock fetch globally
+  - Test each engine method in isolation
+  - Verify request/response transformations
+
+Integration Tests:
+  - Run against actual Flask backend
+  - Verify full request/response cycle
+  - Test error handling
+
+E2E Tests:
+  - Test complete user flows
+  - Verify offline graceful degradation
+  - Test cache persistence across refresh
+
+================================================================================
+ERROR HANDLING
+================================================================================
+
+Network errors:
+  - timeout → "Request timed out"
+  - 404 → "Run not found"
+  - 500 → "Server error"
+  - CORS → "Cannot connect to engine"
+
+All errors bubble up to components with clear messages.
+Components display user-friendly error states.
+No silent failures or auto-retries without user knowledge.
+
+================================================================================
+PERFORMANCE CHARACTERISTICS
+================================================================================
+
+listRuns():
+  - ~0ms (reads from localStorage)
+  - No network round-trip
+
+getRun():
+  - ~50-200ms (fetch events)
+  - Results cached locally
+
+streamEvents():
+  - Polls every 2 seconds
+  - Only fetches new events (after_seq)
+  - Cleanup stops polling
+
+verify():
+  - ~500-5000ms (depends on proof size)
+  - Results cached in localStorage
+
+audit():
+  - ~100-500ms (depends on event count)
+  - Results cached in localStorage
+
+================================================================================
+SECURITY CONSIDERATIONS
+================================================================================
+
+1. No credentials stored
+   - Engine adapter doesn't handle auth
+   - Auth layer separate (when needed)
+
+2. Local cache is localStorage
+   - Cleared on logout (if auth added)
+   - Only stores non-sensitive metadata
+
+3. No URL construction in components
+   - All URLs built by engine
+   - Prevents injection attacks
+
+4. CORS required
+   - Flask must allow UI origin
+   - Prevents unauthorized access
+
+================================================================================
+FUTURE EXTENSIONS
+================================================================================
+
+Planned implementations:
+
+impl/rust.js:
+  - Native Rust daemon
+  - Unix socket communication
+  - Faster verification
+
+impl/remote.js:
+  - Cloudflare Workers backend
+  - OAuth authentication
+  - Multi-user support
+
+impl/mock.js:
+  - Test/demo mode
+  - No backend required
+  - Useful for UI development
+
+All implementations conform to same ExecutionEngine interface.
+Zero component changes required.
+
+================================================================================
+DEPENDENCIES
+================================================================================
+
+Runtime:
+  - None (pure JavaScript)
+  - Uses native fetch API
+  - Uses localStorage API
+
+Development:
+  - JSDoc for type annotations
+  - ESLint for code quality
+
+Backend:
+  - Flask API @ localhost:5001
+  - See: server/flask_app/routes.py
+
+================================================================================
+DOCUMENTATION FILES
+================================================================================
+
+README.md         - Architecture overview, design principles
+EXAMPLES.md       - 7 complete usage examples
+INTEGRATION.md    - Step-by-step migration guide
+ARCHITECTURE.txt  - This file (high-level summary)
+
+Read these in order:
+  1. ARCHITECTURE.txt (you are here)
+  2. README.md
+  3. INTEGRATION.md
+  4. EXAMPLES.md
+
+================================================================================
+CONTACTS & QUESTIONS
+================================================================================
+
+This is CRITICAL INFRASTRUCTURE.
+
+If you need to modify anything in this directory:
+  1. Read all documentation first
+  2. Understand the frozen contracts
+  3. Write tests before changing
+  4. Update documentation
+  5. Get review before merging
+
+Breaking changes here will cascade to ALL components.
+
+================================================================================
+END OF ARCHITECTURE SUMMARY
+================================================================================

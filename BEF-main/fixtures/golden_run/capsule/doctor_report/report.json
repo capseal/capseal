@@ -1,0 +1,65 @@
+{
+  "capsule_path": "/home/ryan/BEF-main/fixtures/golden_run/capsule/capsule.json",
+  "capsule_hash": "354e7eb2703fb2abfd3ec4c26c6956fb1dcaeab1fd3ac2a3be9d0bed381209dc",
+  "report_timestamp": "2026-01-24T01:13:55.367001+00:00",
+  "overall_status": "FAIL",
+  "checks": [
+    {
+      "name": "inspect",
+      "status": "pass",
+      "duration_ms": 626.4549550032825,
+      "details": {
+        "format": "capsule.json",
+        "capsule_id": "1a476abdba9f422d",
+        "trace_id": "run_20251223_000934",
+        "backend": "stark_fri",
+        "profile": "POLICY_ENFORCED",
+        "schema": "bef_capsule_v1",
+        "file_size": "56.2 KB"
+      },
+      "error": null
+    },
+    {
+      "name": "verify",
+      "status": "fail",
+      "duration_ms": 686.6806500038365,
+      "details": {},
+      "error": "REJECTED: E013_CAPSULE_HEADER_MISMATCH in 0.1ms\n"
+    },
+    {
+      "name": "audit",
+      "status": "pass",
+      "duration_ms": 620.1717809963156,
+      "details": {
+        "total_events": "8",
+        "hash_chain": "VALID"
+      },
+      "error": null
+    }
+  ],
+  "summary": {
+    "capsule_id": "1a476abdba9f422d",
+    "trace_id": "run_20251223_000934",
+    "backend": "stark_fri",
+    "schema": "bef_capsule_v1",
+    "trace_schema_id": null,
+    "checks_passed": 2,
+    "checks_total": 3,
+    "total_duration_ms": 1933.3073860034347
+  },
+  "index": {
+    "capsule_json": "/home/ryan/BEF-main/fixtures/golden_run/capsule/capsule.json",
+    "capsule_hash": "354e7eb2703fb2abfd3ec4c26c6956fb1dcaeab1fd3ac2a3be9d0bed381209dc",
+    "capsule_id": "1a476abdba9f422d",
+    "trace_id": "run_20251223_000934",
+    "events_log": "/home/ryan/BEF-main/fixtures/golden_run/capsule/events/events.jsonl",
+    "events_log_hash": "37a9543e90760ebd983b294e6d8682acdb646caa398a851cf11796a39a77a72b",
+    "policy_json": "/home/ryan/BEF-main/fixtures/golden_run/capsule/policy.json",
+    "policy_hash": "7b7162a296d86be2bd242dd08465a96957184769db1c7c51c83970716c5fd03a",
+    "row_archive_dir": "/home/ryan/BEF-main/fixtures/golden_run/capsule/row_archive",
+    "row_archive_chunks": "66",
+    "proofs_dir": "/home/ryan/BEF-main/fixtures/golden_run/capsule/proofs",
+    "manifests_dir": "/home/ryan/BEF-main/fixtures/golden_run/capsule/manifests",
+    "manifest_index_hash": "5d4c174cd8575bcc125d3ff1f4580d2618d7dfca2c6d793bb694addb1895c9be"
+  }
+}

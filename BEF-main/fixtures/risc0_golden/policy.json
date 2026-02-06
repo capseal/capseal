@@ -1,0 +1,12 @@
+{
+  "schema": "bef_benchmark_policy_v1",
+  "policy_id": "risc0_demo_policy",
+  "policy_version": "1.0.0",
+  "tracks": [
+    {
+      "track_id": "risc0_test_track",
+      "description": "RISC0 test track (no rules)",
+      "rules": {}
+    }
+  ]
+}

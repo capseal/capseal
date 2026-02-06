@@ -1,0 +1,67 @@
+# CapSeal Workflow: Review + Intent Conformance
+#
+# This workflow demonstrates the DAG-of-agents pattern where every node
+# emits a verifiable packet with cryptographic receipts.
+#
+# Usage:
+#   capseal workflow workflows/review_plus_intent.yml \
+#     --project-dir ~/projects/market-dashboard \
+#     --run /tmp/workflow_run
+
+name: review_plus_intent
+description: "Full PR review with profile extraction and intent conformance checking"
+
+inputs:
+  project_dir: ${PROJECT_DIR}
+  policy_id: review_v1
+
+tasks:
+  # 1. Trace the project (canonical snapshot)
+  - id: trace
+    kind: trace
+    params:
+      policy_id: review_v1
+      num_shards: 4
+
+  # 2. Extract deterministic profile (README, docstrings, entrypoints, deps, hot callsites)
+  - id: profile
+    kind: agent.profile_extract
+    needs: [trace]
+    params:
+      sources:
+        - "README*"
+        - "src/**"
+        - "pyproject.toml"
+        - "setup.cfg"
+        - "*/__main__.py"
+      output: profile.json
+
+  # 3. Check conformance against declared intent
+  - id: intent
+    kind: agent.intent_check
+    needs: [profile]
+    params:
+      intent_file: capseal.intent.json
+      output: conformance.json
+
+  # 4. Run semgrep static analysis (sharded)
+  - id: semgrep
+    kind: review.semgrep
+    needs: [trace]
+    params:
+      shards: 4
+      agents: 4
+
+  # 5. Generate LLM explanation for findings
+  - id: explain
+    kind: explain_llm
+    needs: [semgrep]
+    params:
+      provider: openai
+      model: gpt-4o-mini
+      format: markdown
+      min_severity: warning
+      max_findings: 20
+    budget:
+      context_budget_tokens: 6000
+      max_output_tokens: 1500

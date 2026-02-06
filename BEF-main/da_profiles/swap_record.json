@@ -1,0 +1,31 @@
+{
+  "schema": "stc_da_swap_v1",
+  "stc_root": "694aa2d02410226c9c624d806d88020a76274919def3c217a8b833337274372a",
+  "timestamp": 1765301316,
+  "old_profile": {
+    "version": 1,
+    "mode": "LOCAL_FILE",
+    "sampling": {
+      "delta": 0.2,
+      "epsilon": 0.001,
+      "k_min": 31
+    },
+    "provider": {
+      "path": "code/traces/vm_demo.json"
+    }
+  },
+  "new_profile": {
+    "version": 1,
+    "mode": "L1_BLOB",
+    "sampling": {
+      "delta": 0.1,
+      "epsilon": 1e-06,
+      "k_min": 132
+    },
+    "provider": {
+      "chain_id": 1,
+      "blob_tx": "0xabc"
+    }
+  },
+  "attester": "operator"
+}

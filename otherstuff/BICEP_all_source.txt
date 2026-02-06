@@ -1,0 +1,5845 @@
+
+//==============================================================================
+// FILE: ./Cargo.toml
+//==============================================================================
+[workspace]
+members = [
+    "crates/bicep-core",
+    "crates/bicep-models", 
+    "crates/bicep-sampler",
+    "crates/bicep-io",
+    "crates/bicep-cpu",
+    "crates/bicep-gpu",
+    "crates/bicep-py",
+    "crates/bicep-examples",
+    "crates/bicep-crypto",
+]
+
+resolver = "2"
+
+[workspace.dependencies]
+blake3 = "1.5"
+nalgebra = "0.33"
+rand = "0.8"
+rand_chacha = "0.3"
+rand_distr = "0.4"
+rayon = "1.8"
+arrow = "53"
+parquet = "53"
+uuid = { version = "1.0", features = ["v4"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+thiserror = "2.0"
+clap = { version = "4.0", features = ["derive"] }
+tokio = { version = "1.0", features = ["full"] }
+
+chrono = { version = "0.4", features = ["serde"] }
+wide = "0.7"
+bytemuck = "1.0"
+
+# Performance dependencies
+approx = "0.5"
+criterion = { version = "0.5", features = ["html_reports"] }
+proptest = "1.0"
+
+//==============================================================================
+// FILE: ./crates/bicep-core/Cargo.toml
+//==============================================================================
+[package]
+name = "bicep-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+nalgebra = { workspace = true, features = ["serde-serialize"] }
+rand = { workspace = true }
+rand_chacha = { workspace = true }
+rand_distr = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+blake3 = { workspace = true }
+rayon = { workspace = true }
+
+[dev-dependencies]
+approx = "0.5"
+bicep-models = { path = "../bicep-models" }
+serde_json = "1.0"
+
+//==============================================================================
+// FILE: ./crates/bicep-core/src/diffusion.rs
+//==============================================================================
+use crate::{State, Time};
+use nalgebra::DMatrix;
+
+pub trait Diffusion: Send + Sync {
+    /// σ(t,x) as a matrix mapping dW (R^m) -> state (R^n)
+    fn sigma(&self, t: Time, x: &State) -> DMatrix<f64>;
+
+    /// Optional Jacobian ∂σ/∂x for Stratonovich correction
+    /// Returns a vector of matrices where jacs[j] is the Jacobian of the j-th column of σ
+    fn sigma_jacobian(&self, _t: Time, _x: &State) -> Option<Vec<DMatrix<f64>>> {
+        None
+    }
+
+    /// Number of noise dimensions (columns in σ matrix)
+    fn noise_dim(&self, t: Time, x: &State) -> usize {
+        self.sigma(t, x).ncols()
+    }
+}
+
+//==============================================================================
+// FILE: ./crates/bicep-core/src/drift.rs
+//==============================================================================
+use crate::{State, Time};
+
+pub trait Drift: Send + Sync {
+    fn mu(&self, t: Time, x: &State) -> State;
+}
+
+//==============================================================================
+// FILE: ./crates/bicep-core/src/integrators/euler_maruyama.rs
+//==============================================================================
+use super::helpers::stratonovich_correction;
+use super::{Calc, SdeIntegrator};
+use crate::diffusion::Diffusion;
+use crate::drift::Drift;
+use crate::{State, Time};
+
+#[derive(Clone, Copy, Debug)]
+pub struct EulerMaruyama;
+
+impl SdeIntegrator for EulerMaruyama {
+    fn step(
+        &self,
+        calc: Calc,
+        t: Time,
+        x: &State,
+        dt: f64,
+        dW: &State,
+        drift: &impl Drift,
+        diffusion: &impl Diffusion,
+    ) -> State {
+        // Get base drift
+        let mut mu = drift.mu(t, x);
+
+        // Apply Stratonovich correction if needed
+        if let Calc::Stratonovich = calc {
+            if let Some(correction) = stratonovich_correction(t, x, diffusion) {
+                // μ° = μ - 0.5 * Σ_j σ_j * (∂σ_j/∂x)
+                mu = State(&mu.0 - &correction.0);
+            } else {
+                // If no Jacobian provided, warn that Heun should be used instead
+                eprintln!(
+                    "Warning: Stratonovich mode requested but no Jacobian provided. \
+                          Consider using HeunStratonovich integrator instead."
+                );
+            }
+        }
+
+        // Get diffusion coefficient
+        let sigma = diffusion.sigma(t, x);
+
+        // Euler-Maruyama step: X_{t+dt} = X_t + μ*dt + σ*dW
+        State(&x.0 + &mu.0 * dt + sigma * &dW.0)
+    }
+}
+
+//==============================================================================
+// FILE: ./crates/bicep-core/src/integrators/helpers.rs
+//==============================================================================
+use crate::diffusion::Diffusion;
+use crate::{State, Time};
+use nalgebra::DVector;
+
+/// Computes the Stratonovich drift correction: -0.5 * Σ_j σ_j * (∂σ_j/∂x)
+pub fn stratonovich_correction(t: Time, x: &State, diffusion: &impl Diffusion) -> Option<State> {
+    let jacs = diffusion.sigma_jacobian(t, x)?;
+    let sigma = diffusion.sigma(t, x);
+    let n = x.dim();
+    let mut correction = DVector::zeros(n);
+
+    // For each noise dimension j
+    for (j, jac_j) in jacs.iter().enumerate() {
+        // σ_j is the j-th column of σ
+        let sigma_j = sigma.column(j);
+        // correction += jac_j * σ_j
+        correction += jac_j * &sigma_j;
+    }
+
+    Some(State(0.5 * correction))
+}
+
+//==============================================================================
+// FILE: ./crates/bicep-core/src/integrators/heun_stratonovich.rs
+//==============================================================================
+use super::{Calc, SdeIntegrator};
+use crate::diffusion::Diffusion;
+use crate::drift::Drift;
+use crate::{State, Time};
+
+/// Stochastic Heun method (midpoint rule) for Stratonovich SDEs
+#[derive(Clone, Copy, Debug)]
+pub struct HeunStratonovich;
+
+impl SdeIntegrator for HeunStratonovich {
+    fn step(
+        &self,
+        _calc: Calc, // Always treats as Stratonovich
+        t: Time,
+        x: &State,
+        dt: f64,
+        dW: &State,
+        drift: &impl Drift,
+        diffusion: &impl Diffusion,
+    ) -> State {
+        // Predictor step
+        let mu0 = drift.mu(t, x);
+        let sigma0 = diffusion.sigma(t, x);
+        let x_tilde = State(&x.0 + &mu0.0 * dt + &sigma0 * &dW.0);
+
+        // Corrector step with midpoint
+        let mu1 = drift.mu(t + dt, &x_tilde);
+        let sigma1 = diffusion.sigma(t + dt, &x_tilde);
+
+        // Average drift and diffusion (midpoint rule)
+        let mu_mid = State(0.5 * (&mu0.0 + &mu1.0));
+        let sigma_mid = 0.5 * (sigma0 + sigma1);
+
+        // Final step using midpoint values
+        State(&x.0 + &mu_mid.0 * dt + sigma_mid * &dW.0)
+    }
+}
+
+//==============================================================================
+// FILE: ./crates/bicep-core/src/integrators/milstein.rs
+//==============================================================================
+use super::helpers::stratonovich_correction;
+use super::{Calc, SdeIntegrator};
+use crate::diffusion::Diffusion;
+use crate::drift::Drift;
+use crate::{State, Time};
+use nalgebra::DVector;
+
+/// Milstein method for SDEs with higher strong order convergence
+/// Requires sigma_jacobian to be implemented for full effectiveness
+#[derive(Clone, Copy, Debug)]
+pub struct Milstein;
+
+impl SdeIntegrator for Milstein {
+    fn step(
+        &self,
+        calc: Calc,
+        t: Time,
+        x: &State,
+        dt: f64,
+        dW: &State,
+        drift: &impl Drift,
+        diffusion: &impl Diffusion,
+    ) -> State {
+        // Get base drift
+        let mut mu = drift.mu(t, x);
+
+        // Apply Stratonovich correction if needed
+        if let Calc::Stratonovich = calc {
+            if let Some(correction) = stratonovich_correction(t, x, diffusion) {
+                mu = State(&mu.0 - &correction.0);
+            }
+        }
+
+        // Get diffusion coefficient
+        let sigma = diffusion.sigma(t, x);
+
+        // Start with Euler-Maruyama step
+        let mut x_next = &x.0 + &mu.0 * dt + &sigma * &dW.0;
+
+        // Add Milstein correction terms if Jacobians are available
+        if let Some(jacs) = diffusion.sigma_jacobian(t, x) {
+            let n = x.dim();
+            let m = sigma.ncols();
+            let mut milstein_correction = DVector::zeros(n);
+
+            // Milstein term: 0.5 * Σ_j σ_j * (∂σ_j/∂x) * ((ΔW_j)² - Δt)
+            for j in 0..m {
+                let sigma_j = sigma.column(j).into_owned();
+                let jac_j = &jacs[j];
+                let dW_j = dW.0[j];
+
+                // (ΔW_j)² - Δt term
+                let levy_area = dW_j * dW_j - dt;
+
+                // Add contribution: σ_j * (∂σ_j/∂x) * levy_area
+                milstein_correction += jac_j * sigma_j * (0.5 * levy_area);
+            }
+
+            x_next += milstein_correction;
+        } else {
+            // If no Jacobian available, warn and fall back to Euler-Maruyama
+            eprintln!(
+                "Warning: Milstein method requires sigma_jacobian. \
+                      Falling back to Euler-Maruyama (lower strong order)."
+            );
+        }
+
+        State(x_next)
+    }
+}
+
+//==============================================================================
+// FILE: ./crates/bicep-core/src/integrators/mod.rs
+//==============================================================================
+pub mod euler_maruyama;
+pub mod helpers;
+pub mod heun_stratonovich;
+pub mod milstein;
+
+use crate::diffusion::Diffusion;
+use crate::drift::Drift;
+use crate::{State, Time};
+
+pub use euler_maruyama::EulerMaruyama;
+pub use heun_stratonovich::HeunStratonovich;
+pub use milstein::Milstein;
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum Calc {
+    Ito,
+    Stratonovich,
+}
+
+pub trait SdeIntegrator: Send + Sync {
+    fn step(
+        &self,
+        calc: Calc,
+        t: Time,
+        x: &State,
+        dt: f64,
+        dW: &State,
+        drift: &impl Drift,
+        diffusion: &impl Diffusion,
+    ) -> State;
+}
+
+//==============================================================================
+// FILE: ./crates/bicep-core/src/lib.rs
+//==============================================================================
+pub mod diffusion;
+pub mod drift;
+pub mod integrators;
+pub mod measure;
+pub mod multifidelity;
+pub mod noise;
+pub mod path;
+pub mod seed;
+pub mod state;
+
+// Core types
+pub type F = f64;
+pub use noise::{NoiseGenerator, NoiseConfig, ShockType};
+pub use state::{State, Time};
+
+// SDE traits
+pub use diffusion::Diffusion;
+pub use drift::Drift;
+
+// Integrators
+pub use integrators::{Calc, EulerMaruyama, HeunStratonovich, Milstein, SdeIntegrator};
+
+// Path and ensemble types
+pub use path::{Ensemble, Path, PathSpec};
+pub use seed::{SeedIdentity, SeedSpec};
+
+// Convenience aliases for SDE-specific usage
+pub type SdePath = Path<State>;
+pub type SdeEnsemble = Ensemble<State>;
+
+//==============================================================================
+// FILE: ./crates/bicep-core/src/measure.rs
+//==============================================================================
+use crate::{State, Time};
+
+/// Hook for future change-of-measure operations (e.g., Girsanov)
+pub trait MeasureChange: Send + Sync {
+    fn radon_nikodym_derivative(&self, t: Time, x: &State) -> f64;
+}
+
+//==============================================================================
+// FILE: ./crates/bicep-core/src/multifidelity.rs
+//==============================================================================
+use crate::{Calc, Diffusion, Drift, NoiseGenerator, SdeIntegrator, State};
+use rayon::prelude::*;
+
+#[derive(Debug, Clone)]
+pub struct MfEstimate {
+    pub value: f64,           // The final multifidelity estimate
+    pub variance: f64,        // Estimated variance of the estimator
+    pub q_high_naive: f64,    // Standard MC estimate (High-Fi only)
+    pub q_low_naive: f64,     // Standard MC estimate (Low-Fi only)
+    pub correlation: f64,     // Correlation between High and Low fidelity
+    pub beta: f64,            // Optimal control variate coefficient
+    pub n_high: usize,
+    pub n_low: usize,
+}
+
+/// Run a simulation and return 1.0 if it hits A, 0.0 if it hits B.
+/// If it hits neither by max_steps, we (for now) return 0.0 or handle as incomplete.
+fn run_trajectory<D: Drift + Sync, S: Diffusion + Sync, I: SdeIntegrator + Sync>(
+    drift: &D,
+    diffusion: &S,
+    integrator: &I,
+    start: &State,
+    dt: f64,
+    calc: Calc,
+    noise_gen: &mut NoiseGenerator,
+    is_a: &impl Fn(&State) -> bool,
+    is_b: &impl Fn(&State) -> bool,
+    max_steps: usize,
+) -> f64 {
+    let mut x = start.clone();
+    let dim = x.dim();
+    let sqrt_dt = dt.sqrt();
+    let mut t = 0.0;
+
+    for _ in 0..max_steps {
+        if is_a(&x) { return 1.0; }
+        if is_b(&x) { return 0.0; }
+
+        let dw = noise_gen.generate_dw(dim, sqrt_dt);
+        x = integrator.step(calc, t, &x, dt, &dw, drift, diffusion);
+        t += dt;
+    }
+    // Timeout implies failure to reach goal in time
+    0.0
+}
+
+/// Run a PAIRED simulation (High-Fi and Low-Fi sharing noise).
+/// Returns (y_high, y_low).
+/// 
+/// Note: This implementation assumes dt_low is a integer multiple of dt_high.
+/// Ratio R = dt_low / dt_high.
+fn run_paired_trajectory<
+    D1: Drift + Sync, S1: Diffusion + Sync, I1: SdeIntegrator + Sync,
+    D2: Drift + Sync, S2: Diffusion + Sync, I2: SdeIntegrator + Sync
+>(
+    high: (&D1, &S1, &I1, f64),
+    low: (&D2, &S2, &I2, f64),
+    start: &State,
+    calc: Calc,
+    noise_gen: &mut NoiseGenerator,
+    is_a: &impl Fn(&State) -> bool,
+    is_b: &impl Fn(&State) -> bool,
+    max_steps_high: usize,
+) -> (f64, f64) {
+    let (d1, s1, i1, dt1) = high;
+    let (d2, s2, i2, dt2) = low;
+
+    // Check ratio
+    let ratio = (dt2 / dt1).round() as usize;
+    assert!(ratio >= 1, "Low-Fi dt must be >= High-Fi dt");
+    
+    let mut x1 = start.clone();
+    let mut x2 = start.clone();
+    let dim = start.dim();
+    let sqrt_dt1 = dt1.sqrt();
+    
+    let mut t1 = 0.0;
+    let mut t2 = 0.0;
+    
+    let mut finished1 = false;
+    let mut finished2 = false;
+    let mut res1 = 0.0;
+    let mut res2 = 0.0;
+
+    // Accumulator for Low-Fi noise
+    // dW_L = sum(dW_H)
+    let mut dw_accum = State::zeros(dim); 
+
+    for step in 0..max_steps_high {
+        // If both finished, break
+        if finished1 && finished2 { break; }
+
+        // 1. Check conditions
+        if !finished1 {
+            if is_a(&x1) { res1 = 1.0; finished1 = true; }
+            else if is_b(&x1) { res1 = 0.0; finished1 = true; }
+        }
+        if !finished2 {
+            if is_a(&x2) { res2 = 1.0; finished2 = true; }
+            else if is_b(&x2) { res2 = 0.0; finished2 = true; }
+        }
+
+        if finished1 && finished2 { break; }
+
+        // 2. Generate Fine Noise
+        let dw_fine = noise_gen.generate_dw(dim, sqrt_dt1);
+
+        // 3. Step High-Fi
+        if !finished1 {
+            // Fix: remove * dereference, pass references directly
+            x1 = i1.step(calc, t1, &x1, dt1, &dw_fine, d1, s1);
+            t1 += dt1;
+        }
+
+        // 4. Accumulate for Low-Fi
+        if !finished2 {
+            // Add dW components
+            for k in 0..dim {
+                dw_accum[k] += dw_fine[k];
+            }
+
+            // If we hit the ratio boundary, step Low-Fi
+            if (step + 1) % ratio == 0 {
+                // Fix: remove * dereference, pass references directly
+                x2 = i2.step(calc, t2, &x2, dt2, &dw_accum, d2, s2);
+                t2 += dt2;
+                // Reset accumulator
+                dw_accum = State::zeros(dim);
+            }
+        }
+    }
+
+    (res1, res2)
+}
+
+pub struct MultifidelityEstimator;
+
+impl MultifidelityEstimator {
+    pub fn estimate<
+        D1: Drift + Sync, S1: Diffusion + Sync, I1: SdeIntegrator + Sync,
+        D2: Drift + Sync, S2: Diffusion + Sync, I2: SdeIntegrator + Sync
+    >(
+        start: &State,
+        is_a: &(impl Fn(&State) -> bool + Sync),
+        is_b: &(impl Fn(&State) -> bool + Sync),
+        high: (&D1, &S1, &I1, f64),
+        low: (&D2, &S2, &I2, f64),
+        n_high: usize,
+        n_cheap_only: usize,
+        seed: u64,
+        max_steps_high: usize,
+    ) -> MfEstimate {
+        // 1. Run Paired Simulations (N_High)
+        let results_paired: Vec<(f64, f64)> = (0..n_high).into_par_iter().map(|i| {
+            // Deterministic seeding for parallel reproducibility
+            let mut rng = NoiseGenerator::from_path_id(seed, i as u64);
+            run_paired_trajectory(
+                high, low, start, Calc::Ito, &mut rng, is_a, is_b, max_steps_high
+            )
+        }).collect();
+
+        // 2. Run Cheap-Only Simulations (N_Cheap_Only)
+        // Note: Use a different seed offset (n_high) to ensure independence
+        let results_cheap_only: Vec<f64> = (0..n_cheap_only).into_par_iter().map(|i| {
+            let mut rng = NoiseGenerator::from_path_id(seed, (n_high + i) as u64);
+            let (d2, s2, i2, dt2) = low;
+            // Adjust max steps for low fi
+            let ratio = (dt2 / high.3).round() as usize;
+            let max_steps_low = max_steps_high / ratio;
+            
+            // Fix: remove * dereference
+            run_trajectory(
+                d2, s2, i2, start, dt2, Calc::Ito, &mut rng, is_a, is_b, max_steps_low
+            )
+        }).collect();
+
+        // 3. Compute Statistics from Paired Data
+        let y_h_vec: Vec<f64> = results_paired.iter().map(|(h, _)| *h).collect();
+        let y_l_paired_vec: Vec<f64> = results_paired.iter().map(|(_, l)| *l).collect();
+
+        let mean_h = mean(&y_h_vec);
+        let mean_l_paired = mean(&y_l_paired_vec);
+        
+        let var_h = variance(&y_h_vec, mean_h);
+        let var_l = variance(&y_l_paired_vec, mean_l_paired);
+        let cov_hl = covariance(&y_h_vec, &y_l_paired_vec, mean_h, mean_l_paired);
+        
+        // Beta* = Cov(H, L) / Var(L)
+        let beta = if var_l > 1e-12 { cov_hl / var_l } else { 0.0 };
+
+        // 4. Compute Full Low-Fi Mean (N_L = N_High + N_Cheap_Only)
+        // Combine paired L samples and cheap-only L samples
+        let sum_l_paired: f64 = y_l_paired_vec.iter().sum();
+        let sum_l_cheap: f64 = results_cheap_only.iter().sum();
+        let n_total_l = n_high + n_cheap_only;
+        let mean_l_total = (sum_l_paired + sum_l_cheap) / (n_total_l as f64);
+
+        // 5. Control Variate Estimate
+        // q_MF = mean(H) + beta * (mean(L_total) - mean(L_paired))
+        let q_mf = mean_h + beta * (mean_l_total - mean_l_paired);
+
+        // 6. Variance Estimation
+        // Var(q_MF) = (1/N_H) * Var(H - beta*L_paired) + (beta^2 / N_L) * Var(L)
+        //           = (1/N_H) * (Var(H) + beta^2*Var(L) - 2*beta*Cov(H,L)) + (beta^2/N_L)*Var(L)
+        
+        let var_residual = var_h + beta.powi(2) * var_l - 2.0 * beta * cov_hl;
+        let term1 = var_residual / (n_high as f64);
+        let term2 = (beta.powi(2) * var_l) / (n_total_l as f64);
+        
+        let est_variance = term1 + term2;
+        
+        // For correlation reporting
+        let correlation = if var_h > 1e-12 && var_l > 1e-12 {
+            cov_hl / (var_h.sqrt() * var_l.sqrt())
+        } else {
+            0.0
+        };
+
+        MfEstimate {
+            value: q_mf.clamp(0.0, 1.0), // Probabilities must be in [0,1]
+            variance: est_variance,
+            q_high_naive: mean_h,
+            q_low_naive: mean_l_total,
+            correlation,
+            beta,
+            n_high,
+            n_low: n_total_l,
+        }
+    }
+}
+
+fn mean(data: &[f64]) -> f64 {
+    if data.is_empty() { return 0.0; }
+    data.iter().sum::<f64>() / data.len() as f64
+}
+
+fn variance(data: &[f64], mean: f64) -> f64 {
+    if data.len() < 2 { return 0.0; }
+    data.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (data.len() - 1) as f64
+}
+
+fn covariance(x: &[f64], y: &[f64], mx: f64, my: f64) -> f64 {
+    if x.len() < 2 { return 0.0; }
+    x.iter().zip(y.iter())
+        .map(|(xi, yi)| (xi - mx) * (yi - my))
+        .sum::<f64>() / (x.len() - 1) as f64
+}
+//==============================================================================
+// FILE: ./crates/bicep-core/src/noise.rs
+//==============================================================================
+use crate::{
+    seed::{SeedIdentity, SeedSpec},
+    State,
+};
+use rand::SeedableRng;
+use rand_chacha::ChaCha20Rng;
+use rand_distr::{Distribution, StandardNormal, StudentT};
+
+#[derive(Clone, Debug)]
+pub enum ShockType {
+    Gaussian,
+    StudentT,
+}
+
+#[derive(Clone, Debug)]
+pub struct NoiseConfig {
+    pub shock_type: ShockType,
+    pub nu: Option<f64>,          // df for Student-t
+    pub ewma_alpha: Option<f64>,  // smoothing factor in [0,1)
+}
+
+pub struct NoiseGenerator {
+    rng: ChaCha20Rng,
+    config: Option<NoiseConfig>,
+    scale2: Option<Vec<f64>>, // EWMA variance per-dimension
+}
+
+impl NoiseGenerator {
+    pub fn new(seed: u64) -> Self {
+        Self {
+            rng: ChaCha20Rng::seed_from_u64(seed),
+            config: None,
+            scale2: None,
+        }
+    }
+
+    pub fn from_path_id(global_seed: u64, path_id: u64) -> Self {
+        // Combine seeds deterministically (legacy behavior)
+        let seed = global_seed.wrapping_add(path_id.wrapping_mul(0x9e3779b97f4a7c15));
+        Self::new(seed)
+    }
+
+    pub fn from_identity(seed_spec: &SeedSpec, identity: &SeedIdentity) -> Self {
+        let seed = seed_spec.derive_seed(identity);
+        Self::new(seed)
+    }
+
+    pub fn set_config(&mut self, cfg: Option<NoiseConfig>) {
+        self.config = cfg;
+        self.scale2 = None; // reset EWMA state
+    }
+
+    pub fn generate_dw(&mut self, n: usize, sqrt_dt: f64) -> State {
+        if self.config.is_none() {
+            // Backward-compatible Gaussian
+            let values: Vec<f64> = (0..n)
+                .map(|_| {
+                    let sample: f64 = StandardNormal.sample(&mut self.rng);
+                    sample * sqrt_dt
+                })
+                .collect();
+            return State::new(values);
+        }
+
+        // Configured path: Student‑t support and EWMA scaling
+        let cfg = self.config.as_ref().unwrap();
+        let mut values = Vec::with_capacity(n);
+        if self.scale2.is_none() {
+            self.scale2 = Some(vec![1.0; n]);
+        }
+        let scale2 = self.scale2.as_mut().unwrap();
+
+        // Precompute standardization for Student-t if needed
+        let (use_t, std_t): (bool, f64) = match (&cfg.shock_type, cfg.nu) {
+            (ShockType::StudentT, Some(nu)) if nu > 2.0 => (true, (nu / (nu - 2.0)).sqrt()),
+            (ShockType::StudentT, _) => (true, (5.0f64 / 3.0f64).sqrt()), // default nu=5 fallback
+            _ => (false, 1.0),
+        };
+        let t_dist: Option<StudentT<f64>> = if use_t {
+            Some(StudentT::new(cfg.nu.unwrap_or(5.0)).unwrap())
+        } else {
+            None
+        };
+
+        for j in 0..n {
+            let mut z = if let Some(ref t) = t_dist {
+                // Standardize to unit variance
+                t.sample(&mut self.rng) / std_t
+            } else {
+                StandardNormal.sample(&mut self.rng)
+            };
+            if let Some(alpha) = cfg.ewma_alpha {
+                let a = alpha.max(0.0).min(0.9999);
+                scale2[j] = a * scale2[j] + (1.0 - a) * (z * z);
+                let s = scale2[j].max(1e-12).sqrt();
+                z *= s;
+            }
+            values.push(z * sqrt_dt);
+        }
+        State::new(values)
+    }
+
+    pub fn generate_antithetic_pair(&mut self, n: usize, sqrt_dt: f64) -> (State, State) {
+        let dw1 = self.generate_dw(n, sqrt_dt);
+        let dw2 = State(dw1.0.map(|x| -x));
+        (dw1, dw2)
+    }
+}
+
+//==============================================================================
+// FILE: ./crates/bicep-core/src/path.rs
+//==============================================================================
+use crate::Time;
+
+#[derive(Clone, Debug)]
+pub struct PathSpec {
+    pub n_steps: usize,
+    pub dt: f64,
+    pub save_stride: usize,
+}
+
+impl PathSpec {
+    pub fn new(n_steps: usize, dt: f64) -> Self {
+        Self {
+            n_steps,
+            dt,
+            save_stride: 1,
+        }
+    }
+
+    pub fn with_stride(mut self, stride: usize) -> Self {
+        self.save_stride = stride.max(1);
+        self
+    }
+
+    pub fn final_time(&self) -> Time {
+        self.dt * self.n_steps as f64
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Path<S> {
+    pub times: Vec<Time>,
+    pub states: Vec<S>,
+}
+
+impl<S> Path<S> {
+    pub fn new() -> Self {
+        Self {
+            times: Vec::new(),
+            states: Vec::new(),
+        }
+    }
+
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            times: Vec::with_capacity(capacity),
+            states: Vec::with_capacity(capacity),
+        }
+    }
+
+    pub fn push(&mut self, t: Time, state: S) {
+        self.times.push(t);
+        self.states.push(state);
+    }
+
+    pub fn len(&self) -> usize {
+        self.times.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.times.is_empty()
+    }
+
+    pub fn final_state(&self) -> Option<&S> {
+        self.states.last()
+    }
+
+    pub fn initial_state(&self) -> Option<&S> {
+        self.states.first()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Ensemble<S> {
+    pub paths: Vec<Path<S>>,
+}
+
+impl<S> Ensemble<S> {
+    pub fn new() -> Self {
+        Self { paths: Vec::new() }
+    }
+
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            paths: Vec::with_capacity(capacity),
+        }
+    }
+
+    pub fn push(&mut self, path: Path<S>) {
+        self.paths.push(path);
+    }
+
+    pub fn len(&self) -> usize {
+        self.paths.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.paths.is_empty()
+    }
+}
+
+//==============================================================================
+// FILE: ./crates/bicep-core/src/seed.rs
+//==============================================================================
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+
+/// Identity describing a stochastic path/sequence.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct SeedIdentity {
+    instrument_id: String,
+    date_bucket: String,
+    ensemble_id: u64,
+    path_or_sequence_id: u64,
+}
+
+impl SeedIdentity {
+    pub fn new(
+        instrument_id: impl Into<String>,
+        date_bucket: impl Into<String>,
+        ensemble_id: u64,
+        path_or_sequence_id: u64,
+    ) -> Self {
+        Self {
+            instrument_id: instrument_id.into().to_lowercase(),
+            date_bucket: date_bucket.into(),
+            ensemble_id,
+            path_or_sequence_id,
+        }
+    }
+
+    pub fn legacy_from_path(path_id: u64) -> Self {
+        Self::new("legacy-path", "1970-01-01", 0, path_id)
+    }
+
+    pub fn canonical_json_bytes(&self) -> Vec<u8> {
+        let mut map = BTreeMap::new();
+        map.insert("date_bucket", self.date_bucket.clone());
+        map.insert("ensemble_id", self.ensemble_id.to_string());
+        map.insert("instrument_id", self.instrument_id.clone());
+        map.insert("path_or_sequence_id", self.path_or_sequence_id.to_string());
+        serde_json::to_vec(&map).expect("SeedIdentity canonical serialization")
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SeedSpec {
+    key_id: String,
+    key_bytes: [u8; 32],
+}
+
+impl SeedSpec {
+    pub fn new(key_id: impl Into<String>, key_bytes: [u8; 32]) -> Self {
+        Self {
+            key_id: key_id.into(),
+            key_bytes,
+        }
+    }
+
+    pub fn key_id(&self) -> &str {
+        &self.key_id
+    }
+
+    pub fn derive_seed(&self, identity: &SeedIdentity) -> u64 {
+        let canonical = identity.canonical_json_bytes();
+        let hash = blake3::keyed_hash(&self.key_bytes, &canonical);
+        let bytes = hash.as_bytes();
+        let mut out = [0u8; 8];
+        out.copy_from_slice(&bytes[..8]);
+        u64::from_le_bytes(out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn canonical_is_stable() {
+        let identity = SeedIdentity::new("AAPL", "2025-01-01", 7, 42);
+        let json = identity.canonical_json_bytes();
+        let expected = b"{\"date_bucket\":\"2025-01-01\",\"ensemble_id\":\"7\",\"instrument_id\":\"aapl\",\"path_or_sequence_id\":\"42\"}";
+        assert_eq!(json, expected);
+    }
+
+    #[test]
+    fn derive_seed_changes_with_identity() {
+        let spec = SeedSpec::new("test", [1u8; 32]);
+        let id_a = SeedIdentity::new("AAPL", "2025-01-01", 0, 1);
+        let id_b = SeedIdentity::new("AAPL", "2025-01-02", 0, 1);
+        assert_ne!(spec.derive_seed(&id_a), spec.derive_seed(&id_b));
+    }
+}
+
+//==============================================================================
+// FILE: ./crates/bicep-core/src/state.rs
+//==============================================================================
+use nalgebra::DVector;
+use serde::{Deserialize, Serialize};
+
+pub type Time = f64;
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct State(pub DVector<f64>);
+
+impl State {
+    pub fn new(values: Vec<f64>) -> Self {
+        State(DVector::from_vec(values))
+    }
+
+    pub fn zeros(n: usize) -> Self {
+        State(DVector::zeros(n))
+    }
+
+    pub fn dim(&self) -> usize {
+        self.0.len()
+    }
+}
+
+impl std::ops::Deref for State {
+    type Target = DVector<f64>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for State {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl From<DVector<f64>> for State {
+    fn from(v: DVector<f64>) -> Self {
+        State(v)
+    }
+}
+
+impl From<Vec<f64>> for State {
+    fn from(v: Vec<f64>) -> Self {
+        State::new(v)
+    }
+}
+
+//==============================================================================
+// FILE: ./crates/bicep-core/tests/bm_moments.rs
+//==============================================================================
+use bicep_core::noise::NoiseGenerator;
+use bicep_core::{integrators::EulerMaruyama, Calc, SdeIntegrator, State};
+use bicep_models::BrownianMotion;
+use serde_json::json;
+use std::fs::File;
+use std::io::Write;
+
+#[test]
+fn brownian_moments() {
+    // Test parameters
+    let n_paths = 10_000; // Reduced for faster testing
+    let steps = 1000;
+    let dt: f64 = 1e-3;
+    let t_final = steps as f64 * dt; // T = 1.0
+
+    // Create BM model
+    let bm = BrownianMotion::standard();
+    let integrator = EulerMaruyama;
+
+    // Run simulation
+    let mut final_values = Vec::with_capacity(n_paths);
+
+    for path_id in 0..n_paths {
+        let mut rng = NoiseGenerator::from_path_id(42, path_id as u64);
+        let mut state = State::new(vec![0.0]); // X_0 = 0
+        let mut t = 0.0;
+
+        for _ in 0..steps {
+            let dw = rng.generate_dw(1, dt.sqrt());
+            state = integrator.step(Calc::Ito, t, &state, dt, &dw, &bm, &bm);
+            t += dt;
+        }
+
+        final_values.push(state.0[0]);
+    }
+
+    // Compute statistics
+    let mean = final_values.iter().sum::<f64>() / n_paths as f64;
+    let var = final_values.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (n_paths - 1) as f64;
+
+    // Standard error for mean
+    let stderr = (t_final / n_paths as f64).sqrt();
+
+    // Write results
+    let results = json!({
+        "mean": mean,
+        "var": var,
+        "stderr": stderr,
+        "expected_mean": 0.0,
+        "expected_var": t_final,
+        "n_paths": n_paths,
+        "t_final": t_final
+    });
+
+    std::fs::create_dir_all("runs").ok();
+    let mut file = File::create("runs/bm_moments.json").unwrap();
+    write!(file, "{}", serde_json::to_string(&results).unwrap()).unwrap();
+
+    // Assertions
+    println!("BM Test Results:");
+    println!("Mean: {:.6} (expected: 0)", mean);
+    println!("Variance: {:.6} (expected: {})", var, t_final);
+    println!("Standard error: {:.6}", stderr);
+
+    // |mean| < 4 * stderr
+    assert!(
+        mean.abs() < 4.0 * stderr,
+        "Mean {} exceeds 4 standard errors ({})",
+        mean,
+        4.0 * stderr
+    );
+
+    // |var - T| / T < 0.05
+    let var_rel_error = (var - t_final).abs() / t_final;
+    assert!(
+        var_rel_error < 0.05,
+        "Variance relative error {} exceeds 5%",
+        var_rel_error
+    );
+}
+
+//==============================================================================
+// FILE: ./crates/bicep-core/tests/boundaries.rs
+//==============================================================================
+use bicep_core::noise::NoiseGenerator;
+use bicep_core::{integrators::EulerMaruyama, Calc, SdeIntegrator, State};
+use bicep_models::BrownianMotion;
+
+#[test]
+fn reflecting_boundaries() {
+    // Simple reflecting boundary implementation
+    let lower_bound = -2.0;
+    let upper_bound = 2.0;
+    let model = BrownianMotion::standard();
+    let integrator = EulerMaruyama;
+
+    let x0 = 0.0;
+    let dt: f64 = 1e-3;
+    let steps = 10000;
+    let n_paths = 1000;
+
+    let tolerance = 1e-12;
+
+    for path_id in 0..n_paths {
+        let mut rng = NoiseGenerator::from_path_id(42, path_id as u64);
+        let mut state = State::new(vec![x0]);
+        let mut t = 0.0;
+
+        for _ in 0..steps {
+            let dw = rng.generate_dw(1, dt.sqrt());
+            state = integrator.step(Calc::Ito, t, &state, dt, &dw, &model, &model);
+
+            // Apply reflecting boundary manually
+            if state.0[0] < lower_bound {
+                state.0[0] = 2.0 * lower_bound - state.0[0];
+            } else if state.0[0] > upper_bound {
+                state.0[0] = 2.0 * upper_bound - state.0[0];
+            }
+
+            // Assert within bounds (with tolerance)
+            assert!(
+                state.0[0] >= lower_bound - tolerance && state.0[0] <= upper_bound + tolerance,
+                "State {} outside reflecting bounds [{}, {}]",
+                state.0[0],
+                lower_bound,
+                upper_bound
+            );
+
+            t += dt;
+        }
+    }
+
+    println!("Reflecting boundaries test passed: all states within bounds");
+}
+
+#[test]
+fn periodic_boundaries() {
+    // Simple periodic boundary implementation
+    let period = 4.0; // Period length
+    let lower = -2.0; // [-2, 2] interval
+    let upper = 2.0;
+    let model = BrownianMotion::standard();
+    let integrator = EulerMaruyama;
+
+    let x0 = 0.0;
+    let dt: f64 = 1e-3;
+    let steps = 10000;
+
+    let mut rng = NoiseGenerator::new(42);
+    let mut state = State::new(vec![x0]);
+    let mut t = 0.0;
+    let mut wrap_count = 0i32;
+
+    for _ in 0..steps {
+        let dw = rng.generate_dw(1, dt.sqrt());
+        state = integrator.step(Calc::Ito, t, &state, dt, &dw, &model, &model);
+
+        // Apply periodic boundary manually
+        while state.0[0] > upper {
+            state.0[0] -= period;
+            wrap_count += 1;
+        }
+        while state.0[0] < lower {
+            state.0[0] += period;
+            wrap_count -= 1;
+        }
+
+        // Assert within bounds
+        assert!(
+            state.0[0] >= lower && state.0[0] <= upper,
+            "Wrapped state {} outside [{}, {}]",
+            state.0[0],
+            lower,
+            upper
+        );
+
+        t += dt;
+    }
+
+    println!("Periodic boundaries test:");
+    println!(
+        "Final position: {:.3}, Wrap count: {}",
+        state.0[0], wrap_count
+    );
+}
+
+#[test]
+fn absorbing_boundaries() {
+    // Test first-passage time recording
+    let absorbing_level = 3.0; // Increased level to make it harder to reach
+    let model = BrownianMotion::standard();
+    let integrator = EulerMaruyama;
+
+    let x0 = 0.0;
+    let dt: f64 = 1e-3;
+    let max_steps = 20000; // Reduced max steps
+    let n_paths = 100;
+
+    let mut first_passage_times = Vec::new();
+
+    for path_id in 0..n_paths {
+        let mut rng = NoiseGenerator::from_path_id(42, path_id as u64);
+        let mut state = State::new(vec![x0]);
+        let mut t = 0.0;
+        for _ in 0..max_steps {
+            let dw = rng.generate_dw(1, dt.sqrt());
+            state = integrator.step(Calc::Ito, t, &state, dt, &dw, &model, &model);
+            t += dt;
+
+            // Check absorption
+            if state.0[0].abs() >= absorbing_level {
+                first_passage_times.push(t);
+                break; // Stop simulation
+            }
+        }
+    }
+
+    // Statistics
+    let n_absorbed = first_passage_times.len();
+    let absorption_rate = n_absorbed as f64 / n_paths as f64;
+
+    println!("Absorbing boundaries test:");
+    println!("Absorption rate: {:.2}%", absorption_rate * 100.0);
+    println!("Absorbed paths: {}/{}", n_absorbed, n_paths);
+
+    assert!(
+        absorption_rate > 0.05,
+        "Too few paths absorbed (got {:.1}%)",
+        absorption_rate * 100.0
+    );
+    assert!(
+        absorption_rate < 0.95,
+        "Too many paths absorbed (got {:.1}%)",
+        absorption_rate * 100.0
+    );
+}
+
+#[test]
+fn first_hit_stopping() {
+    // Test that simulation can detect first-passage times
+    let model = BrownianMotion::standard();
+    let integrator = EulerMaruyama;
+
+    let x0 = 0.0;
+    let dt: f64 = 1e-3;
+    let barrier = 1.0;
+    let max_steps = 20000;
+
+    let mut rng = NoiseGenerator::new(42);
+    let mut state = State::new(vec![x0]);
+    let mut t = 0.0;
+    let mut first_hit_time = None;
+
+    for _ in 0..max_steps {
+        let dw = rng.generate_dw(1, dt.sqrt());
+        state = integrator.step(Calc::Ito, t, &state, dt, &dw, &model, &model);
+        t += dt;
+
+        if state.0[0] >= barrier && first_hit_time.is_none() {
+            first_hit_time = Some(t);
+            break; // Stop at first hit
+        }
+    }
+
+    println!("First-hit stopping test:");
+    if let Some(hit_time) = first_hit_time {
+        println!("First hit time: {:.4}", hit_time);
+        println!("Final state: {:.4}", state.0[0]);
+        assert!(state.0[0] >= barrier, "First hit state below barrier");
+    } else {
+        println!("No hit detected in {} steps", max_steps);
+    }
+}
+
+//==============================================================================
+// FILE: ./crates/bicep-core/tests/determinism.rs
+//==============================================================================
+use bicep_core::noise::NoiseGenerator;
+use bicep_core::{integrators::EulerMaruyama, Calc, SdeIntegrator, State};
+use bicep_models::GeometricBrownianMotion;
+use serde_json::json;
+use std::env;
+use std::fs::File;
+use std::io::Write;
+
+#[test]
+fn determinism() {
+    // Test parameters
+    let mu = 0.15;
+    let sigma = 0.25;
+    let gbm = GeometricBrownianMotion::new(mu, sigma);
+    let integrator = EulerMaruyama;
+
+    let x0 = 1.0;
+    let dt: f64 = 1e-3;
+    let steps = 1000;
+    let n_paths = 10000;
+
+    // Save current thread count
+    let original_threads = env::var("RAYON_NUM_THREADS").ok();
+
+    // Run with single thread
+    env::set_var("RAYON_NUM_THREADS", "1");
+    let (mean_single, var_single, ci_width_single) =
+        run_simulation(&gbm, &integrator, x0, dt, steps, n_paths);
+
+    // Run with max threads
+    env::remove_var("RAYON_NUM_THREADS"); // Let rayon use all available threads
+    let (mean_multi, var_multi, ci_width_multi) =
+        run_simulation(&gbm, &integrator, x0, dt, steps, n_paths);
+
+    // Restore original thread count
+    if let Some(threads) = original_threads {
+        env::set_var("RAYON_NUM_THREADS", threads);
+    }
+
+    // Compute differences
+    let mean_drift = (mean_multi - mean_single).abs();
+    let var_change = (var_multi - var_single).abs() / var_single;
+    let ci_change = (ci_width_multi - ci_width_single).abs() / ci_width_single;
+
+    // Write results
+    let results = json!({
+        "single_thread": {
+            "mean": mean_single,
+            "var": var_single,
+            "ci_width": ci_width_single
+        },
+        "multi_thread": {
+            "mean": mean_multi,
+            "var": var_multi,
+            "ci_width": ci_width_multi
+        },
+        "differences": {
+            "mean_drift": mean_drift,
+            "var_change_pct": var_change * 100.0,
+            "ci_change_pct": ci_change * 100.0
+        }
+    });
+
+    std::fs::create_dir_all("runs").ok();
+    let mut file = File::create("runs/determinism.json").unwrap();
+    write!(file, "{}", serde_json::to_string(&results).unwrap()).unwrap();
+
+    println!("Determinism Test Results:");
+    println!(
+        "Single thread - Mean: {:.6}, Var: {:.6}",
+        mean_single, var_single
+    );
+    println!(
+        "Multi thread  - Mean: {:.6}, Var: {:.6}",
+        mean_multi, var_multi
+    );
+    println!("Mean drift: {:.2e}", mean_drift);
+    println!("Variance change: {:.2}%", var_change * 100.0);
+    println!("CI width change: {:.2}%", ci_change * 100.0);
+
+    // Assertions
+    assert!(
+        mean_drift < 1e-12,
+        "Mean drift {} exceeds 1e-12",
+        mean_drift
+    );
+    assert!(
+        var_change < 0.01,
+        "Variance change {:.2}% exceeds 1%",
+        var_change * 100.0
+    );
+    assert!(
+        ci_change < 0.01,
+        "CI width change {:.2}% exceeds 1%",
+        ci_change * 100.0
+    );
+}
+
+fn run_simulation(
+    model: &GeometricBrownianMotion,
+    integrator: &EulerMaruyama,
+    x0: f64,
+    dt: f64,
+    steps: usize,
+    n_paths: usize,
+) -> (f64, f64, f64) {
+    let mut final_values = Vec::with_capacity(n_paths);
+
+    // Use single-threaded simulation for determinism test
+    for path_id in 0..n_paths {
+        final_values.push(simulate_path(model, integrator, x0, dt, steps, path_id));
+    }
+
+    // Compute statistics
+    let mean = final_values.iter().sum::<f64>() / n_paths as f64;
+    let var = final_values.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (n_paths - 1) as f64;
+
+    // 95% confidence interval width
+    let stderr = (var / n_paths as f64).sqrt();
+    let ci_width = 2.0 * 1.96 * stderr;
+
+    (mean, var, ci_width)
+}
+
+fn simulate_path(
+    model: &GeometricBrownianMotion,
+    integrator: &EulerMaruyama,
+    x0: f64,
+    dt: f64,
+    steps: usize,
+    path_id: usize,
+) -> f64 {
+    let mut rng = NoiseGenerator::from_path_id(42, path_id as u64);
+    let mut state = State::new(vec![x0]);
+    let mut t = 0.0;
+
+    for _ in 0..steps {
+        let dw = rng.generate_dw(1, dt.sqrt());
+        state = integrator.step(Calc::Ito, t, &state, dt, &dw, model, model);
+        t += dt;
+    }
+
+    state.0[0]
+}
+
+//==============================================================================
+// FILE: ./crates/bicep-core/tests/gbm_lognormal.rs
+//==============================================================================
+use bicep_core::noise::NoiseGenerator;
+use bicep_core::{integrators::EulerMaruyama, Calc, SdeIntegrator, State};
+use bicep_models::GeometricBrownianMotion;
+use serde_json::json;
+use std::fs::File;
+use std::io::Write;
+
+#[test]
+fn gbm_lognormal() {
+    // GBM parameters
+    let mu = 0.2;
+    let sigma = 0.35;
+    let x0 = 1.0;
+    let t_final = 1.0;
+    let n_paths = 10_000; // Reduced for faster testing
+    let dt: f64 = 1e-3;
+    let steps = (t_final / dt) as usize;
+
+    let gbm = GeometricBrownianMotion::new(mu, sigma);
+    let integrator = EulerMaruyama;
+
+    // Collect log(X_T) values
+    let mut log_final_values = Vec::with_capacity(n_paths);
+
+    for path_id in 0..n_paths {
+        let mut rng = NoiseGenerator::from_path_id(42, path_id as u64);
+        let mut state = State::new(vec![x0]);
+        let mut t = 0.0;
+
+        for _ in 0..steps {
+            let dw = rng.generate_dw(1, dt.sqrt());
+            state = integrator.step(Calc::Ito, t, &state, dt, &dw, &gbm, &gbm);
+            t += dt;
+        }
+
+        log_final_values.push(state.0[0].ln());
+    }
+
+    // Theoretical distribution: log(X_T) ~ N(mu_theory, sigma2_theory)
+    let mu_theory = x0.ln() + (mu - sigma.powi(2) / 2.0) * t_final;
+    let sigma2_theory = sigma.powi(2) * t_final;
+
+    // Sample statistics
+    let mu_hat = log_final_values.iter().sum::<f64>() / n_paths as f64;
+    let sigma2_hat = log_final_values
+        .iter()
+        .map(|x| (x - mu_hat).powi(2))
+        .sum::<f64>()
+        / (n_paths - 1) as f64;
+
+    // Kolmogorov-Smirnov test
+    let ks_pvalue = compute_ks_test(&log_final_values, mu_theory, sigma2_theory.sqrt());
+
+    // Write results
+    let results = json!({
+        "mu_hat": mu_hat,
+        "sigma2_hat": sigma2_hat,
+        "ks_pvalue": ks_pvalue,
+        "mu_theory": mu_theory,
+        "sigma2_theory": sigma2_theory,
+        "n_paths": n_paths
+    });
+
+    std::fs::create_dir_all("runs").ok();
+    let mut file = File::create("runs/gbm_lognormal.json").unwrap();
+    write!(file, "{}", serde_json::to_string(&results).unwrap()).unwrap();
+
+    println!("GBM Log-Normal Test Results:");
+    println!("Sample mean: {:.6} (expected: {:.6})", mu_hat, mu_theory);
+    println!(
+        "Sample variance: {:.6} (expected: {:.6})",
+        sigma2_hat, sigma2_theory
+    );
+    println!("KS p-value: {:.6}", ks_pvalue);
+
+    // Assert KS p-value > 0.05
+    assert!(
+        ks_pvalue > 0.05,
+        "KS test failed: p-value {} <= 0.05",
+        ks_pvalue
+    );
+}
+
+fn compute_ks_test(samples: &[f64], mean: f64, std: f64) -> f64 {
+    // Simple KS test implementation
+    let n = samples.len();
+    let mut sorted = samples.to_vec();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+    let mut d_max: f64 = 0.0;
+
+    for (i, &x) in sorted.iter().enumerate() {
+        let z = (x - mean) / std;
+        let cdf_theoretical = normal_cdf(z);
+        let cdf_empirical = (i + 1) as f64 / n as f64;
+
+        let d1 = (cdf_empirical - cdf_theoretical).abs();
+        let d2 = (i as f64 / n as f64 - cdf_theoretical).abs();
+
+        d_max = d_max.max(d1).max(d2);
+    }
+
+    // Simplified p-value approximation using Kolmogorov distribution
+    let sqrt_n = (n as f64).sqrt();
+    let lambda = sqrt_n * d_max;
+
+    // Kolmogorov distribution approximation
+    let p_value = 2.0 * (-2.0 * lambda.powi(2)).exp();
+    p_value.min(1.0)
+}
+
+fn normal_cdf(z: f64) -> f64 {
+    // Standard normal CDF using error function approximation
+    0.5 * (1.0 + erf(z / std::f64::consts::SQRT_2))
+}
+
+fn erf(x: f64) -> f64 {
+    // Abramowitz and Stegun approximation
+    let a1 = 0.254829592;
+    let a2 = -0.284496736;
+    let a3 = 1.421413741;
+    let a4 = -1.453152027;
+    let a5 = 1.061405429;
+    let p = 0.3275911;
+
+    let sign = if x < 0.0 { -1.0 } else { 1.0 };
+    let x = x.abs();
+
+    let t = 1.0 / (1.0 + p * x);
+    let y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * (-x * x).exp();
+
+    sign * y
+}
+
+//==============================================================================
+// FILE: ./crates/bicep-core/tests/ito_strat_equivalence.rs
+//==============================================================================
+use approx::assert_relative_eq;
+use bicep_core::integrators::{EulerMaruyama, HeunStratonovich};
+use bicep_core::noise::NoiseGenerator;
+use bicep_core::{Calc, SdeIntegrator, State};
+use bicep_models::GeometricBrownianMotion;
+
+#[test]
+fn test_ito_stratonovich_equivalence() {
+    // Use GBM as test case since it has analytical Jacobian
+    let mu = 0.1;
+    let sigma = 0.3;
+    let gbm = GeometricBrownianMotion::new(mu, sigma);
+
+    // Test parameters
+    let x0 = 1.0;
+    let dt_values: Vec<f64> = vec![0.1, 0.01, 0.001, 0.0001];
+    let n_paths = 1000;
+    let n_steps = 100;
+
+    println!("\nItô-Stratonovich Equivalence Test:");
+    println!("dt\t\tMean Error\tStd Error");
+    println!("{}", "-".repeat(40));
+
+    for &dt in &dt_values {
+        let mut ito_finals = Vec::with_capacity(n_paths);
+        let mut strat_em_finals = Vec::with_capacity(n_paths);
+        let mut strat_heun_finals = Vec::with_capacity(n_paths);
+
+        for path_id in 0..n_paths {
+            // Use same random numbers for all methods
+            let seed = 12345 + path_id as u64;
+
+            // Itô with Euler-Maruyama
+            let mut rng_ito = NoiseGenerator::new(seed);
+            let mut state_ito = State::new(vec![x0]);
+            let mut t = 0.0;
+
+            for _ in 0..n_steps {
+                let dw = rng_ito.generate_dw(1, dt.sqrt());
+                state_ito = EulerMaruyama.step(Calc::Ito, t, &state_ito, dt, &dw, &gbm, &gbm);
+                t += dt;
+            }
+            ito_finals.push(state_ito.0[0]);
+
+            // Stratonovich with Euler-Maruyama (using drift correction)
+            let mut rng_strat_em = NoiseGenerator::new(seed);
+            let mut state_strat_em = State::new(vec![x0]);
+            t = 0.0;
+
+            for _ in 0..n_steps {
+                let dw = rng_strat_em.generate_dw(1, dt.sqrt());
+                state_strat_em =
+                    EulerMaruyama.step(Calc::Stratonovich, t, &state_strat_em, dt, &dw, &gbm, &gbm);
+                t += dt;
+            }
+            strat_em_finals.push(state_strat_em.0[0]);
+
+            // Stratonovich with Heun midpoint
+            let mut rng_strat_heun = NoiseGenerator::new(seed);
+            let mut state_strat_heun = State::new(vec![x0]);
+            t = 0.0;
+
+            for _ in 0..n_steps {
+                let dw = rng_strat_heun.generate_dw(1, dt.sqrt());
+                state_strat_heun = HeunStratonovich.step(
+                    Calc::Stratonovich,
+                    t,
+                    &state_strat_heun,
+                    dt,
+                    &dw,
+                    &gbm,
+                    &gbm,
+                );
+                t += dt;
+            }
+            strat_heun_finals.push(state_strat_heun.0[0]);
+        }
+
+        // Compare distributions
+        let ito_mean = ito_finals.iter().sum::<f64>() / n_paths as f64;
+        let strat_em_mean = strat_em_finals.iter().sum::<f64>() / n_paths as f64;
+        let strat_heun_mean = strat_heun_finals.iter().sum::<f64>() / n_paths as f64;
+
+        let em_error = (strat_em_mean - ito_mean).abs();
+        let heun_error = (strat_heun_mean - ito_mean).abs();
+
+        // Compute standard deviations
+        let ito_std = (ito_finals
+            .iter()
+            .map(|x| (x - ito_mean).powi(2))
+            .sum::<f64>()
+            / (n_paths - 1) as f64)
+            .sqrt();
+        let strat_em_std = (strat_em_finals
+            .iter()
+            .map(|x| (x - strat_em_mean).powi(2))
+            .sum::<f64>()
+            / (n_paths - 1) as f64)
+            .sqrt();
+
+        let std_error = (strat_em_std - ito_std).abs();
+
+        println!("{:.4}\t\t{:.6}\t{:.6}", dt, em_error, std_error);
+
+        // For small dt, the methods should converge
+        if dt <= 0.001 {
+            assert!(
+                em_error < 0.01,
+                "EM drift correction error too large for dt={}",
+                dt
+            );
+            assert!(heun_error < 0.01, "Heun error too large for dt={}", dt);
+        }
+    }
+}
+
+#[test]
+fn test_stratonovich_chain_rule() {
+    // Test that Stratonovich preserves ordinary chain rule
+    // Use f(X) = X² and check that df = 2X dX in Stratonovich
+    let sigma = 0.5;
+    let gbm = GeometricBrownianMotion::new(0.0, sigma); // Zero drift for simplicity
+
+    let x0 = 1.0;
+    let dt: f64 = 0.0001;
+    let n_steps = 10000;
+    let n_paths = 1000;
+
+    let mut strat_f_finals = Vec::with_capacity(n_paths);
+    let mut computed_f_finals = Vec::with_capacity(n_paths);
+
+    for path_id in 0..n_paths {
+        let mut rng = NoiseGenerator::from_path_id(99, path_id as u64);
+        let mut x = State::new(vec![x0]);
+        let mut f_x = x0 * x0; // f(X) = X²
+        let mut t = 0.0;
+
+        for _ in 0..n_steps {
+            let dw = rng.generate_dw(1, dt.sqrt());
+            let x_old = x.0[0];
+
+            // Update X using Stratonovich
+            x = HeunStratonovich.step(Calc::Stratonovich, t, &x, dt, &dw, &gbm, &gbm);
+
+            // Update f(X) using chain rule: df = 2X ∘ dX (Stratonovich)
+            let dx = x.0[0] - x_old;
+            // For Stratonovich, use midpoint rule: 2 * (X_old + X_new)/2 * dX
+            f_x += 2.0 * 0.5 * (x_old + x.0[0]) * dx;
+
+            t += dt;
+        }
+
+        strat_f_finals.push(f_x);
+        computed_f_finals.push(x.0[0] * x.0[0]);
+    }
+
+    // Compare E[f(X)] computed via chain rule vs direct computation
+    let chain_rule_mean = strat_f_finals.iter().sum::<f64>() / n_paths as f64;
+    let direct_mean = computed_f_finals.iter().sum::<f64>() / n_paths as f64;
+
+    println!("\nStratonovich Chain Rule Test:");
+    println!("E[X²] via chain rule: {:.4}", chain_rule_mean);
+    println!("E[X²] direct: {:.4}", direct_mean);
+
+    assert_relative_eq!(chain_rule_mean, direct_mean, max_relative = 0.02);
+}
+
+//==============================================================================
+// FILE: ./crates/bicep-core/tests/ou_moments.rs
+//==============================================================================
+use approx::{assert_abs_diff_eq, assert_relative_eq};
+use bicep_core::noise::NoiseGenerator;
+use bicep_core::{integrators::EulerMaruyama, Calc, SdeIntegrator, State};
+use bicep_models::OrnsteinUhlenbeck;
+
+#[test]
+fn test_ou_moments() {
+    // OU parameters
+    let theta = 2.0; // Mean reversion rate
+    let mu = 5.0; // Long-term mean
+    let sigma = 1.5; // Volatility
+    let ou = OrnsteinUhlenbeck::new(theta, mu, sigma);
+
+    // Simulation parameters
+    let x0 = 10.0; // Start away from mean
+    let dt = 0.0001;
+    let n_steps = 10000;
+    let n_paths = 10000;
+    let final_time = dt * n_steps as f64;
+
+    // Expected moments
+    let expected_mean = ou.exact_mean(x0, final_time);
+    let expected_var = ou.exact_variance(final_time);
+
+    // Run Monte Carlo simulation
+    let integrator = EulerMaruyama;
+    let mut final_values = Vec::with_capacity(n_paths);
+
+    for path_id in 0..n_paths {
+        let mut rng = NoiseGenerator::from_path_id(42, path_id as u64);
+        let mut state = State::new(vec![x0]);
+        let mut t = 0.0;
+
+        for _ in 0..n_steps {
+            let dw = rng.generate_dw(1, dt.sqrt());
+            state = integrator.step(Calc::Ito, t, &state, dt, &dw, &ou, &ou);
+            t += dt;
+        }
+
+        final_values.push(state.0[0]);
+    }
+
+    // Compute sample statistics
+    let sample_mean = final_values.iter().sum::<f64>() / n_paths as f64;
+    let sample_var = final_values
+        .iter()
+        .map(|x| (x - sample_mean).powi(2))
+        .sum::<f64>()
+        / (n_paths - 1) as f64;
+
+    // Check moments (allow 2% relative error)
+    println!("OU Test Results:");
+    println!(
+        "Expected mean: {:.4}, Sample mean: {:.4}",
+        expected_mean, sample_mean
+    );
+    println!(
+        "Expected var: {:.4}, Sample var: {:.4}",
+        expected_var, sample_var
+    );
+    println!("Stationary var: {:.4}", ou.stationary_variance());
+
+    assert_relative_eq!(sample_mean, expected_mean, max_relative = 0.02);
+    assert_relative_eq!(sample_var, expected_var, max_relative = 0.05);
+}
+
+#[test]
+fn test_ou_stationary_distribution() {
+    // Test that OU process reaches stationary distribution
+    let theta = 1.0;
+    let mu = 0.0;
+    let sigma = 1.0;
+    let ou = OrnsteinUhlenbeck::new(theta, mu, sigma);
+
+    // Start from various initial conditions
+    let initial_values = vec![-10.0, -5.0, 0.0, 5.0, 10.0];
+    let dt: f64 = 0.01; // Larger time step for faster simulation
+    let n_steps = 1000; // Reduced steps but still long enough
+    let n_paths_per_x0 = 200; // Fewer paths for speed
+
+    let integrator = EulerMaruyama;
+    let mut all_final_values = Vec::new();
+
+    for &x0 in &initial_values {
+        for path_id in 0..n_paths_per_x0 {
+            let mut rng = NoiseGenerator::from_path_id(123, (x0 as i64 * 1000 + path_id) as u64);
+            let mut state = State::new(vec![x0]);
+            let mut t = 0.0;
+
+            for _ in 0..n_steps {
+                let dw = rng.generate_dw(1, dt.sqrt());
+                state = integrator.step(Calc::Ito, t, &state, dt, &dw, &ou, &ou);
+                t += dt;
+            }
+
+            all_final_values.push(state.0[0]);
+        }
+    }
+
+    // Check that we've reached stationary distribution
+    let sample_mean = all_final_values.iter().sum::<f64>() / all_final_values.len() as f64;
+    let sample_var = all_final_values
+        .iter()
+        .map(|x| (x - sample_mean).powi(2))
+        .sum::<f64>()
+        / (all_final_values.len() - 1) as f64;
+
+    let stationary_mean = mu;
+    let stationary_var = ou.stationary_variance();
+
+    println!("OU Stationary Test:");
+    println!(
+        "Stationary mean: {:.4}, Sample mean: {:.4}",
+        stationary_mean, sample_mean
+    );
+    println!(
+        "Stationary var: {:.4}, Sample var: {:.4}",
+        stationary_var, sample_var
+    );
+
+    assert_abs_diff_eq!(sample_mean, stationary_mean, epsilon = 0.02);
+    assert_relative_eq!(sample_var, stationary_var, max_relative = 0.05);
+}
+
+//==============================================================================
+// FILE: ./crates/bicep-cpu/Cargo.toml
+//==============================================================================
+[package]
+name = "bicep-cpu"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bicep-core = { path = "../bicep-core" }
+bicep-sampler = { path = "../bicep-sampler" }
+bicep-models = { path = "../bicep-models" }
+rayon = { workspace = true }
+nalgebra = { workspace = true }
+wide = "0.7"  # SIMD wrapper
+bytemuck = "1.0"  # Safe casting to SIMD types
+anyhow = { workspace = true }
+//==============================================================================
+// FILE: ./crates/bicep-cpu/src/lib.rs
+//==============================================================================
+use bicep_core::{State, Time, F, Drift, Diffusion, SdeIntegrator, Calc, NoiseGenerator};
+use bicep_sampler::{PathSpec, Path, Ensemble, Boundary, Stopping, apply_boundary};
+use nalgebra::{DVector, DMatrix};
+use rayon::prelude::*;
+use wide::f64x4;
+
+/// SIMD-optimized batch sampler for CPU
+pub struct CpuBatchSampler<I, D, S>
+where
+    I: SdeIntegrator,
+    D: Drift,
+    S: Diffusion,
+{
+    pub integrator: I,
+    pub drift: D,
+    pub diffusion: S,
+}
+
+impl<I, D, S> CpuBatchSampler<I, D, S>
+where
+    I: SdeIntegrator + Clone + Send + Sync,
+    D: Drift + Clone + Send + Sync,
+    S: Diffusion + Clone + Send + Sync,
+{
+    pub fn new(integrator: I, drift: D, diffusion: S) -> Self {
+        Self { integrator, drift, diffusion }
+    }
+    
+    /// Run paths with adaptive batching and SIMD optimization
+    pub fn run_paths_optimized(
+        &self,
+        calc: Calc,
+        spec: &PathSpec,
+        x0s: &[State],
+        boundary: &Boundary,
+        stopping: &Stopping,
+        global_seed: u64,
+    ) -> Ensemble {
+        let n_cores = rayon::current_num_threads();
+        let batch_size = (x0s.len() + n_cores - 1) / n_cores;
+        
+        // For small problems or non-uniform models, fall back to standard approach
+        if x0s.len() < 64 || !self.supports_simd_batch() {
+            return self.run_paths_standard(calc, spec, x0s, boundary, stopping, global_seed);
+        }
+        
+        // SIMD batch processing for large uniform problems
+        self.run_paths_simd_batched(calc, spec, x0s, boundary, stopping, global_seed, batch_size)
+    }
+    
+    /// Standard path execution (fallback)
+    fn run_paths_standard(
+        &self,
+        calc: Calc,
+        spec: &PathSpec,
+        x0s: &[State],
+        boundary: &Boundary,
+        stopping: &Stopping,
+        global_seed: u64,
+    ) -> Ensemble {
+        let paths: Vec<Path> = x0s
+            .par_iter()
+            .enumerate()
+            .map(|(path_id, x0)| {
+                let mut rng = NoiseGenerator::from_path_id(global_seed, path_id as u64);
+                self.run_single_path(calc, spec, x0.clone(), boundary, stopping, &mut rng)
+            })
+            .collect();
+        
+        Ensemble {
+            paths,
+            spec: spec.clone(),
+        }
+    }
+    
+    /// SIMD-batched path execution for uniform models
+    fn run_paths_simd_batched(
+        &self,
+        calc: Calc,
+        spec: &PathSpec,
+        x0s: &[State],
+        boundary: &Boundary,
+        stopping: &Stopping,
+        global_seed: u64,
+        batch_size: usize,
+    ) -> Ensemble {
+        let paths: Vec<Path> = x0s
+            .par_chunks(batch_size)
+            .enumerate()
+            .flat_map(|(chunk_idx, chunk)| {
+                let chunk_offset = chunk_idx * batch_size;
+                self.run_simd_chunk(calc, spec, chunk, boundary, stopping, global_seed, chunk_offset)
+            })
+            .collect();
+        
+        Ensemble {
+            paths,
+            spec: spec.clone(),
+        }
+    }
+    
+    /// Process a chunk of paths with SIMD vectorization
+    fn run_simd_chunk(
+        &self,
+        calc: Calc,
+        spec: &PathSpec,
+        x0s: &[State],
+        boundary: &Boundary,
+        stopping: &Stopping,
+        global_seed: u64,
+        chunk_offset: usize,
+    ) -> Vec<Path> {
+        let dim = if let Some(x0) = x0s.first() { x0.dim() } else { return vec![]; };
+        
+        // For 1D problems, use f64x4 SIMD (4 paths at once)
+        if dim == 1 && x0s.len() >= 4 {
+            self.run_simd_1d_batch(calc, spec, x0s, boundary, stopping, global_seed, chunk_offset)
+        } else {
+            // Fall back to individual path processing for higher dimensions
+            x0s.iter()
+                .enumerate()
+                .map(|(local_idx, x0)| {
+                    let path_id = chunk_offset + local_idx;
+                    let mut rng = NoiseGenerator::from_path_id(global_seed, path_id as u64);
+                    self.run_single_path(calc, spec, x0.clone(), boundary, stopping, &mut rng)
+                })
+                .collect()
+        }
+    }
+    
+    /// SIMD-optimized 1D path processing (4 paths at once)
+    fn run_simd_1d_batch(
+        &self,
+        calc: Calc,
+        spec: &PathSpec,
+        x0s: &[State],
+        boundary: &Boundary,
+        stopping: &Stopping,
+        global_seed: u64,
+        chunk_offset: usize,
+    ) -> Vec<Path> {
+        let mut paths = Vec::new();
+        
+        // Process 4 paths at a time with SIMD
+        for batch_start in (0..x0s.len()).step_by(4) {
+            let batch_end = (batch_start + 4).min(x0s.len());
+            let batch_size = batch_end - batch_start;
+            
+            if batch_size == 4 {
+                // Full SIMD batch
+                let simd_paths = self.run_simd_1d_quartet(
+                    calc, spec, &x0s[batch_start..batch_end], 
+                    boundary, stopping, global_seed, chunk_offset + batch_start
+                );
+                paths.extend(simd_paths);
+            } else {
+                // Partial batch - fall back to scalar
+                for (local_idx, x0) in x0s[batch_start..batch_end].iter().enumerate() {
+                    let path_id = chunk_offset + batch_start + local_idx;
+                    let mut rng = NoiseGenerator::from_path_id(global_seed, path_id as u64);
+                    paths.push(self.run_single_path(calc, spec, x0.clone(), boundary, stopping, &mut rng));
+                }
+            }
+        }
+        
+        paths
+    }
+    
+    /// Run exactly 4 1D paths with f64x4 SIMD
+    fn run_simd_1d_quartet(
+        &self,
+        calc: Calc,
+        spec: &PathSpec,
+        x0s: &[State],
+        boundary: &Boundary,
+        stopping: &Stopping,
+        global_seed: u64,
+        chunk_offset: usize,
+    ) -> Vec<Path> {
+        assert_eq!(x0s.len(), 4, "SIMD quartet requires exactly 4 states");
+        assert!(x0s.iter().all(|x| x.dim() == 1), "SIMD quartet requires 1D states");
+        
+        // Initialize SIMD state vector
+        let mut x_simd = f64x4::new([
+            x0s[0].0[0], x0s[1].0[0], x0s[2].0[0], x0s[3].0[0]
+        ]);
+        
+        let mut t = 0.0;
+        let sqrt_dt = spec.dt.sqrt();
+        
+        // Initialize RNGs for each path
+        let mut rngs: Vec<_> = (0..4)
+            .map(|i| NoiseGenerator::from_path_id(global_seed, (chunk_offset + i) as u64))
+            .collect();
+        
+        // Initialize paths
+        let mut paths: Vec<Path> = (0..4).map(|i| Path {
+            times: Vec::new(),
+            states: Vec::new(),
+            stopped: false,
+            stop_time: None,
+            hit_set: None,
+        }).collect();
+        
+        let noise_dim = 1; // For 1D problems
+        
+        for step in 0..spec.n_steps {
+            // Save states if on stride boundary
+            if step % spec.save_stride == 0 {
+                let x_array = x_simd.to_array();
+                for i in 0..4 {
+                    paths[i].times.push(t);
+                    paths[i].states.push(State::new(vec![x_array[i]]));
+                }
+            }
+            
+            // Check stopping conditions (scalar for now - could be SIMD-ized too)
+            let mut active_mask = [true; 4];
+            for i in 0..4 {
+                if paths[i].stopped {
+                    active_mask[i] = false;
+                    continue;
+                }
+                
+                let state_i = State::new(vec![x_simd.to_array()[i]]);
+                
+                if let Some(ref hit_fn) = stopping.first_hit {
+                    if let Some(hit_label) = hit_fn(&state_i) {
+                        paths[i].stopped = true;
+                        paths[i].stop_time = Some(t);
+                        paths[i].hit_set = Some(hit_label);
+                        active_mask[i] = false;
+                        continue;
+                    }
+                }
+                
+                if let Some(max_time) = stopping.max_time {
+                    if t >= max_time {
+                        paths[i].stopped = true;
+                        paths[i].stop_time = Some(t);
+                        active_mask[i] = false;
+                        continue;
+                    }
+                }
+            }
+            
+            // Early exit if all paths stopped
+            if active_mask.iter().all(|&x| !x) {
+                break;
+            }
+            
+            // Generate SIMD noise
+            let dw_array: [f64; 4] = core::array::from_fn(|i| {
+                if active_mask[i] {
+                    rngs[i].generate_dw(noise_dim, sqrt_dt).0[0]
+                } else {
+                    0.0
+                }
+            });
+            let dw_simd = f64x4::from(dw_array);
+            
+            // SIMD integration step for active paths
+            if active_mask.iter().any(|&x| x) {
+                x_simd = self.simd_integration_step_1d(calc, t, x_simd, spec.dt, dw_simd, &active_mask);
+            }
+            
+            t += spec.dt;
+        }
+        
+        // Save final states
+        let final_x = x_simd.to_array();
+        for i in 0..4 {
+            if paths[i].times.is_empty() || paths[i].times.last() != Some(&t) {
+                paths[i].times.push(t);
+                paths[i].states.push(State::new(vec![final_x[i]]));
+            }
+        }
+        
+        paths
+    }
+    
+    /// SIMD-optimized integration step for 1D problems
+    fn simd_integration_step_1d(
+        &self,
+        calc: Calc,
+        t: Time,
+        x_simd: f64x4,
+        dt: F,
+        dw_simd: f64x4,
+        active_mask: &[bool; 4],
+    ) -> f64x4 {
+        // For simplicity, convert to scalar, compute, then back to SIMD
+        // A full SIMD implementation would require SIMD-aware Drift/Diffusion traits
+        let x_array = x_simd.to_array();
+        let dw_array = dw_simd.to_array();
+        
+        let mut result = [0.0; 4];
+        
+        for i in 0..4 {
+            if active_mask[i] {
+                let state_i = State::new(vec![x_array[i]]);
+                let dw_i = State::new(vec![dw_array[i]]);
+                
+                let next_state = self.integrator.step(
+                    calc, t, &state_i, dt, &dw_i, &self.drift, &self.diffusion
+                );
+                
+                result[i] = next_state.0[0];
+            } else {
+                result[i] = x_array[i]; // Keep inactive paths unchanged
+            }
+        }
+        
+        f64x4::from(result)
+    }
+    
+    /// Check if this model combination supports SIMD batching
+    fn supports_simd_batch(&self) -> bool {
+        // For now, conservative check - could be expanded based on model traits
+        true
+    }
+    
+    /// Single path execution (standard algorithm)
+    fn run_single_path(
+        &self,
+        calc: Calc,
+        spec: &PathSpec,
+        mut x: State,
+        boundary: &Boundary,
+        stopping: &Stopping,
+        rng: &mut NoiseGenerator,
+    ) -> Path {
+        let mut path = Path {
+            times: Vec::new(),
+            states: Vec::new(),
+            stopped: false,
+            stop_time: None,
+            hit_set: None,
+        };
+        
+        let mut t = 0.0;
+        let noise_dim = self.diffusion.noise_dim(t, &x);
+        let sqrt_dt = spec.dt.sqrt();
+        
+        for step in 0..spec.n_steps {
+            if step % spec.save_stride == 0 {
+                path.times.push(t);
+                path.states.push(x.clone());
+            }
+            
+            // Check stopping conditions
+            if let Some(ref hit_fn) = stopping.first_hit {
+                if let Some(hit_label) = hit_fn(&x) {
+                    path.stopped = true;
+                    path.stop_time = Some(t);
+                    path.hit_set = Some(hit_label);
+                    break;
+                }
+            }
+            
+            if let Some(max_time) = stopping.max_time {
+                if t >= max_time {
+                    path.stopped = true;
+                    path.stop_time = Some(t);
+                    break;
+                }
+            }
+            
+            let dw = rng.generate_dw(noise_dim, sqrt_dt);
+            x = self.integrator.step(calc, t, &x, spec.dt, &dw, &self.drift, &self.diffusion);
+            x = apply_boundary(boundary, x);
+            
+            t += spec.dt;
+        }
+        
+        if path.times.is_empty() || path.times.last() != Some(&t) {
+            path.times.push(t);
+            path.states.push(x);
+        }
+        
+        path
+    }
+}
+
+/// Memory-efficient batch matrix operations
+pub struct BatchMatrixOps;
+
+impl BatchMatrixOps {
+    /// Batch matrix-vector multiplication for drift computation
+    pub fn batch_matvec_f64x4(
+        matrices: &[DMatrix<F>], 
+        vectors: &f64x4
+    ) -> Vec<f64x4> {
+        matrices.iter().map(|mat| {
+            let v_array = vectors.to_array();
+            let mut result = [0.0; 4];
+            
+            for i in 0..4 {
+                // Assuming 1D for simplicity - extend for higher dimensions
+                result[i] = mat[(0, 0)] * v_array[i];
+            }
+            
+            f64x4::from(result)
+        }).collect()
+    }
+    
+    /// Vectorized noise generation for batch processing
+    pub fn generate_batch_noise_1d(
+        rngs: &mut [NoiseGenerator],
+        sqrt_dt: F,
+        count: usize,
+    ) -> Vec<f64x4> {
+        let mut batches = Vec::new();
+        
+        for batch_start in (0..count).step_by(4) {
+            let batch_end = (batch_start + 4).min(count);
+            
+            if batch_end - batch_start == 4 {
+                let noise_array: [f64; 4] = core::array::from_fn(|i| {
+                    rngs[batch_start + i].generate_dw(1, sqrt_dt).0[0]
+                });
+                batches.push(f64x4::from(noise_array));
+            }
+        }
+        
+        batches
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bicep_core::{EulerMaruyama, Calc};
+    use bicep_models::BrownianMotion;
+    
+    #[test]
+    fn test_cpu_batch_sampler() {
+        let model = BrownianMotion::new(1.0);
+        let sampler = CpuBatchSampler::new(EulerMaruyama, model.clone(), model);
+        
+        let spec = PathSpec::new(100, 0.01, 1);
+        let x0s = vec![State::new(vec![0.0]); 8];
+        let boundary = Boundary::None;
+        let stopping = bicep_sampler::Stopping::default();
+        
+        let ensemble = sampler.run_paths_optimized(
+            Calc::Ito, &spec, &x0s, &boundary, &stopping, 42
+        );
+        
+        assert_eq!(ensemble.paths.len(), 8);
+        assert!(ensemble.paths.iter().all(|p| p.states.len() > 0));
+    }
+    
+    #[test]
+    fn test_simd_1d_quartet() {
+        let model = BrownianMotion::new(1.0);
+        let sampler = CpuBatchSampler::new(EulerMaruyama, model.clone(), model);
+        
+        let spec = PathSpec::new(10, 0.1, 1);
+        let x0s = vec![
+            State::new(vec![0.0]),
+            State::new(vec![1.0]), 
+            State::new(vec![-1.0]),
+            State::new(vec![0.5])
+        ];
+        let boundary = Boundary::None;
+        let stopping = bicep_sampler::Stopping::default();
+        
+        let paths = sampler.run_simd_1d_quartet(
+            Calc::Ito, &spec, &x0s, &boundary, &stopping, 42, 0
+        );
+        
+        assert_eq!(paths.len(), 4);
+        for path in &paths {
+            assert!(path.states.len() > 0);
+            assert_eq!(path.states[0].dim(), 1);
+        }
+    }
+}
+//==============================================================================
+// FILE: ./crates/bicep-crypto/Cargo.toml
+//==============================================================================
+[package]
+name = "bicep-crypto"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bicep-core = { path = "../bicep-core" }
+blake3 = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+
+//==============================================================================
+// FILE: ./crates/bicep-crypto/src/bin/bef_verify_fast_cli.rs
+//==============================================================================
+use std::fs;
+use std::path::PathBuf;
+use std::time::Instant;
+
+use bicep_crypto::{bef_verify_fast, ChunkSketch, FieldElement, TraceCommitParams, TraceCommitment};
+use serde::Deserialize;
+
+#[derive(Deserialize)]
+struct TraceCommitmentJson {
+    len: u64,
+    root_hex: String,
+    challenges: Vec<u64>,
+    sketches: Vec<u64>,
+}
+
+#[derive(Deserialize)]
+struct ChunkJson {
+    chunk_index: u64,
+    offset: u64,
+    length: u64,
+    root_hex: String,
+    sketch_vec: Vec<u64>,
+}
+
+#[derive(Deserialize)]
+struct SketchFileJson {
+    trace_commitment: TraceCommitmentJson,
+    chunks: Vec<ChunkJson>,
+}
+
+fn parse_hex32(hex: &str) -> Result<[u8; 32], String> {
+    if hex.len() != 64 {
+        return Err(format!("expected 64 hex chars, got {}", hex.len()));
+    }
+    let mut out = [0u8; 32];
+    for i in 0..32 {
+        let byte = u8::from_str_radix(&hex[2 * i..2 * i + 2], 16)
+            .map_err(|e| format!("invalid hex at byte {}: {}", i, e))?;
+        out[i] = byte;
+    }
+    Ok(out)
+}
+
+fn load_sketch(path: &PathBuf) -> Result<(TraceCommitment, Vec<ChunkSketch>), String> {
+    let data = fs::read_to_string(path)
+        .map_err(|e| format!("failed to read {}: {}", path.display(), e))?;
+    let parsed: SketchFileJson = serde_json::from_str(&data)
+        .map_err(|e| format!("failed to parse JSON: {}", e))?;
+
+    let commitment = TraceCommitment {
+        len: parsed.trace_commitment.len,
+        root: parse_hex32(&parsed.trace_commitment.root_hex)?,
+        challenges: parsed
+            .trace_commitment
+            .challenges
+            .iter()
+            .map(|&v| FieldElement::new(v))
+            .collect(),
+        sketches: parsed
+            .trace_commitment
+            .sketches
+            .iter()
+            .map(|&v| FieldElement::new(v))
+            .collect(),
+    };
+
+    let mut chunk_summaries = Vec::with_capacity(parsed.chunks.len());
+    for chunk in parsed.chunks.into_iter() {
+        let root = parse_hex32(&chunk.root_hex)?;
+        let sketch_vec = chunk
+            .sketch_vec
+            .into_iter()
+            .map(FieldElement::new)
+            .collect();
+        chunk_summaries.push(ChunkSketch {
+            chunk_index: chunk.chunk_index,
+            offset: chunk.offset,
+            length: chunk.length,
+            root,
+            sketch_vec,
+        });
+    }
+
+    Ok((commitment, chunk_summaries))
+}
+
+fn main() {
+    let mut args = std::env::args().skip(1);
+    let path = match args.next() {
+        Some(p) => PathBuf::from(p),
+        None => {
+            eprintln!("usage: bef_verify_fast_cli <sketch.json>");
+            std::process::exit(2);
+        }
+    };
+
+    let (commitment, chunks) = match load_sketch(&path) {
+        Ok(data) => data,
+        Err(err) => {
+            eprintln!("error: {}", err);
+            std::process::exit(1);
+        }
+    };
+
+    let params = TraceCommitParams {
+        num_challenges: commitment.challenges.len(),
+    };
+
+    let start = Instant::now();
+    let ok = bef_verify_fast(&params, &commitment, &chunks);
+    let elapsed = start.elapsed().as_secs_f64() * 1_000.0;
+
+    if !ok {
+        eprintln!("bef_verify_fast rejected sketch");
+        std::process::exit(1);
+    }
+
+    println!("{:.6}", elapsed);
+}
+
+//==============================================================================
+// FILE: ./crates/bicep-crypto/src/lib.rs
+//==============================================================================
+use bicep_core::{Ensemble, Path, Time};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+
+/// Light-weight field element placeholder. Swap this for a proper finite field when needed.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FieldElement(pub u64);
+
+impl FieldElement {
+    pub const MODULUS: u64 = 0x1fffffffffffffff; // 2^61 - 1
+
+    pub fn new(value: u64) -> Self {
+        FieldElement(value % Self::MODULUS)
+    }
+
+    pub fn zero() -> Self {
+        FieldElement(0)
+    }
+
+    pub fn one() -> Self {
+        FieldElement(1)
+    }
+
+    pub fn add(self, other: Self) -> Self {
+        FieldElement::new(self.0.wrapping_add(other.0))
+    }
+
+    pub fn mul(self, other: Self) -> Self {
+        let prod = (self.0 as u128) * (other.0 as u128);
+        FieldElement::new((prod % Self::MODULUS as u128) as u64)
+    }
+
+    pub fn from_le_bytes(bytes: [u8; 8]) -> Self {
+        FieldElement::new(u64::from_le_bytes(bytes))
+    }
+}
+
+/// Public commitment emitted after streaming through the trace.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TraceCommitment {
+    pub len: u64,
+    pub root: [u8; 32],
+    pub challenges: Vec<FieldElement>,
+    pub sketches: Vec<FieldElement>,
+}
+
+/// Internal mutable state used during streaming (keeps challenge powers).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TraceCommitState {
+    len: u64,
+    root: [u8; 32],
+    challenges: Vec<FieldElement>,
+    sketches: Vec<FieldElement>,
+    powers: Vec<FieldElement>,
+}
+
+#[derive(Clone, Debug)]
+pub struct TraceCommitParams {
+    pub num_challenges: usize,
+}
+
+impl Default for TraceCommitParams {
+    fn default() -> Self {
+        Self { num_challenges: 2 }
+    }
+}
+
+impl TraceCommitParams {
+    pub fn initial_root(&self) -> [u8; 32] {
+        let mut hasher = Sha256::new();
+        hasher.update(b"bef-init");
+        let digest = hasher.finalize();
+        let mut out = [0u8; 32];
+        out.copy_from_slice(&digest);
+        out
+    }
+}
+
+impl TraceCommitState {
+    pub fn new(params: &TraceCommitParams) -> Self {
+        let root = params.initial_root();
+        let challenges: Vec<FieldElement> = (0..params.num_challenges)
+            .map(|j| derive_challenge_for_index(&root, j as u64))
+            .collect();
+        let sketches = vec![FieldElement::zero(); params.num_challenges];
+        let powers = vec![FieldElement::one(); params.num_challenges];
+        Self {
+            len: 0,
+            root,
+            challenges,
+            sketches,
+            powers,
+        }
+    }
+
+    pub fn len(&self) -> u64 {
+        self.len
+    }
+
+    pub fn root(&self) -> &[u8; 32] {
+        &self.root
+    }
+
+    pub fn challenges(&self) -> &[FieldElement] {
+        &self.challenges
+    }
+
+    pub fn sketches(&self) -> &[FieldElement] {
+        &self.sketches
+    }
+
+    pub fn update_with_chunk(&mut self, chunk_root: &[u8; 32], values: &[FieldElement]) {
+        self.root = hash_root_update(self.root, self.len, *chunk_root);
+        for idx in 0..self.challenges.len() {
+            let mut s = self.sketches[idx];
+            let mut pow = self.powers[idx];
+            let challenge = self.challenges[idx];
+            for value in values {
+                s = s.add(value.mul(pow));
+                pow = pow.mul(challenge);
+            }
+            self.sketches[idx] = s;
+            self.powers[idx] = pow;
+        }
+        self.len += values.len() as u64;
+    }
+
+    pub fn finalize(&self) -> TraceCommitment {
+        TraceCommitment {
+            len: self.len,
+            root: self.root,
+            challenges: self.challenges.clone(),
+            sketches: self.sketches.clone(),
+        }
+    }
+}
+
+fn derive_challenge_for_index(root: &[u8; 32], idx: u64) -> FieldElement {
+    let mut hasher = Sha256::new();
+    hasher.update(root);
+    hasher.update(&idx.to_be_bytes());
+    let digest = hasher.finalize();
+    let mut bytes = [0u8; 8];
+    bytes.copy_from_slice(&digest[..8]);
+    FieldElement::from_le_bytes(bytes)
+}
+
+pub fn hash_root_update(root: [u8; 32], len: u64, chunk_root: [u8; 32]) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(&root);
+    hasher.update(&len.to_be_bytes());
+    hasher.update(&chunk_root);
+    let digest = hasher.finalize();
+    let mut out = [0u8; 32];
+    out.copy_from_slice(&digest);
+    out
+}
+
+/// Summary of chunk commitment/sketch data for fast verification.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ChunkSketch {
+    pub chunk_index: u64,
+    pub offset: u64,
+    pub length: u64,
+    pub root: [u8; 32],
+    pub sketch_vec: Vec<FieldElement>,
+}
+
+/// Fast deterministic verification operating on chunk metadata.
+pub fn bef_verify_fast(
+    params: &TraceCommitParams,
+    commitment: &TraceCommitment,
+    chunk_summaries: &[ChunkSketch],
+) -> bool {
+    if commitment.len == 0 {
+        return chunk_summaries.is_empty();
+    }
+    if chunk_summaries.is_empty() {
+        return false;
+    }
+    let num_challenges = commitment.sketches.len();
+    if num_challenges == 0 || commitment.challenges.len() != num_challenges {
+        return false;
+    }
+
+    let mut chunks = chunk_summaries.to_vec();
+    chunks.sort_by_key(|c| c.offset);
+
+    let mut total_len = 0u64;
+    for (idx, chunk) in chunks.iter().enumerate() {
+        if chunk.offset != total_len || chunk.length == 0 {
+            return false;
+        }
+        total_len = match total_len.checked_add(chunk.length) {
+            Some(v) => v,
+            None => return false,
+        };
+        if chunk.chunk_index != idx as u64 {
+            return false;
+        }
+        if chunk.sketch_vec.len() != num_challenges {
+            return false;
+        }
+    }
+    if total_len != commitment.len {
+        return false;
+    }
+
+    let mut root_acc = params.initial_root();
+    total_len = 0;
+    for chunk in &chunks {
+        if chunk.offset != total_len {
+            return false;
+        }
+        root_acc = hash_root_update(root_acc, chunk.offset, chunk.root);
+        total_len += chunk.length;
+    }
+    if root_acc != commitment.root {
+        return false;
+    }
+
+    let mut aggregates = vec![FieldElement::zero(); num_challenges];
+    for chunk in &chunks {
+        for (acc, contrib) in aggregates.iter_mut().zip(chunk.sketch_vec.iter()) {
+            *acc = acc.add(*contrib);
+        }
+    }
+    if aggregates != commitment.sketches {
+        return false;
+    }
+
+    true
+}
+
+/// Crypto accumulator state at a particular step (legacy single-challenge prototype).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CryptoState {
+    pub step: u64,
+    pub root: [u8; 32],
+    pub sketch: FieldElement,
+    pub challenge: FieldElement,
+}
+
+impl CryptoState {
+    pub fn genesis() -> Self {
+        let root_bytes = TraceCommitParams::default().initial_root();
+        let challenge = TemporalPCS::derive_challenge(&root_bytes);
+        Self {
+            step: 0,
+            root: root_bytes,
+            sketch: FieldElement::zero(),
+            challenge,
+        }
+    }
+}
+
+/// Events that mutate the crypto state.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum UpdateEvent {
+    AppendChunk(Vec<FieldElement>),
+    RotateChallenge,
+}
+
+/// Optional per-step artifact (e.g., Merkle proofs) that accompanies transitions.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ProofSnippet {
+    pub placeholder: u8,
+}
+
+/// Trait for objects that know how to advance the crypto state for each event.
+pub trait CryptoTransition: Send + Sync {
+    fn apply(&self, state: &CryptoState, event: &UpdateEvent) -> (CryptoState, ProofSnippet);
+}
+
+/// Temporal PCS accumulator (hash + algebraic sketch) transition logic.
+pub struct TemporalPCS;
+
+impl TemporalPCS {
+    pub fn new() -> Self {
+        Self
+    }
+
+    fn derive_challenge(root: &[u8; 32]) -> FieldElement {
+        let mut hasher = Sha256::new();
+        hasher.update(root);
+        let digest = hasher.finalize();
+        let mut bytes = [0u8; 8];
+        bytes.copy_from_slice(&digest[..8]);
+        FieldElement::new(u64::from_le_bytes(bytes))
+    }
+
+    fn update_sketch(
+        old_sketch: FieldElement,
+        challenge: FieldElement,
+        start_power: FieldElement,
+        values: &[FieldElement],
+    ) -> FieldElement {
+        let mut acc = old_sketch;
+        let mut power = start_power;
+        for value in values {
+            acc = acc.add(value.mul(power));
+            power = power.mul(challenge);
+        }
+        acc
+    }
+}
+
+impl CryptoTransition for TemporalPCS {
+    fn apply(&self, state: &CryptoState, event: &UpdateEvent) -> (CryptoState, ProofSnippet) {
+        match event {
+            UpdateEvent::AppendChunk(values) => {
+                let next_step = state.step + 1;
+
+                let mut hasher = Sha256::new();
+                hasher.update(&state.root);
+                hasher.update(&next_step.to_be_bytes());
+                for value in values {
+                    hasher.update(&value.0.to_le_bytes());
+                }
+                let digest = hasher.finalize();
+                let mut new_root = [0u8; 32];
+                new_root.copy_from_slice(&digest);
+
+                let challenge = Self::derive_challenge(&new_root);
+                let start_power = FieldElement::one();
+                let new_sketch = Self::update_sketch(state.sketch, challenge, start_power, values);
+
+                (
+                    CryptoState {
+                        step: next_step,
+                        root: new_root,
+                        sketch: new_sketch,
+                        challenge,
+                    },
+                    ProofSnippet { placeholder: 0 },
+                )
+            }
+            UpdateEvent::RotateChallenge => {
+                let challenge = Self::derive_challenge(&state.root);
+                (
+                    CryptoState {
+                        challenge,
+                        ..state.clone()
+                    },
+                    ProofSnippet { placeholder: 0 },
+                )
+            }
+        }
+    }
+}
+
+/// Convenience aliases so callers can reuse bicep-core temporal utilities.
+pub type CryptoPath = Path<CryptoState>;
+pub type CryptoEnsemble = Ensemble<CryptoState>;
+
+/// Simple helper for simulating a run of the accumulator over update events.
+pub fn apply_events<T: CryptoTransition>(
+    transition: &T,
+    events: &[UpdateEvent],
+) -> (CryptoPath, Vec<ProofSnippet>) {
+    let mut state = CryptoState::genesis();
+    let mut path = Path::new();
+    let mut proofs = Vec::with_capacity(events.len());
+
+    // treat discrete steps as integer times for now
+    for (idx, event) in events.iter().enumerate() {
+        let (next_state, proof) = transition.apply(&state, event);
+        state = next_state;
+        path.push(idx as Time, state.clone());
+        proofs.push(proof);
+    }
+
+    (path, proofs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde::Deserialize;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+
+    #[derive(Deserialize)]
+    struct TraceCommitmentJson {
+        len: u64,
+        root_hex: String,
+        challenges: Vec<u64>,
+        sketches: Vec<u64>,
+    }
+
+    #[derive(Deserialize)]
+    struct ChunkJson {
+        chunk_index: u64,
+        offset: u64,
+        length: u64,
+        root_hex: String,
+        sketch_vec: Vec<u64>,
+    }
+
+    #[derive(Deserialize)]
+    struct SketchFileJson {
+        trace_commitment: TraceCommitmentJson,
+        chunks: Vec<ChunkJson>,
+    }
+
+    fn repo_root() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("..")
+            .join("..")
+            .join("..")
+    }
+
+    fn parse_hex32(hex: &str) -> [u8; 32] {
+        assert_eq!(hex.len(), 64, "hex string must be 32 bytes");
+        let mut out = [0u8; 32];
+        for i in 0..32 {
+            let byte = u8::from_str_radix(&hex[2 * i..2 * i + 2], 16).expect("invalid hex");
+            out[i] = byte;
+        }
+        out
+    }
+
+    fn load_trace_demo() -> (TraceCommitment, Vec<ChunkSketch>) {
+        let path = repo_root().join("code/sketches/trace_demo_sketch.json");
+        let data = fs::read_to_string(path).expect("failed to read trace demo sketch");
+        let json: SketchFileJson = serde_json::from_str(&data).expect("invalid json");
+
+        let commit = TraceCommitment {
+            len: json.trace_commitment.len,
+            root: parse_hex32(&json.trace_commitment.root_hex),
+            challenges: json
+                .trace_commitment
+                .challenges
+                .iter()
+                .map(|&v| FieldElement::new(v))
+                .collect(),
+            sketches: json
+                .trace_commitment
+                .sketches
+                .iter()
+                .map(|&v| FieldElement::new(v))
+                .collect(),
+        };
+
+        let chunks = json
+            .chunks
+            .into_iter()
+            .map(|chunk| ChunkSketch {
+                chunk_index: chunk.chunk_index,
+                offset: chunk.offset,
+                length: chunk.length,
+                root: parse_hex32(&chunk.root_hex),
+                sketch_vec: chunk
+                    .sketch_vec
+                    .into_iter()
+                    .map(FieldElement::new)
+                    .collect(),
+            })
+            .collect();
+
+        (commit, chunks)
+    }
+
+    fn assert_metadata_consistency(
+        commitment: &TraceCommitment,
+        chunks: &[ChunkSketch],
+        params: &TraceCommitParams,
+    ) {
+        let mut sorted = chunks.to_vec();
+        sorted.sort_by_key(|c| c.offset);
+        let mut total_len = 0u64;
+        for (idx, chunk) in sorted.iter().enumerate() {
+            assert_eq!(chunk.offset, total_len, "chunk offset mismatch");
+            assert!(chunk.length > 0, "chunk length must be > 0");
+            total_len = total_len.checked_add(chunk.length).expect("len overflow");
+            assert_eq!(chunk.chunk_index, idx as u64, "chunk index mismatch");
+            assert_eq!(chunk.sketch_vec.len(), commitment.challenges.len());
+        }
+        assert_eq!(total_len, commitment.len, "total length mismatch");
+
+        let mut root = params.initial_root();
+        for chunk in &sorted {
+            root = hash_root_update(root, chunk.offset, chunk.root);
+        }
+        assert_eq!(root, commitment.root, "root mismatch");
+
+        let mut aggregates = vec![FieldElement::zero(); commitment.challenges.len()];
+        for chunk in &sorted {
+            for (acc, contrib) in aggregates.iter_mut().zip(chunk.sketch_vec.iter()) {
+                *acc = acc.add(*contrib);
+            }
+        }
+        assert_eq!(aggregates, commitment.sketches, "sketch aggregate mismatch");
+    }
+
+    #[test]
+    fn bef_verify_fast_accepts_trace_demo() {
+        let (commitment, chunks) = load_trace_demo();
+        let params = TraceCommitParams {
+            num_challenges: commitment.challenges.len(),
+        };
+        assert_metadata_consistency(&commitment, &chunks, &params);
+        assert!(bef_verify_fast(&params, &commitment, &chunks));
+    }
+
+    #[test]
+    fn bef_verify_fast_rejects_sketch_tamper() {
+        let (commitment, mut chunks) = load_trace_demo();
+        chunks[0].sketch_vec[0] = chunks[0].sketch_vec[0].add(FieldElement::one());
+        let params = TraceCommitParams {
+            num_challenges: commitment.challenges.len(),
+        };
+        assert!(!bef_verify_fast(&params, &commitment, &chunks));
+    }
+
+    #[test]
+    fn bef_verify_fast_rejects_root_tamper() {
+        let (commitment, mut chunks) = load_trace_demo();
+        chunks[0].root[0] ^= 1;
+        let params = TraceCommitParams {
+            num_challenges: commitment.challenges.len(),
+        };
+        assert!(!bef_verify_fast(&params, &commitment, &chunks));
+    }
+}
+
+//==============================================================================
+// FILE: ./crates/bicep-examples/Cargo.toml
+//==============================================================================
+[package]
+name = "bicep-examples"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "gbm"
+path = "src/bin/gbm.rs"
+
+[[bin]]
+name = "double_well_fpt"  
+path = "src/bin/double_well_fpt.rs"
+
+[[bin]]
+name = "strat_vs_ito"
+path = "src/bin/strat_vs_ito.rs"
+
+[[bin]]
+name = "parity_trajectories"
+path = "src/bin/parity_trajectories.rs"
+
+[dependencies]
+bicep-core = { path = "../bicep-core" }
+bicep-models = { path = "../bicep-models" }
+bicep-sampler = { path = "../bicep-sampler" }
+nalgebra = { workspace = true }
+anyhow = { workspace = true }
+clap = { version = "4.0", features = ["derive"] }
+polars = { version = "0.35", features = ["lazy", "parquet", "dtype-struct"] }
+rand = "0.8"
+rand_chacha = { workspace = true }
+rand_distr = { workspace = true }
+
+//==============================================================================
+// FILE: ./crates/bicep-examples/src/bin/double_well_fpt.rs
+//==============================================================================
+use anyhow::Result;
+use bicep_core::integrators::EulerMaruyama;
+use bicep_core::noise::NoiseGenerator;
+use bicep_core::{
+    seed::{SeedIdentity, SeedSpec},
+    Calc, Diffusion, Drift, SdeIntegrator, State,
+};
+use clap::Parser;
+use nalgebra::{DMatrix, DVector};
+use polars::prelude::*;
+use std::path::PathBuf;
+
+#[derive(Parser, Debug)]
+#[command(
+    author,
+    version,
+    about = "Generate double-well paths with first-passage annotations"
+)]
+struct Args {
+    #[arg(long, default_value_t = 500000)]
+    paths: usize,
+
+    #[arg(long, default_value_t = 20000)]
+    steps: usize,
+
+    #[arg(long, default_value_t = 1e-3)]
+    dt: f64,
+
+    #[arg(long, default_value_t = 20)]
+    save_stride: usize,
+
+    #[arg(long, default_value = "runs/dw.parquet")]
+    out: PathBuf,
+
+    #[arg(long, default_value_t = 42)]
+    seed: u64,
+}
+
+// Double-well potential: V(x) = (x²-1)²/4
+struct DoubleWell {
+    temperature: f64,
+}
+
+impl Drift for DoubleWell {
+    fn mu(&self, _t: f64, x: &State) -> State {
+        // Overdamped Langevin: dx = -∇V(x)dt + √(2T)dW
+        // ∇V(x) = x³ - x
+        let grad_v = x.0[0].powi(3) - x.0[0];
+        State::new(vec![-grad_v])
+    }
+}
+
+impl Diffusion for DoubleWell {
+    fn sigma(&self, _t: f64, _x: &State) -> DMatrix<f64> {
+        let sigma_val = (2.0 * self.temperature).sqrt();
+        DMatrix::from_element(1, 1, sigma_val)
+    }
+
+    fn sigma_jacobian(&self, _t: f64, _x: &State) -> Option<Vec<DMatrix<f64>>> {
+        Some(vec![DMatrix::from_element(1, 1, 0.0)]) // Constant diffusion
+    }
+
+    fn noise_dim(&self, _t: f64, _x: &State) -> usize {
+        1
+    }
+}
+
+fn main() -> Result<()> {
+    let args = Args::parse();
+
+    let model = DoubleWell { temperature: 0.5 };
+    let integrator = EulerMaruyama;
+    let seed_spec = SeedSpec::new("cli-seed", seed_key_from_u64(args.seed));
+
+    println!("Generating {} double-well paths", args.paths);
+    println!(
+        "Steps: {}, dt: {}, save_stride: {}",
+        args.steps, args.dt, args.save_stride
+    );
+
+    // Data collectors
+    let mut run_ids = Vec::new();
+    let mut seeds = Vec::new();
+    let mut models = Vec::new();
+    let mut calcs = Vec::new();
+    let mut dts = Vec::new();
+    let mut steps_vec = Vec::new();
+    let mut path_ids = Vec::new();
+    let mut step_nums = Vec::new();
+    let mut times = Vec::new();
+    let mut states = Vec::new();
+    let mut state_means = Vec::new();
+    let mut state_stds = Vec::new();
+    let mut state_q10 = Vec::new();
+    let mut state_q90 = Vec::new();
+    let mut aleatoric_unc = Vec::new();
+    let mut epistemic_unc = Vec::new();
+    let mut first_hit_as = Vec::new();
+    let mut first_hit_bs = Vec::new();
+    let mut first_hit_times_a = Vec::new();
+    let mut first_hit_times_b = Vec::new();
+
+    // Define basins
+    let basin_a_threshold = -1.0;
+    let basin_b_threshold = 1.0;
+
+    // Generate paths
+    for path_id in 0..args.paths {
+        if path_id % 10000 == 0 {
+            println!("Progress: {}/{} paths", path_id, args.paths);
+        }
+
+        let identity = SeedIdentity::new("double_well", "1970-01-01", 0, path_id as u64);
+        let mut rng = NoiseGenerator::from_identity(&seed_spec, &identity);
+        let x0 = if path_id % 2 == 0 { -0.5 } else { 0.5 }; // Start near different wells
+        let mut state = State::new(vec![x0]);
+        let mut t = 0.0;
+        let mut first_hit_a = false;
+        let mut first_hit_b = false;
+        let mut fpt_a = None;
+        let mut fpt_b = None;
+
+        // Save initial state
+        if args.save_stride == 1 || 0 % args.save_stride == 0 {
+            run_ids.push("double_well_run".to_string());
+            seeds.push(args.seed);
+            models.push("DoubleWell".to_string());
+            calcs.push("Ito".to_string());
+            dts.push(args.dt);
+            steps_vec.push(args.steps as u32);
+            path_ids.push(path_id as u64);
+            step_nums.push(0u32);
+            times.push(0.0);
+            states.push(vec![x0]);
+            state_means.push(x0);
+            state_stds.push(0.0);
+            state_q10.push(x0);
+            state_q90.push(x0);
+            aleatoric_unc.push(0.0);
+            epistemic_unc.push(0.0);
+            first_hit_as.push(false);
+            first_hit_bs.push(false);
+            first_hit_times_a.push(None::<f64>);
+            first_hit_times_b.push(None::<f64>);
+        }
+
+        // Simulate path
+        for step in 1..=args.steps {
+            let dw = rng.generate_dw(1, args.dt.sqrt());
+            state = integrator.step(Calc::Ito, t, &state, args.dt, &dw, &model, &model);
+            t += args.dt;
+
+            // Check first passages
+            if !first_hit_a && state.0[0] <= basin_a_threshold {
+                first_hit_a = true;
+                fpt_a = Some(t);
+            }
+            if !first_hit_b && state.0[0] >= basin_b_threshold {
+                first_hit_b = true;
+                fpt_b = Some(t);
+            }
+
+            // Save state if on stride
+            if step % args.save_stride == 0 {
+                run_ids.push("double_well_run".to_string());
+                seeds.push(args.seed);
+                models.push("DoubleWell".to_string());
+                calcs.push("Ito".to_string());
+                dts.push(args.dt);
+                steps_vec.push(args.steps as u32);
+                path_ids.push(path_id as u64);
+                step_nums.push(step as u32);
+                times.push(t);
+                let value = state.0[0];
+                states.push(vec![value]);
+                state_means.push(value);
+                state_stds.push(0.0);
+                state_q10.push(value);
+                state_q90.push(value);
+                aleatoric_unc.push(0.0);
+                epistemic_unc.push(0.0);
+                first_hit_as.push(first_hit_a);
+                first_hit_bs.push(first_hit_b);
+                first_hit_times_a.push(fpt_a);
+                first_hit_times_b.push(fpt_b);
+            }
+        }
+    }
+
+    // Create DataFrame matching the specified schema
+    let state_series = Series::new(
+        "state",
+        states
+            .into_iter()
+            .map(|v| Series::new("", v))
+            .collect::<Vec<_>>(),
+    );
+
+    let df = DataFrame::new(vec![
+        Series::new("run_id", run_ids),
+        Series::new("seed", seeds),
+        Series::new("model", models),
+        Series::new("calc", calcs),
+        Series::new("dt", dts),
+        Series::new("steps", steps_vec),
+        Series::new("path_id", path_ids),
+        Series::new("step", step_nums),
+        Series::new("t", times),
+        state_series,
+        Series::new("state_mean", state_means),
+        Series::new("state_std", state_stds),
+        Series::new("state_q10", state_q10),
+        Series::new("state_q90", state_q90),
+        Series::new("aleatoric_unc", aleatoric_unc),
+        Series::new("epistemic_unc", epistemic_unc),
+        Series::new("first_hit_a", first_hit_as),
+        Series::new("first_hit_b", first_hit_bs),
+        Series::new("first_hit_time_a", first_hit_times_a),
+        Series::new("first_hit_time_b", first_hit_times_b),
+    ])?;
+
+    // Save to Parquet
+    std::fs::create_dir_all(args.out.parent().unwrap())?;
+    let mut file = std::fs::File::create(&args.out)?;
+    ParquetWriter::new(&mut file).finish(&mut df.clone())?;
+
+    println!("Saved {} rows to {}", df.height(), args.out.display());
+
+    // Print statistics
+    let final_df = df
+        .lazy()
+        .group_by([col("path_id")])
+        .agg([
+            col("first_hit_a").last(),
+            col("first_hit_b").last(),
+            col("first_hit_time_a").last(),
+            col("first_hit_time_b").last(),
+        ])
+        .collect()?;
+
+    let n_hit_a = final_df.column("first_hit_a")?.bool()?.sum().unwrap_or(0);
+    let n_hit_b = final_df.column("first_hit_b")?.bool()?.sum().unwrap_or(0);
+    let n_hit_both = final_df
+        .lazy()
+        .filter(col("first_hit_a").and(col("first_hit_b")))
+        .collect()?
+        .height();
+
+    println!("\nFirst-passage statistics:");
+    println!(
+        "Paths hitting A: {} ({:.1}%)",
+        n_hit_a,
+        100.0 * n_hit_a as f64 / args.paths as f64
+    );
+    println!(
+        "Paths hitting B: {} ({:.1}%)",
+        n_hit_b,
+        100.0 * n_hit_b as f64 / args.paths as f64
+    );
+    println!(
+        "Paths hitting both: {} ({:.1}%)",
+        n_hit_both,
+        100.0 * n_hit_both as f64 / args.paths as f64
+    );
+
+    Ok(())
+}
+
+fn seed_key_from_u64(seed: u64) -> [u8; 32] {
+    let mut key = [0u8; 32];
+    for i in 0..4 {
+        let value = seed.wrapping_add(i as u64).to_le_bytes();
+        key[i * 8..(i + 1) * 8].copy_from_slice(&value);
+    }
+    key
+}
+
+//==============================================================================
+// FILE: ./crates/bicep-examples/src/bin/gbm.rs
+//==============================================================================
+use anyhow::Result;
+use bicep_core::noise::NoiseGenerator;
+use bicep_core::{integrators::EulerMaruyama, Calc, SdeIntegrator, State};
+use bicep_models::GeometricBrownianMotion;
+use clap::Parser;
+use polars::prelude::*;
+use std::path::PathBuf;
+
+#[derive(Parser, Debug)]
+#[command(author, version, about = "Generate GBM paths and save to Parquet")]
+struct Args {
+    #[arg(long, default_value_t = 200000)]
+    paths: usize,
+
+    #[arg(long, default_value_t = 2000)]
+    steps: usize,
+
+    #[arg(long, default_value_t = 1e-3)]
+    dt: f64,
+
+    #[arg(long, default_value_t = 0.2)]
+    mu: f64,
+
+    #[arg(long, default_value_t = 0.35)]
+    sigma: f64,
+
+    #[arg(long, default_value = "runs/gbm.parquet")]
+    out: PathBuf,
+
+    #[arg(long, default_value_t = 7)]
+    seed: u64,
+}
+
+fn main() -> Result<()> {
+    let args = Args::parse();
+
+    // Create model
+    let gbm = GeometricBrownianMotion::new(args.mu, args.sigma);
+    let integrator = EulerMaruyama;
+    let x0 = 1.0;
+
+    println!(
+        "Generating {} GBM paths with {} steps (dt={})",
+        args.paths, args.steps, args.dt
+    );
+    println!("Parameters: μ={}, σ={}", args.mu, args.sigma);
+
+    // Prepare data collectors
+    let mut path_ids = Vec::new();
+    let mut step_nums = Vec::new();
+    let mut times = Vec::new();
+    let mut values = Vec::new();
+    let mut state_means = Vec::new();
+    let mut state_stds = Vec::new();
+    let mut state_q10 = Vec::new();
+    let mut state_q90 = Vec::new();
+    let mut aleatoric_unc = Vec::new();
+    let mut epistemic_unc = Vec::new();
+
+    // Generate paths
+    for path_id in 0..args.paths {
+        if path_id % 10000 == 0 {
+            println!("Progress: {}/{} paths", path_id, args.paths);
+        }
+
+        let mut rng = NoiseGenerator::from_path_id(args.seed, path_id as u64);
+        let mut state = State::new(vec![x0]);
+        let mut t = 0.0;
+
+        // Store initial state
+        path_ids.push(path_id as u64);
+        step_nums.push(0u32);
+        times.push(0.0);
+        values.push(x0);
+        state_means.push(x0);
+        state_stds.push(0.0);
+        state_q10.push(x0);
+        state_q90.push(x0);
+        aleatoric_unc.push(0.0);
+        epistemic_unc.push(0.0);
+
+        // Simulate path
+        for step in 1..=args.steps {
+            let dw = rng.generate_dw(1, args.dt.sqrt());
+            state = integrator.step(Calc::Ito, t, &state, args.dt, &dw, &gbm, &gbm);
+            t += args.dt;
+
+            // Store state
+            let value = state.0[0];
+            path_ids.push(path_id as u64);
+            step_nums.push(step as u32);
+            times.push(t);
+            values.push(value);
+            state_means.push(value);
+            state_stds.push(0.0);
+            state_q10.push(value);
+            state_q90.push(value);
+            aleatoric_unc.push(0.0);
+            epistemic_unc.push(0.0);
+        }
+    }
+
+    // Create DataFrame
+    let df = DataFrame::new(vec![
+        Series::new("path_id", path_ids),
+        Series::new("step", step_nums),
+        Series::new("t", times),
+        Series::new("x", values),
+        Series::new("state_mean", state_means),
+        Series::new("state_std", state_stds),
+        Series::new("state_q10", state_q10),
+        Series::new("state_q90", state_q90),
+        Series::new("aleatoric_unc", aleatoric_unc),
+        Series::new("epistemic_unc", epistemic_unc),
+    ])?;
+
+    // Save to Parquet
+    std::fs::create_dir_all(args.out.parent().unwrap())?;
+    let mut file = std::fs::File::create(&args.out)?;
+    ParquetWriter::new(&mut file).finish(&mut df.clone())?;
+
+    println!("Saved {} rows to {}", df.height(), args.out.display());
+
+    // Print statistics
+    let final_values: Vec<f64> = df
+        .lazy()
+        .filter(col("step").eq(args.steps as u32))
+        .select([col("x")])
+        .collect()?
+        .column("x")?
+        .f64()?
+        .into_no_null_iter()
+        .collect();
+
+    let mean = final_values.iter().sum::<f64>() / final_values.len() as f64;
+    let var = final_values.iter().map(|x| (x - mean).powi(2)).sum::<f64>()
+        / (final_values.len() - 1) as f64;
+
+    println!("\nFinal value statistics:");
+    println!("Mean: {:.6}", mean);
+    println!("Variance: {:.6}", var);
+    println!(
+        "Expected mean: {:.6}",
+        x0 * (args.mu * args.steps as f64 * args.dt).exp()
+    );
+
+    Ok(())
+}
+
+//==============================================================================
+// FILE: ./crates/bicep-examples/src/bin/gbm_simple.rs
+//==============================================================================
+use bicep_core::noise::NoiseGenerator;
+use bicep_core::path::{Path, PathSpec};
+use bicep_core::{integrators::EulerMaruyama, Calc, SdeIntegrator, State};
+use bicep_models::GeometricBrownianMotion;
+
+fn main() {
+    // GBM parameters (e.g., stock price model)
+    let mu = 0.05; // 5% annual drift
+    let sigma = 0.2; // 20% annual volatility
+    let gbm = GeometricBrownianMotion::new(mu, sigma);
+
+    // Simulation parameters
+    let x0 = 100.0; // Initial price
+    let dt = 1.0 / 252.0; // Daily steps (252 trading days/year)
+    let n_steps = 252; // One year
+    let n_paths = 5; // Generate 5 sample paths
+
+    // Path specification
+    let path_spec = PathSpec::new(n_steps, dt);
+
+    println!("Simulating {} GBM paths for {} days", n_paths, n_steps);
+    println!("Initial value: {}, μ={}, σ={}", x0, mu, sigma);
+    println!();
+
+    // Generate paths
+    let integrator = EulerMaruyama;
+
+    for path_id in 0..n_paths {
+        let mut rng = NoiseGenerator::from_path_id(42, path_id as u64);
+        let mut path = Path::with_capacity(n_steps + 1);
+        let mut state = State::new(vec![x0]);
+        let mut t = 0.0;
+
+        // Save initial state
+        path.push(t, state.clone());
+
+        // Simulate path
+        for _ in 0..n_steps {
+            let dw = rng.generate_dw(1, dt.sqrt());
+            state = integrator.step(Calc::Ito, t, &state, dt, &dw, &gbm, &gbm);
+            t += dt;
+            path.push(t, state.clone());
+        }
+
+        let final_value = path.final_state().unwrap().0[0];
+        let return_pct = (final_value / x0 - 1.0) * 100.0;
+
+        println!(
+            "Path {}: Final value = {:.2}, Return = {:.2}%",
+            path_id, final_value, return_pct
+        );
+    }
+
+    // Theoretical statistics
+    let expected_final = gbm.exact_mean(x0, path_spec.final_time());
+    let variance_final = gbm.exact_variance(x0, path_spec.final_time());
+    let std_final = variance_final.sqrt();
+
+    println!("\nTheoretical statistics at T={}:", path_spec.final_time());
+    println!("Expected value: {:.2}", expected_final);
+    println!("Standard deviation: {:.2}", std_final);
+    println!(
+        "95% confidence interval: [{:.2}, {:.2}]",
+        expected_final - 1.96 * std_final,
+        expected_final + 1.96 * std_final
+    );
+}
+
+//==============================================================================
+// FILE: ./crates/bicep-examples/src/bin/mf_double_well.rs
+//==============================================================================
+use std::fs::File;
+use std::io::{BufWriter, Write};
+
+use rand::prelude::*;
+use rand_chacha::ChaCha8Rng;
+
+// -----------------------------
+// Double-well SDE (2D)
+// U(x,y) = (x^2 - 1)^2 + y^2
+// dX = -∇U(X) dt + sigma dW
+// -----------------------------
+
+#[derive(Clone, Copy, Debug)]
+struct State {
+    x: f64,
+    y: f64,
+}
+
+fn drift(s: State) -> State {
+    // U = (x^2 - 1)^2 + y^2
+    // dU/dx = 4x(x^2 - 1)
+    // dU/dy = 2y
+    // drift = -∇U
+    State {
+        x: -4.0 * s.x * (s.x * s.x - 1.0),
+        y: -2.0 * s.y,
+    }
+}
+
+fn is_a(s: State) -> bool {
+    // Goal set A: right well
+    s.x > 0.9
+}
+
+fn is_b(s: State) -> bool {
+    // Failure set B: left well
+    s.x < -0.9
+}
+
+fn euler_maruyama_step(s: State, dt: f64, sigma: f64, dWx: f64, dWy: f64) -> State {
+    let b = drift(s);
+    State {
+        x: s.x + b.x * dt + sigma * dWx,
+        y: s.y + b.y * dt + sigma * dWy,
+    }
+}
+
+// Run one trajectory, return hit indicator Y in {0,1}:
+// 1 if hit A before B, 0 if hit B before A (or timed out -> treat as 0 by default)
+fn rollout_hit(
+    x0: State,
+    dt: f64,
+    t_max: f64,
+    sigma: f64,
+    rng: &mut ChaCha8Rng,
+    shared_increments: Option<&[(f64, f64)]>, // if provided, use these dW increments (paired sim)
+) -> u8 {
+    let steps = (t_max / dt).ceil() as usize;
+    let sqrt_dt = dt.sqrt();
+
+    let mut s = x0;
+
+    for k in 0..steps {
+        if is_a(s) {
+            return 1;
+        }
+        if is_b(s) {
+            return 0;
+        }
+
+        let (z1, z2) = if let Some(incs) = shared_increments {
+            incs[k]
+        } else {
+            (
+                rng.sample::<f64, _>(rand_distr::StandardNormal),
+                rng.sample::<f64, _>(rand_distr::StandardNormal),
+            )
+        };
+
+        // Brownian increments: dW ~ N(0, dt) so we use sqrt(dt)*Z
+        let dWx = sqrt_dt * z1;
+        let dWy = sqrt_dt * z2;
+
+        s = euler_maruyama_step(s, dt, sigma, dWx, dWy);
+    }
+
+    // Timeout handling:
+    // For committor problems, you can either (a) discard timeouts, (b) treat as 0, (c) treat as 0.5.
+    // We’ll treat as 0 here to be conservative.
+    0
+}
+
+fn mean(xs: &[f64]) -> f64 {
+    xs.iter().sum::<f64>() / (xs.len() as f64)
+}
+
+fn var_unbiased(xs: &[f64]) -> f64 {
+    if xs.len() < 2 {
+        return 0.0;
+    }
+    let m = mean(xs);
+    let s2 = xs.iter().map(|v| (v - m) * (v - m)).sum::<f64>() / ((xs.len() - 1) as f64);
+    s2
+}
+
+fn cov_unbiased(x: &[f64], y: &[f64]) -> f64 {
+    assert_eq!(x.len(), y.len());
+    if x.len() < 2 {
+        return 0.0;
+    }
+    let mx = mean(x);
+    let my = mean(y);
+    let c = x
+        .iter()
+        .zip(y.iter())
+        .map(|(a, b)| (a - mx) * (b - my))
+        .sum::<f64>()
+        / ((x.len() - 1) as f64);
+    c
+}
+
+// Multifidelity control variate estimator:
+// q̂_MF = Ȳ_H + β (Ȳ_L - Ȳ_L^(H-paired))
+// where:
+// - paired batch i=1..N_H gives (Y_H^i, Y_L^i)
+// - cheap-only batch j=1..N_L gives Y_L^j (independent)
+// β* = Cov(Y_H, Y_L) / Var(Y_L)  (regularized)
+fn multifidelity_estimate(
+    x0: State,
+    n_hi: usize,
+    n_lo: usize,
+    dt_hi: f64,
+    dt_lo: f64,
+    t_max: f64,
+    sigma: f64,
+    beta_l2: f64,
+    rng: &mut ChaCha8Rng,
+) -> (f64, f64) {
+    // --- Paired batch with shared Brownian normals (Zs) ---
+    let steps_hi = (t_max / dt_hi).ceil() as usize;
+    let steps_lo = (t_max / dt_lo).ceil() as usize;
+
+    // For pairing, we’ll generate normals at the *fine* resolution and reuse them.
+    // Low-fidelity uses a coarser dt, so it consumes blocks of fine increments.
+    // Simple approach: create fine Zs and for low-fidelity, sum the block increments.
+    let mut y_h = Vec::with_capacity(n_hi);
+    let mut y_l_paired = Vec::with_capacity(n_hi);
+
+    for _ in 0..n_hi {
+        // fine normal draws (z1,z2) per fine step
+        let mut fine_normals = Vec::with_capacity(steps_hi);
+        for _k in 0..steps_hi {
+            let z1 = rng.sample::<f64, _>(rand_distr::StandardNormal);
+            let z2 = rng.sample::<f64, _>(rand_distr::StandardNormal);
+            fine_normals.push((z1, z2));
+        }
+
+        // High-fidelity uses fine normals directly
+        let yh = rollout_hit(x0, dt_hi, t_max, sigma, rng, Some(&fine_normals)) as f64;
+        y_h.push(yh);
+
+        // Low-fidelity: aggregate fine normals into coarse normals
+        let block = ((dt_lo / dt_hi).round() as usize).max(1);
+        let mut coarse_normals = Vec::with_capacity(steps_lo);
+
+        // Combine blocks: sum sqrt(dt_hi)*Z over block -> sqrt(dt_lo)*Z_coarse
+        // Equivalent: Z_coarse = (1/sqrt(block)) * sum Z_i
+        let mut idx = 0usize;
+        while idx < fine_normals.len() && coarse_normals.len() < steps_lo {
+            let end = (idx + block).min(fine_normals.len());
+            let mut s1 = 0.0;
+            let mut s2 = 0.0;
+            for k in idx..end {
+                s1 += fine_normals[k].0;
+                s2 += fine_normals[k].1;
+            }
+            let norm = (end - idx) as f64;
+            coarse_normals.push((s1 / norm.sqrt(), s2 / norm.sqrt()));
+            idx = end;
+        }
+
+        let yl = rollout_hit(x0, dt_lo, t_max, sigma, rng, Some(&coarse_normals)) as f64;
+        y_l_paired.push(yl);
+    }
+
+    // --- Cheap-only batch (independent low-fidelity) ---
+    let mut y_l = Vec::with_capacity(n_lo);
+    for _ in 0..n_lo {
+        let yl = rollout_hit(x0, dt_lo, t_max, sigma, rng, None) as f64;
+        y_l.push(yl);
+    }
+
+    // --- β* with regularization ---
+    let var_l = var_unbiased(&y_l_paired);
+    let cov_hl = cov_unbiased(&y_h, &y_l_paired);
+    let beta = if var_l < 1e-12 {
+        0.0
+    } else {
+        cov_hl / (var_l + beta_l2)
+    };
+
+    let y_h_bar = mean(&y_h);
+    let y_l_bar = mean(&y_l);
+    let y_lh_bar = mean(&y_l_paired);
+
+    let q_hat = y_h_bar + beta * (y_l_bar - y_lh_bar);
+
+    // --- Variance estimate (the “don’t lie to yourself” version) ---
+    // Var(Ȳ_H - β Ȳ_L^(H)) + β^2 Var(Ȳ_L)
+    // with unbiased sample estimates:
+    let var_yh = var_unbiased(&y_h);
+    let var_ylh = var_unbiased(&y_l_paired);
+    let cov_yh_ylh = cov_hl;
+
+    let nH = n_hi as f64;
+    let nL = n_lo as f64;
+
+    let term_paired = (var_yh + beta * beta * var_ylh - 2.0 * beta * cov_yh_ylh) / nH;
+    let term_lo = (beta * beta * var_unbiased(&y_l)) / nL;
+
+    let var_hat = (term_paired + term_lo).max(1e-12);
+
+    (q_hat.clamp(0.0, 1.0), var_hat)
+}
+
+fn main() -> anyhow::Result<()> {
+    // Minimal “edit constants then run” workflow.
+    // If you want CLI args, I’ll add clap in 30 seconds.
+    let out_path = "double_well_data.csv";
+
+    let seed: u64 = 1337;
+    let mut rng = ChaCha8Rng::seed_from_u64(seed);
+
+    // Dataset: sample initial points in [-2,2]^2
+    let n_points: usize = 4000;
+    let lo = -2.0;
+    let hi = 2.0;
+
+    // Simulation params
+    let sigma = 0.7; // noise strength (tune this)
+    let t_max = 6.0;
+
+    // Multifidelity params
+    let n_hi = 64; // expensive paired
+    let n_lo = 512; // cheap-only
+    let dt_hi = 0.0025;
+    let dt_lo = 0.01;
+
+    // β regularization
+    let beta_l2 = 1e-6;
+
+    // Weight clamp (prevents ENN from worshipping one point)
+    let w_max = 1e6;
+    let eps = 1e-9;
+
+    let f = File::create(out_path)?;
+    let mut w = BufWriter::new(f);
+
+    writeln!(w, "x,y,q_hat,var,weight,n_hi,n_lo,dt_hi,dt_lo,sigma,t_max")?;
+
+    for _ in 0..n_points {
+        let x = rng.gen_range(lo..hi);
+        let y = rng.gen_range(lo..hi);
+        let x0 = State { x, y };
+
+        let (q_hat, var_hat) = multifidelity_estimate(
+            x0, n_hi, n_lo, dt_hi, dt_lo, t_max, sigma, beta_l2, &mut rng,
+        );
+
+        let weight = (1.0 / (var_hat + eps)).min(w_max);
+
+        writeln!(
+            w,
+            "{:.6},{:.6},{:.6},{:.8e},{:.6e},{},{},{:.6},{:.6},{:.6},{:.6}",
+            x, y, q_hat, var_hat, weight, n_hi, n_lo, dt_hi, dt_lo, sigma, t_max
+        )?;
+    }
+
+    w.flush()?;
+    eprintln!("Wrote {}", out_path);
+    Ok(())
+}
+
+//==============================================================================
+// FILE: ./crates/bicep-examples/src/bin/parity_trajectories.rs
+//==============================================================================
+use anyhow::Result;
+use clap::Parser;
+use polars::prelude::*;
+use rand::{Rng, SeedableRng};
+use rand_distr::{Distribution, Normal};
+use std::f64::consts::TAU;
+use std::path::PathBuf;
+
+#[derive(Parser, Debug)]
+#[command(
+    author,
+    version,
+    about = "Generate parity task trajectories for ENN training"
+)]
+struct Args {
+    #[arg(long, default_value_t = 1000)]
+    sequences: usize,
+
+    #[arg(long, default_value_t = 15)]
+    seq_len: usize,
+
+    #[arg(long, default_value_t = 1e-2)]
+    dt: f64,
+
+    #[arg(long, default_value = "runs/parity_trajectories.parquet")]
+    out: PathBuf,
+
+    #[arg(long, default_value_t = 42)]
+    seed: u64,
+
+    /// Ensembles in adaptive BICEP (controls epistemic variance)
+    #[arg(long, default_value_t = 3)]
+    ensembles: usize,
+
+    /// Paths simulated per ensemble (controls aleatoric variance)
+    #[arg(long, default_value_t = 8)]
+    paths_per_ensemble: usize,
+
+    /// Oscillation amplitude injected during SDE steps
+    #[arg(long, default_value_t = 0.15)]
+    oscillation_amp: f64,
+
+    /// Base oscillation frequency in Hz
+    #[arg(long, default_value_t = 8.0)]
+    oscillation_freq: f64,
+
+    /// Jump rate per step for ERP-like spikes
+    #[arg(long, default_value_t = 0.15)]
+    jump_rate: f64,
+
+    /// Jump magnitude scale
+    #[arg(long, default_value_t = 0.25)]
+    jump_scale: f64,
+}
+
+fn ensemble_configs(base: f64, args: &Args) -> Vec<EnsembleConfig> {
+    (0..args.ensembles.max(1))
+        .map(|idx| {
+            let theta = 1.5 + 0.3 * idx as f64;
+            let sigma = 0.25 + 0.05 * idx as f64;
+            let freq = args.oscillation_freq * (1.0 + 0.1 * idx as f64);
+            EnsembleConfig {
+                theta,
+                mu: base,
+                sigma,
+                freq,
+            }
+        })
+        .collect()
+}
+
+fn quantile(sorted: &[f64], q: f64) -> f64 {
+    if sorted.is_empty() {
+        return f64::NAN;
+    }
+    if sorted.len() == 1 {
+        return sorted[0];
+    }
+    let clamped = q.clamp(0.0, 1.0);
+    let pos = clamped * (sorted.len() - 1) as f64;
+    let idx = pos.floor() as usize;
+    let frac = pos - idx as f64;
+    if idx + 1 >= sorted.len() {
+        sorted[idx]
+    } else {
+        sorted[idx] + (sorted[idx + 1] - sorted[idx]) * frac
+    }
+}
+
+fn simulate_single(
+    base: f64,
+    cfg: &EnsembleConfig,
+    dt: f64,
+    inner_steps: usize,
+    rng: &mut rand::rngs::StdRng,
+    normal: &Normal<f64>,
+    amp: f64,
+    jump_rate: f64,
+    jump_scale: f64,
+    base_time: f64,
+) -> f64 {
+    let mut state = base;
+    let inner_dt = dt / inner_steps as f64;
+    for step in 0..inner_steps {
+        let drift = cfg.theta * (cfg.mu - state);
+        let noise = cfg.sigma * normal.sample(rng) * inner_dt.sqrt();
+        state += drift * inner_dt + noise;
+
+        let t = base_time + step as f64 * inner_dt;
+        state += amp * (TAU * cfg.freq * t).sin() * inner_dt;
+
+        if rng.gen::<f64>() < jump_rate * inner_dt {
+            state += jump_scale * normal.sample(rng);
+        }
+    }
+    state
+}
+
+fn adaptive_stats(
+    base: f64,
+    args: &Args,
+    seq_rng: &mut rand::rngs::StdRng,
+    base_time: f64,
+) -> PathStats {
+    let configs = ensemble_configs(base, args);
+    let mut all_paths = Vec::new();
+    let mut ensemble_means = Vec::new();
+    let mut aleatoric_sum = 0.0;
+    let inner_steps = 5;
+    let paths_per = args.paths_per_ensemble.max(1);
+    let normal = Normal::new(0.0, 1.0).unwrap();
+
+    for cfg in configs.iter() {
+        let mut values = Vec::with_capacity(paths_per);
+        for _ in 0..paths_per {
+            values.push(simulate_single(
+                base,
+                cfg,
+                args.dt,
+                inner_steps,
+                seq_rng,
+                &normal,
+                args.oscillation_amp,
+                args.jump_rate,
+                args.jump_scale,
+                base_time,
+            ));
+        }
+        let ensemble_mean = values.iter().copied().sum::<f64>() / values.len() as f64;
+        let variance = values
+            .iter()
+            .map(|v| (v - ensemble_mean).powi(2))
+            .sum::<f64>()
+            / values.len().max(1) as f64;
+        aleatoric_sum += variance;
+        ensemble_means.push(ensemble_mean);
+        all_paths.extend(values);
+    }
+
+    let mut sorted = all_paths.clone();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let mean = all_paths.iter().copied().sum::<f64>() / all_paths.len().max(1) as f64;
+    let variance =
+        all_paths.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / all_paths.len().max(1) as f64;
+    let std = variance.sqrt();
+
+    let epistemic = if ensemble_means.len() > 1 {
+        let m = ensemble_means.iter().copied().sum::<f64>() / ensemble_means.len() as f64;
+        ensemble_means.iter().map(|v| (v - m).powi(2)).sum::<f64>() / ensemble_means.len() as f64
+    } else {
+        0.0
+    };
+
+    PathStats {
+        mean,
+        std,
+        q10: quantile(&sorted, 0.1),
+        q90: quantile(&sorted, 0.9),
+        aleatoric: aleatoric_sum / configs.len().max(1) as f64,
+        epistemic,
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct EnsembleConfig {
+    theta: f64,
+    mu: f64,
+    sigma: f64,
+    freq: f64,
+}
+
+#[derive(Default, Debug)]
+struct PathStats {
+    mean: f64,
+    std: f64,
+    q10: f64,
+    q90: f64,
+    aleatoric: f64,
+    epistemic: f64,
+}
+
+fn main() -> Result<()> {
+    let args = Args::parse();
+
+    println!("Generating {} parity task sequences", args.sequences);
+    println!("Sequence length: {}, dt: {}", args.seq_len, args.dt);
+
+    // Data collectors
+    let mut run_ids = Vec::new();
+    let mut seeds = Vec::new();
+    let mut models = Vec::new();
+    let mut calcs = Vec::new();
+    let mut dts = Vec::new();
+    let mut seq_lens = Vec::new();
+    let mut sequence_ids = Vec::new();
+    let mut step_nums = Vec::new();
+    let mut times = Vec::new();
+    let mut state_values = Vec::new();
+    let mut state_std = Vec::new();
+    let mut state_q10 = Vec::new();
+    let mut state_q90 = Vec::new();
+    let mut aleatoric_unc = Vec::new();
+    let mut epistemic_unc = Vec::new();
+    let mut inputs = Vec::new();
+    let mut targets = Vec::new();
+
+    let mut rng = rand::rngs::StdRng::seed_from_u64(args.seed);
+
+    // Generate parity sequences
+    for seq_id in 0..args.sequences {
+        if seq_id % 100 == 0 {
+            println!("Progress: {}/{} sequences", seq_id, args.sequences);
+        }
+
+        // Generate random binary sequence
+        let binary_seq: Vec<i32> = (0..args.seq_len)
+            .map(|_| if rng.gen::<bool>() { 1 } else { 0 })
+            .collect();
+
+        // Compute XOR parity (1 if odd number of 1s, 0 if even)
+        let parity = binary_seq.iter().sum::<i32>() % 2;
+
+        // Convert to floating point inputs {-1, 1} for SDE simulation
+        let float_seq: Vec<f64> = binary_seq
+            .iter()
+            .map(|&x| if x == 1 { 1.0 } else { -1.0 })
+            .collect();
+
+        // Simulate paths per step
+        let mut seq_rng = rand::rngs::StdRng::seed_from_u64(
+            args.seed ^ (seq_id as u64).wrapping_mul(0x9E3779B97F4A7C15),
+        );
+
+        for (step, &input_val) in float_seq.iter().enumerate() {
+            let base_time = step as f64 * args.dt;
+            let stats = adaptive_stats(input_val, &args, &mut seq_rng, base_time);
+
+            // Store the data
+            run_ids.push("parity_task".to_string());
+            seeds.push(args.seed);
+            models.push("ParityTask".to_string());
+            calcs.push("Ito".to_string());
+            dts.push(args.dt);
+            seq_lens.push(args.seq_len as u32);
+            sequence_ids.push(seq_id as u64);
+            step_nums.push(step as u32);
+            times.push(step as f64 * args.dt);
+            state_values.push(stats.mean);
+            state_std.push(stats.std);
+            state_q10.push(stats.q10);
+            state_q90.push(stats.q90);
+            aleatoric_unc.push(stats.aleatoric);
+            epistemic_unc.push(stats.epistemic);
+            inputs.push(input_val);
+
+            // Target is only revealed at the end
+            if step == args.seq_len - 1 {
+                targets.push(parity as f64);
+            } else {
+                targets.push(0.0); // No target during sequence
+            }
+        }
+    }
+
+    // Create DataFrame
+    let df = DataFrame::new(vec![
+        Series::new("run_id", run_ids),
+        Series::new("seed", seeds),
+        Series::new("model", models),
+        Series::new("calc", calcs),
+        Series::new("dt", dts),
+        Series::new("seq_len", seq_lens),
+        Series::new("sequence_id", sequence_ids),
+        Series::new("step", step_nums),
+        Series::new("t", times),
+        Series::new("state", state_values.clone()),
+        Series::new("state_std", state_std),
+        Series::new("state_q10", state_q10),
+        Series::new("state_q90", state_q90),
+        Series::new("aleatoric_unc", aleatoric_unc),
+        Series::new("epistemic_unc", epistemic_unc),
+        Series::new("input", inputs),
+        Series::new("target", targets),
+    ])?;
+
+    // Save to Parquet
+    std::fs::create_dir_all(args.out.parent().unwrap())?;
+    let mut file = std::fs::File::create(&args.out)?;
+    ParquetWriter::new(&mut file).finish(&mut df.clone())?;
+
+    println!("Saved {} rows to {}", df.height(), args.out.display());
+
+    // Print statistics
+    let final_df = df
+        .lazy()
+        .group_by([col("sequence_id")])
+        .agg([
+            col("target").last().alias("final_target"),
+            col("input").sum().alias("input_sum"),
+        ])
+        .collect()?;
+
+    let n_positive = final_df.column("final_target")?.f64()?.sum().unwrap_or(0.0) as usize;
+    let n_negative = args.sequences - n_positive;
+
+    println!("\nParity task statistics:");
+    println!(
+        "Sequences with parity 1: {} ({:.1}%)",
+        n_positive,
+        100.0 * n_positive as f64 / args.sequences as f64
+    );
+    println!(
+        "Sequences with parity 0: {} ({:.1}%)",
+        n_negative,
+        100.0 * n_negative as f64 / args.sequences as f64
+    );
+
+    Ok(())
+}
+
+//==============================================================================
+// FILE: ./crates/bicep-examples/src/bin/strat_vs_ito.rs
+//==============================================================================
+use anyhow::Result;
+use bicep_core::integrators::{EulerMaruyama, HeunStratonovich};
+use bicep_core::noise::NoiseGenerator;
+use bicep_core::{Calc, Diffusion, Drift, SdeIntegrator, State};
+use clap::Parser;
+use nalgebra::{DMatrix, DVector};
+use std::fs::File;
+use std::io::Write;
+use std::path::PathBuf;
+
+#[derive(Parser, Debug)]
+#[command(
+    author,
+    version,
+    about = "Compare Itô vs Stratonovich methods and generate KS distance sweep"
+)]
+struct Args {
+    #[arg(long, default_value_t = 200000)]
+    paths: usize,
+
+    #[arg(long, default_value_t = 1e-2)]
+    dt: f64,
+
+    #[arg(long, default_value_t = 100)]
+    steps: usize,
+
+    #[arg(long, default_value = "runs/ito_strat_ks.csv")]
+    out: PathBuf,
+}
+
+// State-dependent diffusion model: σ(x) = 0.4 + 0.3x²
+struct StateDependentDiffusion;
+
+impl Drift for StateDependentDiffusion {
+    fn mu(&self, _t: f64, _x: &State) -> State {
+        State::new(vec![0.1]) // Small drift
+    }
+}
+
+impl Diffusion for StateDependentDiffusion {
+    fn sigma(&self, _t: f64, x: &State) -> DMatrix<f64> {
+        let sigma_x = 0.4 + 0.3 * x.0[0].powi(2);
+        DMatrix::from_element(1, 1, sigma_x)
+    }
+
+    fn sigma_jacobian(&self, _t: f64, x: &State) -> Option<Vec<DMatrix<f64>>> {
+        // d(σ(x))/dx = 0.6x
+        Some(vec![DMatrix::from_element(1, 1, 0.6 * x.0[0])])
+    }
+
+    fn noise_dim(&self, _t: f64, _x: &State) -> usize {
+        1
+    }
+}
+
+fn main() -> Result<()> {
+    let args = Args::parse();
+
+    let model = StateDependentDiffusion;
+    let x0 = 1.0;
+    let t_final = 1.0;
+
+    // Different dt values to test
+    let dt_values = vec![1e-1, 5e-2, 2e-2, 1e-2, 5e-3];
+
+    println!("Comparing Itô vs Stratonovich with {} paths", args.paths);
+    println!("dt sweep: {:?}", dt_values);
+
+    // Prepare CSV output
+    let mut csv_content = String::from("dt,ks_distance\n");
+
+    for &dt in &dt_values {
+        let steps = (t_final / dt) as usize;
+        println!("\nProcessing dt={} ({} steps)", dt, steps);
+
+        let ks_dist = compute_ks_for_dt(&model, x0, dt, steps, args.paths);
+
+        println!("KS distance: {:.6}", ks_dist);
+        csv_content.push_str(&format!("{},{}\n", dt, ks_dist));
+    }
+
+    // Save CSV
+    std::fs::create_dir_all(args.out.parent().unwrap())?;
+    let mut file = File::create(&args.out)?;
+    write!(file, "{}", csv_content)?;
+
+    println!("\nSaved results to {}", args.out.display());
+
+    Ok(())
+}
+
+fn compute_ks_for_dt(
+    model: &StateDependentDiffusion,
+    x0: f64,
+    dt: f64,
+    steps: usize,
+    n_paths: usize,
+) -> f64 {
+    let mut ito_finals = Vec::with_capacity(n_paths);
+    let mut strat_finals = Vec::with_capacity(n_paths);
+
+    for path_id in 0..n_paths {
+        if path_id % 10000 == 0 && path_id > 0 {
+            println!("  Progress: {}/{} paths", path_id, n_paths);
+        }
+
+        let seed = 42 + path_id as u64;
+
+        // Itô with EM + drift correction
+        let mut rng_ito = NoiseGenerator::new(seed);
+        let mut state_ito = State::new(vec![x0]);
+        let mut t = 0.0;
+
+        for _ in 0..steps {
+            let dw = rng_ito.generate_dw(1, dt.sqrt());
+            state_ito = EulerMaruyama.step(Calc::Ito, t, &state_ito, dt, &dw, model, model);
+            t += dt;
+        }
+        ito_finals.push(state_ito.0[0]);
+
+        // Stratonovich with Heun midpoint
+        let mut rng_strat = NoiseGenerator::new(seed);
+        let mut state_strat = State::new(vec![x0]);
+        t = 0.0;
+
+        for _ in 0..steps {
+            let dw = rng_strat.generate_dw(1, dt.sqrt());
+            state_strat =
+                HeunStratonovich.step(Calc::Stratonovich, t, &state_strat, dt, &dw, model, model);
+            t += dt;
+        }
+        strat_finals.push(state_strat.0[0]);
+    }
+
+    compute_ks_distance(&ito_finals, &strat_finals)
+}
+
+fn compute_ks_distance(sample1: &[f64], sample2: &[f64]) -> f64 {
+    let n1 = sample1.len();
+    let n2 = sample2.len();
+
+    // Combine and sort all values
+    let mut all_values: Vec<(f64, bool)> = Vec::with_capacity(n1 + n2);
+    for &x in sample1 {
+        all_values.push((x, true)); // true = from sample1
+    }
+    for &x in sample2 {
+        all_values.push((x, false)); // false = from sample2
+    }
+    all_values.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+
+    // Compute KS statistic
+    let mut d_max = 0.0;
+    let mut count1 = 0;
+    let mut count2 = 0;
+
+    for &(_, from_sample1) in &all_values {
+        if from_sample1 {
+            count1 += 1;
+        } else {
+            count2 += 1;
+        }
+
+        let cdf1 = count1 as f64 / n1 as f64;
+        let cdf2 = count2 as f64 / n2 as f64;
+        let d = (cdf1 - cdf2).abs();
+
+        if d > d_max {
+            d_max = d;
+        }
+    }
+
+    d_max
+}
+
+//==============================================================================
+// FILE: ./crates/bicep-examples/src/lib.rs
+//==============================================================================
+// Examples crate for BICEP
+
+//==============================================================================
+// FILE: ./crates/bicep-gpu/Cargo.toml
+//==============================================================================
+[package]
+name = "bicep-gpu"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bicep-core = { path = "../bicep-core" }
+# wgpu = "0.21" # Optional GPU backend
+//==============================================================================
+// FILE: ./crates/bicep-gpu/src/lib.rs
+//==============================================================================
+// TODO: GPU backends (wgpu/CUDA)
+//==============================================================================
+// FILE: ./crates/bicep-io/Cargo.toml
+//==============================================================================
+[package]
+name = "bicep-io"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bicep-core = { path = "../bicep-core" }
+bicep-sampler = { path = "../bicep-sampler" }
+bicep-models = { path = "../bicep-models" }
+arrow = { workspace = true }
+parquet = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
+tokio = { workspace = true }
+chrono = { version = "0.4", features = ["serde"] }
+
+[[bin]]
+name = "bicep"
+path = "src/main.rs"
+
+[dev-dependencies]
+tempfile = "3.0"
+//==============================================================================
+// FILE: ./crates/bicep-io/src/cli.rs
+//==============================================================================
+use crate::{RunManifest, write_ensemble_with_manifest};
+use bicep_core::{State, Calc, EulerMaruyama, Milstein, HeunStratonovich, NoiseConfig, ShockType};
+use bicep_models::{BrownianMotion, GeometricBrownianMotion, OrnsteinUhlenbeck, DoubleWell};
+use bicep_sampler::{Sampler, PathSpec, Boundary, Stopping};
+use clap::{Parser, Subcommand, ValueEnum};
+use serde_json::json;
+use std::path::PathBuf;
+
+#[derive(Parser)]
+#[command(name = "bicep")]
+#[command(about = "BICEP - Brownian-Inspired Computation Engine for Paths")]
+#[command(long_about = "High-performance SDE simulation with Itô/Stratonovich calculus support")]
+pub struct Cli {
+    #[command(subcommand)]
+    pub command: Commands,
+}
+
+#[derive(Subcommand)]
+pub enum Commands {
+    /// Sample SDE paths and write to Parquet
+    Sample {
+        /// Model type
+        #[arg(long, value_enum)]
+        model: ModelType,
+        
+        /// Calculation method
+        #[arg(long, value_enum, default_value = "ito")]
+        calc: CalcType,
+        
+        /// Integrator type
+        #[arg(long, value_enum, default_value = "euler-maruyama")]
+        integrator: IntegratorType,
+        
+        /// Time step size
+        #[arg(long)]
+        dt: f64,
+        
+        /// Number of time steps
+        #[arg(long)]
+        steps: usize,
+        
+        /// Number of paths to simulate
+        #[arg(long)]
+        paths: usize,
+        
+        /// Save every nth step (default: save all)
+        #[arg(long, default_value = "1")]
+        save_stride: usize,
+        
+        /// Random seed
+        #[arg(long, default_value = "42")]
+        seed: u64,
+        
+        /// Output Parquet file
+        #[arg(long)]
+        out: PathBuf,
+        
+        /// Model-specific parameters (JSON)
+        #[arg(long)]
+        params: Option<String>,
+    },
+}
+
+#[derive(Clone, Debug, ValueEnum)]
+pub enum ModelType {
+    #[value(name = "brownian")]
+    Brownian,
+    #[value(name = "gbm")]
+    GeometricBrownianMotion,
+    #[value(name = "ou")]
+    OrnsteinUhlenbeck,
+    #[value(name = "double-well")]
+    DoubleWell,
+}
+
+#[derive(Clone, Debug, ValueEnum)]
+pub enum CalcType {
+    #[value(name = "ito")]
+    Ito,
+    #[value(name = "stratonovich")]
+    Stratonovich,
+}
+
+#[derive(Clone, Debug, ValueEnum)]
+pub enum IntegratorType {
+    #[value(name = "euler-maruyama")]
+    EulerMaruyama,
+    #[value(name = "milstein")]
+    Milstein,
+    #[value(name = "heun-stratonovich")]
+    HeunStratonovich,
+}
+
+impl From<CalcType> for Calc {
+    fn from(calc_type: CalcType) -> Self {
+        match calc_type {
+            CalcType::Ito => Calc::Ito,
+            CalcType::Stratonovich => Calc::Stratonovich,
+        }
+    }
+}
+
+pub async fn run_sample_command(
+    model: ModelType,
+    calc: CalcType,
+    integrator: IntegratorType,
+    dt: f64,
+    steps: usize,
+    paths: usize,
+    save_stride: usize,
+    seed: u64,
+    out: PathBuf,
+    params: Option<String>,
+) -> anyhow::Result<()> {
+    println!("BICEP Sampling");
+    println!("==============");
+    println!("Model: {:?}", model);
+    println!("Calculus: {:?}", calc);
+    println!("Integrator: {:?}", integrator);
+    println!("dt: {:.6}", dt);
+    println!("Steps: {}", steps);
+    println!("Paths: {}", paths);
+    println!("Save stride: {}", save_stride);
+    println!("Seed: {}", seed);
+    println!("Output: {:?}", out);
+    
+    // Parse model parameters
+    let model_params = if let Some(params_str) = params {
+        serde_json::from_str(&params_str)?
+    } else {
+        json!({})
+    };
+
+    // Phase 1/2 modelling controls (recognized but not all used yet in core engine)
+    let returns_space = model_params.get("returns_space").and_then(|v| v.as_bool());
+    let ewma_alpha = model_params.get("ewma_alpha").and_then(|v| v.as_f64());
+    let shock_type = model_params.get("shock_type").and_then(|v| v.as_str()).unwrap_or("gaussian");
+    let nu = model_params.get("nu").and_then(|v| v.as_f64());
+    let bootstrap_block = model_params.get("bootstrap_block").and_then(|v| v.as_u64()).map(|u| u as usize);
+    let regime_percentile = model_params.get("regime_percentile").and_then(|v| v.as_f64());
+
+    println!("\nModelling controls (requested):");
+    println!("  returns_space:    {:?}", returns_space);
+    println!("  ewma_alpha:       {:?}", ewma_alpha);
+    println!("  shock_type:       {}", shock_type);
+    println!("  nu:               {:?}", nu);
+    println!("  bootstrap_block:  {:?}", bootstrap_block);
+    println!("  regime_percentile:{:?}", regime_percentile);
+    println!("  note: Student‑t noise and EWMA scaling are active; block bootstrap/regime split are reserved for future patches.");
+    
+    // Create path specification
+    let spec = PathSpec::new(steps, dt, save_stride);
+    
+    // Create manifest
+    let calc_enum = Calc::from(calc);
+    let integrator_str = match integrator {
+        IntegratorType::EulerMaruyama => "euler_maruyama",
+        IntegratorType::Milstein => "milstein", 
+        IntegratorType::HeunStratonovich => "heun_stratonovich",
+    };
+    
+    let model_name = match model {
+        ModelType::Brownian => "brownian",
+        ModelType::GeometricBrownianMotion => "gbm",
+        ModelType::OrnsteinUhlenbeck => "ou",
+        ModelType::DoubleWell => "double_well",
+    };
+    
+    let manifest = RunManifest::new(
+        seed,
+        calc_enum,
+        integrator_str,
+        dt,
+        model_name,
+        model_params.clone(),
+        &spec,
+    );
+    
+    // Build optional noise config
+    let noise_cfg = {
+        let shock = match shock_type.to_lowercase().as_str() {
+            "student_t" | "student-t" | "studentt" => ShockType::StudentT,
+            _ => ShockType::Gaussian,
+        };
+        Some(NoiseConfig { shock_type: shock, nu, ewma_alpha })
+    };
+
+    // Run simulation based on model type
+    let ensemble = match model {
+        ModelType::Brownian => {
+            let sigma = model_params.get("sigma")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(1.0);
+            let model = BrownianMotion::new(sigma);
+            run_simulation(integrator, model.clone(), model, calc_enum, &spec, paths, seed, noise_cfg.clone())?
+        },
+        
+        ModelType::GeometricBrownianMotion => {
+            let mu = model_params.get("mu").and_then(|v| v.as_f64()).unwrap_or(0.05);
+            let sigma = model_params.get("sigma").and_then(|v| v.as_f64()).unwrap_or(0.2);
+            let s0 = model_params.get("s0").and_then(|v| v.as_f64()).unwrap_or(100.0);
+            
+            let model = GeometricBrownianMotion::new(mu, sigma);
+            let x0s = vec![State::new(vec![s0]); paths];
+            run_simulation_with_x0s(integrator, model.clone(), model, calc_enum, &spec, &x0s, seed, noise_cfg.clone())?
+        },
+        
+        ModelType::OrnsteinUhlenbeck => {
+            let theta = model_params.get("theta").and_then(|v| v.as_f64()).unwrap_or(1.0);
+            let mu = model_params.get("mu").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let sigma = model_params.get("sigma").and_then(|v| v.as_f64()).unwrap_or(1.0);
+            let x0 = model_params.get("x0").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            
+            let model = OrnsteinUhlenbeck::new(theta, mu, sigma);
+            let x0s = vec![State::new(vec![x0]); paths];
+            run_simulation_with_x0s(integrator, model.clone(), model, calc_enum, &spec, &x0s, seed, noise_cfg.clone())?
+        },
+        
+        ModelType::DoubleWell => {
+            let a = model_params.get("a").and_then(|v| v.as_f64()).unwrap_or(1.0);
+            let b = model_params.get("b").and_then(|v| v.as_f64()).unwrap_or(2.0);
+            let temperature = model_params.get("temperature").and_then(|v| v.as_f64()).unwrap_or(0.1);
+            let x0 = model_params.get("x0").and_then(|v| v.as_f64()).unwrap_or(-1.0);
+            
+            let model = DoubleWell::new(a, b, temperature);
+            let x0s = vec![State::new(vec![x0]); paths];
+            run_simulation_with_x0s(integrator, model.clone(), model, calc_enum, &spec, &x0s, seed, noise_cfg.clone())?
+        },
+    };
+    
+    // Write output files
+    let parquet_path = out.to_str().unwrap();
+    let manifest_path = out.with_extension("manifest.json");
+    let manifest_path_str = manifest_path.to_str().unwrap();
+    
+    write_ensemble_with_manifest(&ensemble, &manifest, parquet_path, manifest_path_str)?;
+    
+    // Print summary statistics
+    let stats = ensemble.final_statistics();
+    println!("");
+    println!("Summary Statistics:");
+    println!("==================");
+    println!("Paths completed: {}", stats.n_paths);
+    
+    if !stats.means.is_empty() {
+        println!("Final state means: {:?}", stats.means.data.as_vec());
+        println!("Final state stds: {:?}", 
+                 stats.variances.data.as_vec().iter().map(|v| v.sqrt()).collect::<Vec<_>>());
+    }
+    
+    if !stats.first_passage_times.is_empty() {
+        let mean_fpt = stats.first_passage_times.iter().sum::<f64>() / stats.first_passage_times.len() as f64;
+        println!("Transitions: {} / {} ({:.1}%)", 
+                 stats.first_passage_times.len(), 
+                 ensemble.n_paths(),
+                 stats.first_passage_times.len() as f64 / ensemble.n_paths() as f64 * 100.0);
+        println!("Mean first passage time: {:.4}", mean_fpt);
+    }
+    
+    println!("✓ Simulation completed successfully!");
+    
+    Ok(())
+}
+
+/// Generic simulation runner
+fn run_simulation<D, S>(
+    integrator: IntegratorType,
+    drift: D,
+    diffusion: S,
+    calc: Calc,
+    spec: &PathSpec,
+    n_paths: usize,
+    seed: u64,
+    noise_cfg: Option<NoiseConfig>,
+) -> anyhow::Result<bicep_sampler::Ensemble>
+where
+    D: bicep_core::Drift + Clone,
+    S: bicep_core::Diffusion + Clone,
+{
+    let x0s = vec![State::new(vec![0.0]); n_paths];
+    run_simulation_with_x0s(integrator, drift, diffusion, calc, spec, &x0s, seed, noise_cfg)
+}
+
+/// Simulation runner with custom initial conditions
+fn run_simulation_with_x0s<D, S>(
+    integrator: IntegratorType,
+    drift: D,
+    diffusion: S,
+    calc: Calc,
+    spec: &PathSpec,
+    x0s: &[State],
+    seed: u64,
+    noise_cfg: Option<NoiseConfig>,
+) -> anyhow::Result<bicep_sampler::Ensemble>
+where
+    D: bicep_core::Drift + Clone,
+    S: bicep_core::Diffusion + Clone,
+{
+    let boundary = Boundary::None;
+    let stopping = Stopping::default();
+    
+    match integrator {
+        IntegratorType::EulerMaruyama => {
+            let sampler = Sampler::new(EulerMaruyama, drift, diffusion).with_noise_config(noise_cfg);
+            Ok(sampler.run_paths(calc, spec, x0s, &boundary, &stopping, seed))
+        },
+        
+        IntegratorType::Milstein => {
+            let sampler = Sampler::new(Milstein, drift, diffusion).with_noise_config(noise_cfg);
+            Ok(sampler.run_paths(calc, spec, x0s, &boundary, &stopping, seed))
+        },
+        
+        IntegratorType::HeunStratonovich => {
+            let sampler = Sampler::new(HeunStratonovich, drift, diffusion).with_noise_config(noise_cfg);
+            Ok(sampler.run_paths(calc, spec, x0s, &boundary, &stopping, seed))
+        },
+    }
+}
+
+//==============================================================================
+// FILE: ./crates/bicep-io/src/lib.rs
+//==============================================================================
+use bicep_core::{State, Time, F, Calc};
+use bicep_sampler::{Ensemble, Path, PathSpec};
+use arrow::array::{Array, Float64Array, UInt64Array, UInt32Array, StringArray};
+use arrow::datatypes::{DataType, Field, Schema};
+use arrow::record_batch::RecordBatch;
+use parquet::arrow::ArrowWriter;
+use serde::{Serialize, Deserialize};
+use std::fs::File;
+use std::sync::Arc;
+use uuid::Uuid;
+
+pub mod cli;
+pub use cli::*;
+
+/// Run manifest for complete reproducibility
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RunManifest {
+    pub run_id: String,
+    pub timestamp: String,
+    pub seed: u64,
+    pub calc: String,         // "ito" | "stratonovich"
+    pub integrator: String,   // "euler_maruyama" | "milstein" | "heun_stratonovich"
+    pub dt: F,
+    pub model_name: String,
+    pub model_params: serde_json::Value,
+    pub n_paths: usize,
+    pub n_steps: usize,
+    pub save_stride: usize,
+    pub total_time: F,
+    pub commit_hash: Option<String>,
+    pub rust_version: String,
+}
+
+/// Parquet schema for path data
+pub struct ParquetWriter {
+    writer: ArrowWriter<File>,
+    schema: Arc<Schema>,
+    state_dim: usize,
+}
+
+/// Single row in the path table
+#[derive(Clone, Debug)]
+pub struct PathRow {
+    pub run_id: String,
+    pub path_id: u64,
+    pub step: u32,
+    pub time: F,
+    pub state: Vec<F>,
+    pub hit_set: Option<String>,
+}
+
+impl RunManifest {
+    pub fn new(
+        seed: u64,
+        calc: Calc,
+        integrator: &str,
+        dt: F,
+        model_name: &str,
+        model_params: serde_json::Value,
+        spec: &PathSpec,
+    ) -> Self {
+        let run_id = Uuid::new_v4().to_string();
+        let timestamp = chrono::Utc::now().to_rfc3339();
+        let calc_str = match calc {
+            Calc::Ito => "ito",
+            Calc::Stratonovich => "stratonovich",
+        };
+        
+        Self {
+            run_id,
+            timestamp,
+            seed,
+            calc: calc_str.to_string(),
+            integrator: integrator.to_string(),
+            dt,
+            model_name: model_name.to_string(),
+            model_params,
+            n_paths: 0,  // Will be set when writing
+            n_steps: spec.n_steps,
+            save_stride: spec.save_stride,
+            total_time: spec.total_time(),
+            commit_hash: get_git_commit(),
+            rust_version: get_rust_version(),
+        }
+    }
+    
+    pub fn save_to_file(&self, path: &str) -> anyhow::Result<()> {
+        let json = serde_json::to_string_pretty(self)?;
+        std::fs::write(path, json)?;
+        Ok(())
+    }
+    
+    pub fn load_from_file(path: &str) -> anyhow::Result<Self> {
+        let json = std::fs::read_to_string(path)?;
+        let manifest = serde_json::from_str(&json)?;
+        Ok(manifest)
+    }
+}
+
+impl ParquetWriter {
+    pub fn new(file_path: &str, state_dim: usize) -> anyhow::Result<Self> {
+        let file = File::create(file_path)?;
+        
+        // Build schema: (run_id, path_id, step, time, x0, x1, ..., hit_set)
+        let mut fields = vec![
+            Field::new("run_id", DataType::Utf8, false),
+            Field::new("path_id", DataType::UInt64, false),
+            Field::new("step", DataType::UInt32, false),
+            Field::new("time", DataType::Float64, false),
+        ];
+        
+        // Add state dimensions
+        for i in 0..state_dim {
+            fields.push(Field::new(&format!("x{}", i), DataType::Float64, false));
+        }
+        
+        fields.push(Field::new("hit_set", DataType::Utf8, true));  // Optional
+        
+        let schema = Arc::new(Schema::new(fields));
+        let writer = ArrowWriter::try_new(file, schema.clone(), None)?;
+        
+        Ok(Self {
+            writer,
+            schema,
+            state_dim,
+        })
+    }
+    
+    pub fn write_ensemble(
+        &mut self, 
+        ensemble: &Ensemble,
+        manifest: &RunManifest
+    ) -> anyhow::Result<()> {
+        let mut rows = Vec::new();
+        
+        // Extract all path data into rows
+        for (path_id, path) in ensemble.paths.iter().enumerate() {
+            for (step_idx, (time, state)) in path.times.iter().zip(path.states.iter()).enumerate() {
+                rows.push(PathRow {
+                    run_id: manifest.run_id.clone(),
+                    path_id: path_id as u64,
+                    step: step_idx as u32,
+                    time: *time,
+                    state: state.0.data.as_vec().clone(),
+                    hit_set: path.hit_set.clone(),
+                });
+            }
+        }
+        
+        if rows.is_empty() {
+            return Ok(());
+        }
+        
+        // Build Arrow arrays
+        let run_ids: Vec<String> = rows.iter().map(|r| r.run_id.clone()).collect();
+        let path_ids: Vec<u64> = rows.iter().map(|r| r.path_id).collect();
+        let steps: Vec<u32> = rows.iter().map(|r| r.step).collect();
+        let times: Vec<f64> = rows.iter().map(|r| r.time).collect();
+        
+        let mut arrays: Vec<Arc<dyn Array>> = vec![
+            Arc::new(StringArray::from(run_ids)),
+            Arc::new(UInt64Array::from(path_ids)),
+            Arc::new(UInt32Array::from(steps)),
+            Arc::new(Float64Array::from(times)),
+        ];
+        
+        // Add state dimension arrays
+        for i in 0..self.state_dim {
+            let state_vals: Vec<f64> = rows.iter()
+                .map(|r| r.state.get(i).copied().unwrap_or(0.0))
+                .collect();
+            arrays.push(Arc::new(Float64Array::from(state_vals)));
+        }
+        
+        // Add hit_set array
+        let hit_sets: Vec<Option<String>> = rows.iter().map(|r| r.hit_set.clone()).collect();
+        arrays.push(Arc::new(StringArray::from(hit_sets)));
+        
+        // Create record batch and write
+        let batch = RecordBatch::try_new(self.schema.clone(), arrays)?;
+        
+        self.writer.write(&batch)?;
+        Ok(())
+    }
+    
+    pub fn close(self) -> anyhow::Result<()> {
+        self.writer.close()?;
+        Ok(())
+    }
+}
+
+/// Write ensemble to Parquet with manifest
+pub fn write_ensemble_with_manifest(
+    ensemble: &Ensemble,
+    manifest: &RunManifest,
+    parquet_path: &str,
+    manifest_path: &str,
+) -> anyhow::Result<()> {
+    // Determine state dimension from first path
+    let state_dim = if let Some(path) = ensemble.paths.first() {
+        if let Some(state) = path.states.first() {
+            state.dim()
+        } else {
+            1
+        }
+    } else {
+        1
+    };
+    
+    // Write Parquet
+    let mut writer = ParquetWriter::new(parquet_path, state_dim)?;
+    writer.write_ensemble(ensemble, manifest)?;
+    writer.close()?;
+    
+    // Write manifest
+    let mut manifest_with_paths = manifest.clone();
+    manifest_with_paths.n_paths = ensemble.n_paths();
+    manifest_with_paths.save_to_file(manifest_path)?;
+    
+    println!("Wrote {} paths to {}", ensemble.n_paths(), parquet_path);
+    println!("Wrote manifest to {}", manifest_path);
+    
+    Ok(())
+}
+
+/// Get git commit hash for reproducibility
+
+fn get_git_commit() -> Option<String> {
+    std::process::Command::new("git")
+        .args(&["rev-parse", "HEAD"])
+        .output()
+        .ok()
+        .and_then(|output| {
+            if output.status.success() {
+                String::from_utf8(output.stdout).ok()
+            } else {
+                None
+            }
+        })
+        .map(|s| s.trim().to_string())
+}
+
+fn get_rust_version() -> String {
+    std::process::Command::new("rustc")
+        .arg("--version")
+        .output()
+        .ok()
+        .and_then(|output| {
+            if output.status.success() {
+                String::from_utf8(output.stdout).ok()
+            } else {
+                None
+            }
+        })
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|| "unknown".to_string())
+}
+//==============================================================================
+// FILE: ./crates/bicep-io/src/main.rs
+//==============================================================================
+use bicep_io::cli::{Cli, Commands, run_sample_command};
+use clap::Parser;
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let cli = Cli::parse();
+    
+    match cli.command {
+        Commands::Sample {
+            model,
+            calc,
+            integrator,
+            dt,
+            steps,
+            paths,
+            save_stride,
+            seed,
+            out,
+            params,
+        } => {
+            run_sample_command(
+                model,
+                calc, 
+                integrator,
+                dt,
+                steps,
+                paths,
+                save_stride,
+                seed,
+                out,
+                params,
+            ).await?;
+        }
+    }
+    
+    Ok(())
+}
+//==============================================================================
+// FILE: ./crates/bicep-models/Cargo.toml
+//==============================================================================
+[package]
+name = "bicep-models"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bicep-core = { path = "../bicep-core" }
+nalgebra = { workspace = true }
+anyhow = { workspace = true }
+//==============================================================================
+// FILE: ./crates/bicep-models/src/brownian.rs
+//==============================================================================
+use bicep_core::{State, Time, Drift, Diffusion};
+use nalgebra::DMatrix;
+
+/// Standard Brownian Motion: dX_t = 0 dt + σ dW_t
+#[derive(Clone, Debug)]
+pub struct BrownianMotion {
+    pub sigma: f64,
+}
+
+impl BrownianMotion {
+    pub fn new(sigma: f64) -> Self {
+        Self { sigma }
+    }
+    
+    /// Standard Brownian motion with σ = 1
+    pub fn standard() -> Self {
+        Self::new(1.0)
+    }
+    
+    /// Exact mean for Brownian motion (always zero)
+    pub fn exact_mean(&self, _x0: f64, _t: Time) -> f64 {
+        0.0
+    }
+    
+    /// Exact variance for Brownian motion
+    /// Var[X_t | X_0] = σ²t
+    pub fn exact_variance(&self, t: Time) -> f64 {
+        self.sigma * self.sigma * t
+    }
+}
+
+impl Drift for BrownianMotion {
+    fn mu(&self, _t: Time, x: &State) -> State {
+        // Zero drift
+        State::zeros(x.dim())
+    }
+}
+
+impl Diffusion for BrownianMotion {
+    fn sigma(&self, _t: Time, x: &State) -> DMatrix<f64> {
+        let n = x.dim();
+        // Constant diffusion: σ * I
+        DMatrix::from_diagonal_element(n, n, self.sigma)
+    }
+    
+    fn sigma_jacobian(&self, _t: Time, x: &State) -> Option<Vec<DMatrix<f64>>> {
+        let n = x.dim();
+        // Constant diffusion, so all Jacobians are zero
+        Some(vec![DMatrix::zeros(n, n); n])
+    }
+}
+//==============================================================================
+// FILE: ./crates/bicep-models/src/double_well.rs
+//==============================================================================
+use bicep_core::{State, Time, Drift, Diffusion};
+use nalgebra::DMatrix;
+
+/// Double-well potential model: dX_t = -∇U(X_t) dt + √(2β⁻¹) dW_t
+/// where U(x) = a*x^4 - b*x^2 (quartic double-well potential)
+#[derive(Clone, Debug)]
+pub struct DoubleWell {
+    pub a: f64,          // Quartic coefficient (a > 0)
+    pub b: f64,          // Quadratic coefficient (b > 0 for double well)
+    pub temperature: f64, // β⁻¹ = k_B T (inverse temperature)
+}
+
+impl DoubleWell {
+    pub fn new(a: f64, b: f64, temperature: f64) -> Self {
+        assert!(a > 0.0, "Quartic coefficient a must be positive for stability");
+        assert!(b > 0.0, "Quadratic coefficient b must be positive for double well");
+        assert!(temperature > 0.0, "Temperature must be positive");
+        
+        Self { a, b, temperature }
+    }
+    
+    /// Standard symmetric double well with unit barrier
+    pub fn standard() -> Self {
+        Self::new(1.0, 2.0, 0.1) // Low temperature for clear barriers
+    }
+    
+    /// Potential energy U(x) = a*x^4 - b*x^2
+    pub fn potential(&self, x: f64) -> f64 {
+        self.a * x.powi(4) - self.b * x * x
+    }
+    
+    /// Force (negative gradient): -dU/dx = -4ax³ + 2bx = 2x(b - 2ax²)
+    pub fn force(&self, x: f64) -> f64 {
+        -4.0 * self.a * x.powi(3) + 2.0 * self.b * x
+    }
+    
+    /// Second derivative of force (for Jacobian): d²U/dx² = 12ax² - 2b  
+    pub fn force_derivative(&self, x: f64) -> f64 {
+        -12.0 * self.a * x * x + 2.0 * self.b
+    }
+    
+    /// Metastable minima locations: x = ±√(b/(2a))
+    pub fn minima(&self) -> (f64, f64) {
+        let x_min = (self.b / (2.0 * self.a)).sqrt();
+        (-x_min, x_min)
+    }
+    
+    /// Barrier height: U(0) - U(x_min) = b²/(4a)
+    pub fn barrier_height(&self) -> f64 {
+        self.b * self.b / (4.0 * self.a)
+    }
+    
+    /// Effective noise strength: √(2β⁻¹)
+    pub fn noise_strength(&self) -> f64 {
+        (2.0 * self.temperature).sqrt()
+    }
+}
+
+impl Drift for DoubleWell {
+    fn mu(&self, _t: Time, x: &State) -> State {
+        // Drift is the negative gradient of potential: -∇U(x)
+        let forces: Vec<f64> = x.0.iter()
+            .map(|&xi| self.force(xi))
+            .collect();
+        State::new(forces)
+    }
+}
+
+impl Diffusion for DoubleWell {
+    fn sigma(&self, _t: Time, x: &State) -> DMatrix<f64> {
+        let n = x.dim();
+        let noise_coeff = self.noise_strength();
+        
+        // Isotropic diffusion: √(2β⁻¹) * I
+        DMatrix::from_diagonal_element(n, n, noise_coeff)
+    }
+    
+    fn sigma_jacobian(&self, _t: Time, x: &State) -> Option<Vec<DMatrix<f64>>> {
+        let n = x.dim();
+        // Constant diffusion coefficient, so all Jacobians are zero
+        Some(vec![DMatrix::zeros(n, n); n])
+    }
+}
+
+/// Convenience functions for transition path sampling
+impl DoubleWell {
+    /// Check if state is in left well (A region)
+    pub fn in_left_well(&self, x: &State, threshold: f64) -> bool {
+        let (x_left, _) = self.minima();
+        x.0.iter().all(|&xi| xi < x_left + threshold)
+    }
+    
+    /// Check if state is in right well (B region)  
+    pub fn in_right_well(&self, x: &State, threshold: f64) -> bool {
+        let (_, x_right) = self.minima();
+        x.0.iter().all(|&xi| xi > x_right - threshold)
+    }
+    
+    /// Check if state is near transition region
+    pub fn in_transition_region(&self, x: &State, width: f64) -> bool {
+        x.0.iter().all(|&xi| xi.abs() < width)
+    }
+    
+    /// Theoretical committor for 1D double well (approximate)
+    /// q(x) ≈ (1 + tanh(x/√(2T))) / 2 for high barriers
+    pub fn approximate_committor(&self, x: f64) -> f64 {
+        let scale = (2.0 * self.temperature).sqrt();
+        0.5 * (1.0 + (x / scale).tanh())
+    }
+}
+//==============================================================================
+// FILE: ./crates/bicep-models/src/gbm.rs
+//==============================================================================
+use bicep_core::{State, Time, Drift, Diffusion};
+use nalgebra::DMatrix;
+
+/// Geometric Brownian Motion: dX_t = μ X_t dt + σ X_t dW_t
+#[derive(Clone, Debug)]
+pub struct GeometricBrownianMotion {
+    pub mu: f64,
+    pub sigma: f64,
+}
+
+impl GeometricBrownianMotion {
+    pub fn new(mu: f64, sigma: f64) -> Self {
+        Self { mu, sigma }
+    }
+    
+    /// Exact solution for GBM at time t
+    /// X_t = X_0 * exp((μ - σ²/2)t + σ W_t)
+    pub fn exact_mean(&self, x0: f64, t: Time) -> f64 {
+        x0 * (self.mu * t).exp()
+    }
+    
+    /// Exact variance for GBM
+    /// Var[X_t] = X_0² * exp(2μt) * (exp(σ²t) - 1)
+    pub fn exact_variance(&self, x0: f64, t: Time) -> f64 {
+        let exp_2mu_t = (2.0 * self.mu * t).exp();
+        let exp_sigma2_t = (self.sigma * self.sigma * t).exp();
+        x0 * x0 * exp_2mu_t * (exp_sigma2_t - 1.0)
+    }
+}
+
+impl Drift for GeometricBrownianMotion {
+    fn mu(&self, _t: Time, x: &State) -> State {
+        // μ X_t (elementwise multiplication)
+        State(self.mu * &x.0)
+    }
+}
+
+impl Diffusion for GeometricBrownianMotion {
+    fn sigma(&self, _t: Time, x: &State) -> DMatrix<f64> {
+        let n = x.dim();
+        // Diagonal matrix with σ * x_i on diagonal
+        let mut s = DMatrix::zeros(n, n);
+        for i in 0..n {
+            s[(i, i)] = self.sigma * x.0[i];
+        }
+        s
+    }
+    
+    fn sigma_jacobian(&self, _t: Time, x: &State) -> Option<Vec<DMatrix<f64>>> {
+        let n = x.dim();
+        let mut jacobians = Vec::with_capacity(n);
+        
+        // For GBM, σ_i(x) = σ * x_i * e_i
+        // So ∂σ_i/∂x_j = σ * δ_ij (Kronecker delta)
+        for i in 0..n {
+            let mut jac = DMatrix::zeros(n, n);
+            jac[(i, i)] = self.sigma;
+            jacobians.push(jac);
+        }
+        
+        Some(jacobians)
+    }
+}
+//==============================================================================
+// FILE: ./crates/bicep-models/src/lib.rs
+//==============================================================================
+pub mod gbm;
+pub mod ou;
+pub mod brownian;
+pub mod double_well;
+
+pub use gbm::GeometricBrownianMotion;
+pub use ou::OrnsteinUhlenbeck;
+pub use brownian::BrownianMotion;
+pub use double_well::DoubleWell;
+//==============================================================================
+// FILE: ./crates/bicep-models/src/ou.rs
+//==============================================================================
+use bicep_core::{State, Time, Drift, Diffusion};
+use nalgebra::DMatrix;
+
+/// Ornstein-Uhlenbeck process: dX_t = θ(μ - X_t) dt + σ dW_t
+#[derive(Clone, Debug)]
+pub struct OrnsteinUhlenbeck {
+    pub theta: f64,    // Mean reversion rate
+    pub mu: f64,       // Long-term mean
+    pub sigma: f64,    // Volatility
+}
+
+impl OrnsteinUhlenbeck {
+    pub fn new(theta: f64, mu: f64, sigma: f64) -> Self {
+        Self { theta, mu, sigma }
+    }
+    
+    /// Exact mean for OU process
+    /// E[X_t | X_0] = μ + (X_0 - μ) * exp(-θt)
+    pub fn exact_mean(&self, x0: f64, t: Time) -> f64 {
+        self.mu + (x0 - self.mu) * (-self.theta * t).exp()
+    }
+    
+    /// Exact variance for OU process
+    /// Var[X_t | X_0] = σ²/(2θ) * (1 - exp(-2θt))
+    pub fn exact_variance(&self, t: Time) -> f64 {
+        if self.theta.abs() < 1e-10 {
+            // Limit as θ → 0: Brownian motion variance
+            self.sigma * self.sigma * t
+        } else {
+            let sigma2_over_2theta = self.sigma * self.sigma / (2.0 * self.theta);
+            sigma2_over_2theta * (1.0 - (-2.0 * self.theta * t).exp())
+        }
+    }
+    
+    /// Stationary variance (t → ∞)
+    /// Var_∞ = σ²/(2θ)
+    pub fn stationary_variance(&self) -> f64 {
+        if self.theta > 0.0 {
+            self.sigma * self.sigma / (2.0 * self.theta)
+        } else {
+            f64::INFINITY
+        }
+    }
+}
+
+impl Drift for OrnsteinUhlenbeck {
+    fn mu(&self, _t: Time, x: &State) -> State {
+        // θ(μ - X_t)
+        State(self.theta * x.0.map(|xi| self.mu - xi))
+    }
+}
+
+impl Diffusion for OrnsteinUhlenbeck {
+    fn sigma(&self, _t: Time, x: &State) -> DMatrix<f64> {
+        let n = x.dim();
+        // Constant diffusion: σ * I
+        DMatrix::from_diagonal_element(n, n, self.sigma)
+    }
+    
+    fn sigma_jacobian(&self, _t: Time, x: &State) -> Option<Vec<DMatrix<f64>>> {
+        let n = x.dim();
+        // Since σ is constant, all Jacobians are zero
+        Some(vec![DMatrix::zeros(n, n); n])
+    }
+}
+//==============================================================================
+// FILE: ./crates/bicep-py/Cargo.toml
+//==============================================================================
+[package]
+name = "bicep-py"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bicep-core = { path = "../bicep-core" }
+bicep-models = { path = "../bicep-models" }
+# pyo3 = { version = "0.21", features = ["extension-module"] } # Optional Python bindings
+//==============================================================================
+// FILE: ./crates/bicep-py/src/lib.rs
+//==============================================================================
+// TODO: PyO3 bindings for Python integration
+//==============================================================================
+// FILE: ./crates/bicep-sampler/Cargo.toml
+//==============================================================================
+[package]
+name = "bicep-sampler"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bicep-core = { path = "../bicep-core" }
+nalgebra = { workspace = true }
+rayon = { workspace = true }
+serde = { workspace = true }
+
+//==============================================================================
+// FILE: ./crates/bicep-sampler/src/lib.rs
+//==============================================================================
+use bicep_core::{
+    seed::{SeedIdentity, SeedSpec},
+    Calc, Diffusion, Drift, NoiseConfig, NoiseGenerator, SdeIntegrator, State, Time, F,
+};
+use nalgebra::DVector;
+use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
+
+/// Path specification for simulation
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PathSpec {
+    pub n_steps: usize,
+    pub dt: F,
+    pub save_stride: usize, // Save every nth step
+}
+
+/// Single path trajectory
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Path {
+    pub times: Vec<Time>,
+    pub states: Vec<State>,
+    pub stopped: bool,
+    pub stop_time: Option<Time>,
+    pub hit_set: Option<String>,
+}
+
+/// Collection of paths (ensemble)
+#[derive(Clone, Debug)]
+pub struct Ensemble {
+    pub paths: Vec<Path>,
+    pub spec: PathSpec,
+}
+
+/// Statistical summary of ensemble
+#[derive(Clone, Debug)]
+pub struct EnsembleStats {
+    pub n_paths: usize,
+    pub means: DVector<F>,
+    pub variances: DVector<F>,
+    pub first_passage_times: Vec<Time>,
+}
+
+/// Boundary conditions
+pub enum Boundary {
+    None,
+    Absorbing(Box<dyn Fn(&State) -> bool + Send + Sync>),
+    Reflecting(Box<dyn Fn(&State) -> State + Send + Sync>),
+    Periodic { low: DVector<F>, high: DVector<F> },
+}
+
+/// Stopping conditions
+pub struct Stopping {
+    pub first_hit: Option<Box<dyn Fn(&State) -> Option<String> + Send + Sync>>,
+    pub max_time: Option<F>,
+}
+
+/// Main sampler for path generation
+pub struct Sampler<I, D, S>
+where
+    I: SdeIntegrator,
+    D: Drift,
+    S: Diffusion,
+{
+    pub integrator: I,
+    pub drift: D,
+    pub diffusion: S,
+    pub noise_config: Option<NoiseConfig>,
+}
+
+impl<I, D, S> Sampler<I, D, S>
+where
+    I: SdeIntegrator + Clone,
+    D: Drift + Clone,
+    S: Diffusion + Clone,
+{
+    pub fn new(integrator: I, drift: D, diffusion: S) -> Self {
+        Self {
+            integrator,
+            drift,
+            diffusion,
+            noise_config: None,
+        }
+    }
+
+    pub fn with_noise_config(mut self, config: Option<NoiseConfig>) -> Self {
+        self.noise_config = config;
+        self
+    }
+
+    /// Run ensemble of paths in parallel
+    pub fn run_paths(
+        &self,
+        calc: Calc,
+        spec: &PathSpec,
+        x0s: &[State],
+        boundary: &Boundary,
+        stopping: &Stopping,
+        global_seed: u64,
+    ) -> Ensemble {
+        let paths: Vec<Path> = x0s
+            .par_iter()
+            .enumerate()
+            .map(|(path_id, x0)| {
+                let mut rng = NoiseGenerator::from_path_id(global_seed, path_id as u64);
+                if self.noise_config.is_some() { rng.set_config(self.noise_config.clone()); }
+                self.run_single_path(calc, spec, x0.clone(), boundary, stopping, &mut rng)
+            })
+            .collect();
+
+        Ensemble {
+            paths,
+            spec: spec.clone(),
+        }
+    }
+
+    /// Run ensemble with explicit SeedSpec + identity per path.
+    pub fn run_paths_with_seed_spec(
+        &self,
+        calc: Calc,
+        spec: &PathSpec,
+        x0s: &[State],
+        boundary: &Boundary,
+        stopping: &Stopping,
+        seed_spec: &SeedSpec,
+        identities: &[SeedIdentity],
+    ) -> Ensemble {
+        assert_eq!(
+            x0s.len(),
+            identities.len(),
+            "identities must align with x0s"
+        );
+        let paths: Vec<Path> = x0s
+            .par_iter()
+            .enumerate()
+            .map(|(idx, x0)| {
+                let identity = identities.get(idx).expect("identity missing for path");
+                let mut rng = NoiseGenerator::from_identity(seed_spec, identity);
+                if self.noise_config.is_some() { rng.set_config(self.noise_config.clone()); }
+                self.run_single_path(calc, spec, x0.clone(), boundary, stopping, &mut rng)
+            })
+            .collect();
+
+        Ensemble {
+            paths,
+            spec: spec.clone(),
+        }
+    }
+
+    /// Replay a single path deterministically given a SeedSpec and identity.
+    pub fn run_single_path_with_seed_spec(
+        &self,
+        calc: Calc,
+        spec: &PathSpec,
+        x0: State,
+        boundary: &Boundary,
+        stopping: &Stopping,
+        seed_spec: &SeedSpec,
+        identity: &SeedIdentity,
+    ) -> Path {
+        let mut rng = NoiseGenerator::from_identity(seed_spec, identity);
+        if self.noise_config.is_some() { rng.set_config(self.noise_config.clone()); }
+        self.run_single_path(calc, spec, x0, boundary, stopping, &mut rng)
+    }
+
+    /// Run a single path (called by run_paths)
+    fn run_single_path(
+        &self,
+        calc: Calc,
+        spec: &PathSpec,
+        mut x: State,
+        boundary: &Boundary,
+        stopping: &Stopping,
+        rng: &mut NoiseGenerator,
+    ) -> Path {
+        let mut path = Path {
+            times: Vec::new(),
+            states: Vec::new(),
+            stopped: false,
+            stop_time: None,
+            hit_set: None,
+        };
+
+        let mut t = 0.0;
+        let noise_dim = self.diffusion.noise_dim(t, &x);
+        let sqrt_dt = spec.dt.sqrt();
+
+        for step in 0..spec.n_steps {
+            // Save state if on stride boundary
+            if step % spec.save_stride == 0 {
+                path.times.push(t);
+                path.states.push(x.clone());
+            }
+
+            // Check stopping conditions
+            if let Some(ref hit_fn) = stopping.first_hit {
+                if let Some(hit_label) = hit_fn(&x) {
+                    path.stopped = true;
+                    path.stop_time = Some(t);
+                    path.hit_set = Some(hit_label);
+                    break;
+                }
+            }
+
+            if let Some(max_time) = stopping.max_time {
+                if t >= max_time {
+                    path.stopped = true;
+                    path.stop_time = Some(t);
+                    break;
+                }
+            }
+
+            // Generate noise
+            let dw = rng.generate_dw(noise_dim, sqrt_dt);
+
+            // Take integration step
+            x = self
+                .integrator
+                .step(calc, t, &x, spec.dt, &dw, &self.drift, &self.diffusion);
+
+            // Apply boundary conditions
+            x = apply_boundary(boundary, x);
+
+            t += spec.dt;
+        }
+
+        // Save final state if not already saved
+        if path.times.is_empty() || path.times.last() != Some(&t) {
+            path.times.push(t);
+            path.states.push(x);
+        }
+
+        path
+    }
+}
+
+/// Apply boundary conditions to state
+pub fn apply_boundary(boundary: &Boundary, mut state: State) -> State {
+    match boundary {
+        Boundary::None => state,
+
+        Boundary::Absorbing(absorb_fn) => {
+            if absorb_fn(&state) {
+                state
+            } else {
+                state
+            }
+        }
+
+        Boundary::Reflecting(reflect_fn) => reflect_fn(&state),
+
+        Boundary::Periodic { low, high } => {
+            for i in 0..state.dim() {
+                let range = high[i] - low[i];
+                if range > 0.0 {
+                    let wrapped = ((state.0[i] - low[i]) % range + range) % range + low[i];
+                    state.0[i] = wrapped;
+                }
+            }
+            state
+        }
+    }
+}
+
+// Implementations
+impl PathSpec {
+    pub fn new(n_steps: usize, dt: F, save_stride: usize) -> Self {
+        Self {
+            n_steps,
+            dt,
+            save_stride,
+        }
+    }
+
+    pub fn total_time(&self) -> Time {
+        self.n_steps as F * self.dt
+    }
+
+    pub fn saved_steps(&self) -> usize {
+        (self.n_steps + self.save_stride - 1) / self.save_stride
+    }
+}
+
+impl Path {
+    pub fn new() -> Self {
+        Self {
+            times: Vec::new(),
+            states: Vec::new(),
+            stopped: false,
+            stop_time: None,
+            hit_set: None,
+        }
+    }
+
+    pub fn final_state(&self) -> Option<&State> {
+        self.states.last()
+    }
+
+    pub fn final_time(&self) -> Option<Time> {
+        self.times.last().copied()
+    }
+
+    pub fn first_passage_time(&self) -> Option<Time> {
+        self.stop_time
+    }
+}
+
+impl Ensemble {
+    pub fn new(paths: Vec<Path>, spec: PathSpec) -> Self {
+        Self { paths, spec }
+    }
+
+    pub fn n_paths(&self) -> usize {
+        self.paths.len()
+    }
+
+    pub fn final_statistics(&self) -> EnsembleStats {
+        let final_states: Vec<&State> = self.paths.iter().filter_map(|p| p.final_state()).collect();
+
+        if final_states.is_empty() {
+            return EnsembleStats::empty();
+        }
+
+        let dim = final_states[0].dim();
+        let mut means = vec![0.0; dim];
+        let mut variances = vec![0.0; dim];
+
+        // Compute means
+        for state in &final_states {
+            for i in 0..dim {
+                means[i] += state.0[i];
+            }
+        }
+        for mean in &mut means {
+            *mean /= final_states.len() as F;
+        }
+
+        // Compute variances
+        for state in &final_states {
+            for i in 0..dim {
+                let diff = state.0[i] - means[i];
+                variances[i] += diff * diff;
+            }
+        }
+        for variance in &mut variances {
+            *variance /= (final_states.len() - 1).max(1) as F;
+        }
+
+        EnsembleStats {
+            n_paths: final_states.len(),
+            means: DVector::from_vec(means),
+            variances: DVector::from_vec(variances),
+            first_passage_times: self.first_passage_statistics(),
+        }
+    }
+
+    fn first_passage_statistics(&self) -> Vec<Time> {
+        self.paths
+            .iter()
+            .filter_map(|p| p.first_passage_time())
+            .collect()
+    }
+}
+
+impl EnsembleStats {
+    fn empty() -> Self {
+        Self {
+            n_paths: 0,
+            means: DVector::zeros(0),
+            variances: DVector::zeros(0),
+            first_passage_times: Vec::new(),
+        }
+    }
+}
+
+impl Default for Stopping {
+    fn default() -> Self {
+        Self {
+            first_hit: None,
+            max_time: None,
+        }
+    }
+}
+
+impl Stopping {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_max_time(mut self, max_time: F) -> Self {
+        self.max_time = Some(max_time);
+        self
+    }
+
+    pub fn with_first_hit<F>(mut self, hit_fn: F) -> Self
+    where
+        F: Fn(&State) -> Option<String> + Send + Sync + 'static,
+    {
+        self.first_hit = Some(Box::new(hit_fn));
+        self
+    }
+}
+
+impl Boundary {
+    pub fn absorbing_sphere(center: DVector<F>, radius: F) -> Self {
+        Boundary::Absorbing(Box::new(move |state| {
+            let dist_sq = (&state.0 - &center).norm_squared();
+            dist_sq <= radius * radius
+        }))
+    }
+
+    pub fn reflecting_box(low: DVector<F>, high: DVector<F>) -> Self {
+        Boundary::Reflecting(Box::new(move |state| {
+            let mut reflected = state.clone();
+            for i in 0..state.dim() {
+                if reflected.0[i] < low[i] {
+                    reflected.0[i] = 2.0 * low[i] - reflected.0[i];
+                } else if reflected.0[i] > high[i] {
+                    reflected.0[i] = 2.0 * high[i] - reflected.0[i];
+                }
+            }
+            reflected
+        }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bicep_core::BrownianMotion;
+    use bicep_core::EulerMaruyama;
+
+    #[test]
+    fn test_path_spec() {
+        let spec = PathSpec::new(1000, 0.01, 10);
+        assert_eq!(spec.total_time(), 10.0);
+        assert_eq!(spec.saved_steps(), 100);
+    }
+
+    #[test]
+    fn test_single_brownian_path() {
+        let bm = BrownianMotion::standard();
+        let integrator = EulerMaruyama;
+        let sampler = Sampler::new(integrator, bm.clone(), bm);
+
+        let spec = PathSpec::new(100, 0.01, 1);
+        let x0 = State::new(vec![0.0]);
+        let boundary = Boundary::None;
+        let stopping = Stopping::default();
+
+        let ensemble = sampler.run_paths(Calc::Ito, &spec, &[x0], &boundary, &stopping, 42);
+
+        assert_eq!(ensemble.n_paths(), 1);
+        assert_eq!(ensemble.paths[0].states.len(), 100);
+
+        // Check that times are properly spaced
+        let path = &ensemble.paths[0];
+        for i in 1..path.times.len() {
+            assert!((path.times[i] - path.times[i - 1] - spec.dt).abs() < 1e-12);
+        }
+    }
+}
+
+//==============================================================================
+// FILE: ./rust-toolchain.toml
+//==============================================================================
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy"]

@@ -1,0 +1,28 @@
+{
+  "schema": "enn_calibrator_v1",
+  "method": "platt",
+  "calibrator_id": "calibrator_platt",
+  "fit_on": {
+    "model_id": "auto_calib",
+    "telemetry_path": "/home/ryan/projects/CapsuleTech/work/runs/calib/enn_out/telemetry.csv",
+    "num_samples": 800
+  },
+  "params": {
+    "A": -0.1263126040585881,
+    "B": -0.2706836578317228
+  },
+  "metrics": {
+    "ece": 0.10485722528332614,
+    "brier": 0.087015873051982,
+    "monotonic": true,
+    "bins": [
+      {
+        "lower": 0.5,
+        "upper": 0.6000000000000001,
+        "confidence": 0.5817322252833261,
+        "accuracy": 0.476875,
+        "weight": 1.0
+      }
+    ]
+  }
+}

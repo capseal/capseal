@@ -1,0 +1,13 @@
+{
+  "leaf_hash": "99b2b97c14cb95561f89266c0f9f773f59043764fbce0d6024183e6d78b81a87",
+  "leaf_index": 3,
+  "total_leaves": 4,
+  "arity": 16,
+  "siblings_by_level": [
+    [
+      "e80538b2ad65a1c31eeeb81e6709b663891e14a386e1db32ce2f470714fbec38",
+      "be208932041f3928beae2b24683cc7765497816dd98dcdec22b877d0a08ee42b",
+      "7e70a4a679b7e1ad301f0d61ed76ea5277ba83ab0ed5a2c22f4251c5dd88a902"
+    ]
+  ]
+}

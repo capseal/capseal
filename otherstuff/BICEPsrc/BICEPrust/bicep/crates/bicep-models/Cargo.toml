@@ -1,0 +1,9 @@
+[package]
+name = "bicep-models"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bicep-core = { path = "../bicep-core" }
+nalgebra = { workspace = true }
+anyhow = { workspace = true }

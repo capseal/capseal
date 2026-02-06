@@ -1,0 +1,22 @@
+{
+  "name": "bef-main",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "BEF - Verifiable ML Pipeline with E2E Testing",
+  "scripts": {
+    "e2e:verify": "node scripts/e2e_verify.mjs",
+    "e2e:verify:local": "E2E_BASE=http://127.0.0.1:5001 node scripts/e2e_verify.mjs",
+    "e2e:verify:ci": "E2E_BASE=http://127.0.0.1:5000 node scripts/e2e_verify.mjs",
+    "test:contracts": "node scripts/e2e_verify.mjs",
+    "backend:test": "pytest tests/ -v",
+    "backend:start": "python -m flask --app server.flask_app.app run --port 5001",
+    "ui:dev": "npm run dev --prefix ui",
+    "ui:build": "npm run build --prefix ui",
+    "ui:test": "npm test --prefix ui || echo 'No UI tests configured'",
+    "test:all": "npm run backend:test && npm run e2e:verify"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

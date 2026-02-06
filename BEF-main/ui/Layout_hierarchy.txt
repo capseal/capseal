@@ -1,0 +1,204 @@
+Here’s the same plan, but ordered so each dependency is introduced before anything that relies on it, and nothing is “mentioned early” before it’s actionable. I’m keeping all the specificity and rigor—this is just re-sequenced into the correct execution order. 
+
+1. Establish the product’s “first impression” contract (Launchpad-first)
+   Goal: when people open the app, they see a dead-simple, Steve-Jobs-like intent chooser—not an admin shell.
+
+1.1 Implement the Jobs-like Launchpad as the root route (`/`)
+Screen rules:
+
+* One centered card.
+* 4 primary actions + 1 secondary link.
+* No rail. No list/detail panes. No tabs. No “How it works” panel.
+
+Buttons and routing:
+
+* Start a New Project → `/workspace?mode=new`
+* Continue a Project → `/workspace?mode=recent`
+* Open Existing Project → `/workspace?mode=open`
+* Quick Trace → `/trace`
+* Settings (small link) → `/settings` (or hide route until real)
+
+This is a direct edit of your existing `components/Welcome.jsx`: swap the action cards to these four and add the settings link.
+
+1.2 Hide the rail until “inside a project”
+The rail currently reads as “admin app.” It must not appear on `/` or `/workspace`. It appears only inside `/p/:projectId/*`.
+
+2. Add the missing navigation shells (so the app has a correct spine)
+   Goal: your internal UI structure becomes “intent → choose context → execute governed run.”
+
+2.1 Route map (minimal change, maximal clarity)
+Replace the “Home dashboard” concept with launchpad + shells:
+
+* `/` → `Welcome` (Launchpad)
+* `/workspace` → `WorkspaceHome` (project picker)
+* `/p/:projectId/*` → `ProjectShell` (real app: runs + details + run actions)
+* `/trace` → `QuickTraceShell` (single-purpose “generate trace/receipt”)
+* `/settings` → `SettingsShell` (only if real; otherwise hide)
+
+Keep `/runs` temporarily as a redirect → `/p/default/runs` (compat).
+
+2.2 Add the two wrapper components (small, surgical additions)
+You add only:
+
+* `src/components/WorkspaceHome.jsx`
+* `src/components/ProjectShell.jsx`
+
+Optionally later:
+
+* `RecentProjectsList.jsx`
+* `RailProject.jsx` (slimmer rail variant)
+
+2.3 Component hierarchy (exact tree)
+A) `Welcome` (Launchpad)
+
+* Actions route to `/workspace` or `/trace`
+* Link to `/settings`
+
+B) `WorkspaceHome` (Project picker)
+
+* Shows “Recent Projects” (5–10)
+* Buttons: New / Open / Quick Trace
+* Selecting a project navigates to `/p/${projectId}/runs`
+
+C) `ProjectShell` (the real app; uses existing components)
+`ProjectShell` → `AppShell` with:
+
+* `rail`: `Rail` (or `RailProject`)
+* `list`: ProjectLeftPanel
+
+  * ProjectHeader (project name + track_id)
+  * SegmentedControl: Runs / Circuits
+  * RunsList scoped to projectId
+* `detail`: RunDetailPanel if run selected; otherwise EmptyState
+
+D) `QuickTraceShell` (isolation mode)
+Uses `AppShell` but is single-purpose:
+
+* list: quick trace form (folder/command/policy)
+* detail: streaming events + receipt preview + Verify button
+
+3. Make “Run” the primary product object (so the UI stays lean)
+   Goal: don’t build heavyweight “project management” prematurely.
+
+3.1 Keep Projects and Circuits as derived views
+
+* ProjectsPage derived from `track_id`
+* CircuitsPage derived from `policy_id`
+  Do not build full project metadata/collaboration/permissions yet; keep it derived until forced.
+
+4. Freeze the UI↔backend data contracts before any Rust rewrite
+   Goal: your backend can change (Python → Rust), but the UI doesn’t break.
+
+4.1 Freeze capsule schema + error codes
+Because your UI depends on:
+
+* L0–L4 checklist semantics
+* specific outcomes (“VERIFIED”, “E052_PROOF_HASH_MISMATCH”, etc.)
+
+Lock these now so a Rust verifier produces the same outward behavior even if internals change.
+
+4.2 Define stable report JSON shapes (UI consumes these, regardless of implementation)
+Define these as explicit contracts:
+
+* `RunSummary` (for RunsList)
+* `VerifyReport`:
+
+  * `layers_checked: {L0..L4: pass|fail|skipped}`
+  * `errors: [{ code, message, hint, evidence_ref? }]`
+  * `timings_ms`
+  * `backend_id / proof_system_id`
+* `AuditReport` (event chain validity + counts + timeline index)
+* `EvidenceIndex` (openable proofs/rows/artifacts + references)
+
+This is the “big win” because it prevents rewriting the UI during the Rust migration.
+
+5. Treat events as first-class protocol objects (not logs)
+   Goal: the trust story is the product.
+
+5.1 Event logging must be part of core APIs
+Every action emits structured, hash-chained events in a consistent schema.
+
+5.2 Stream events during “Run & Seal”
+Implement a stream channel (SSE if using daemon; IPC stream if Tauri later) so the UI can show live audit chain updates during execution.
+
+This single feature makes the app feel like an instrument panel and teaches users what’s being committed.
+
+6. Add the “local execution bridge” (required for real workflows)
+   Goal: “drop a folder → Run & Seal” must work.
+
+Choose one, in this order of practicality:
+
+6.1 Fastest prototype bridge: local server wrapper (daemon)
+
+* Local HTTP service
+* SSE streaming `events.jsonl` as it is written
+* UI calls daemon; daemon runs CapSeal and returns reports
+
+6.2 Clean endgame: Tauri desktop shell
+
+* Native file dialogs
+* Rust backend
+* IPC between Vite/React UI and Rust core
+
+Important note: browsers are hostile to local workflows; if you want downloadable software, you eventually leave browser-only behind.
+
+7. Add small product upgrades that reinforce governance and sharing
+   Goal: turn “receipt system” into “tool people trust and can share.”
+
+7.1 Force execution mode choice up front in “Run & Seal”
+Toggle:
+
+* Local: runs on your machine, uses filesystem
+* Remote: uploads inputs, runs hosted sandbox
+
+This is not cosmetic; it defines trust boundaries.
+
+7.2 Add one “Share / Verifier snippet” affordance per run
+
+* Copy capsule hash
+* Copy verify command
+* Export `.cap`
+
+This makes verification portable and collaborative without building accounts/team features.
+
+8. Tokenization + agent governance: formalize ORACLE access as committed artifacts
+   Goal: token spend becomes enforceable and auditable, not vibes.
+
+8.1 Keep Cline as orchestrator
+Cline compiles the DAG (workflow circuit) and delegates steps.
+
+8.2 Treat Greptile as ORACLE vertices
+Budgeted, explicit, quarantined. ORACLE nodes are the only nondeterminism + token spend sources.
+
+8.3 “Context packs” are committed artifacts
+If agents touch code:
+
+* a context selection algorithm produces a context pack
+* pack has a `context_root` hash
+* ORACLE receipt includes `context_root` + token spend
+
+This makes token usage checkable (fits your receipt model).
+
+9. Only now: start the Rust migration, in the correct shape
+   Goal: pure Rust without semantic drift, and without rewriting twice.
+
+9.1 Create `capseal_core` as the single source of truth
+Expose:
+
+* `run(policy, inputs, env) -> Capsule (+ events stream)`
+* `verify(capsule) -> VerifyReport`
+* `audit(events) -> AuditReport`
+* `open_evidence/open_row(...) -> RowOpening`
+
+9.2 Make `capseal_cli` thin glue over `capseal_core`
+Prevents CLI and app drifting semantics.
+
+9.3 Make `capseal_app` (Tauri) call the same core
+Optional: `capseal_daemon` (local HTTP) also calls the same core.
+
+This avoids the classic failure mode: rewriting CLI and desktop separately.
+
+10. The sharpest milestone to aim at (single happy path)
+    “Local folder → Run & Seal → live event stream → Verify checklist (honest L0–L4) → Export .cap”
+
+That’s the moment CapSeal stops being “a UI around a CLI” and becomes a governed execution tool people trust. 

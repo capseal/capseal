@@ -1,0 +1,207 @@
+{
+  "schema": "adapter_pipeline_stats_v1",
+  "trace_id": "test_run_sandbox",
+  "row_width": 14,
+  "trace_chunks": 16,
+  "trace_time_sec": 6.831400241935626e-05,
+  "proof": {
+    "size_bytes": 52333,
+    "profile": {
+      "time_trace_sec": 6.831400241935626e-05,
+      "time_row_commit_sec": 0.0027361630054656416,
+      "time_pc_commit_sec": 0.0005150970027898438,
+      "time_fri_sec": 0.003942542003642302,
+      "time_total_sec": 0.007262292012455873,
+      "row_openings": 15,
+      "backend": "geom_stc_fri",
+      "fri_layers": 5,
+      "fri_batches": 5,
+      "fri_openings": 25,
+      "fri_leaf_siblings": 3,
+      "fri_leaf_siblings_baseline": 68,
+      "fri_chunk_siblings": 0,
+      "fri_leaf_bytes_baseline": 2176,
+      "fri_leaf_bytes_actual": 96,
+      "fri_leaf_bytes_saved": 2080,
+      "fri_leaf_savings_ratio": 0.9558823529411765,
+      "row_chunk_values": 210,
+      "row_chunk_root_siblings": 225,
+      "leaf_auth_bytes_baseline": 2176,
+      "leaf_auth_bytes_actual": 96,
+      "leaf_auth_bytes_saved": 2080,
+      "leaf_auth_savings_ratio": 0.9558823529411765
+    },
+    "verify_stats": {
+      "trace_time_trace_sec": 6.19569982518442e-05,
+      "trace_time_constraints_sec": 0.0,
+      "trace_time_total_sec": 6.19569982518442e-05,
+      "time_verify_sec": 0.0015086460043676198
+    },
+    "verify_time_sec": 0.0019464259967207909,
+    "leaf_auth_bytes_baseline": 2176,
+    "leaf_auth_bytes_actual": 96,
+    "leaf_auth_bytes_saved": 2080,
+    "leaf_auth_savings_ratio": 0.9558823529411765
+  },
+  "row_archive": {
+    "mode": "LOCAL_FILE",
+    "abs_path": "/home/ryan/BEF-main/tmp_test/test_run_output/row_archive",
+    "num_chunks": 16,
+    "chunk_tree_arity": 16,
+    "chunk_roots_path": "row_archive/chunk_roots.json",
+    "chunk_roots_format": "hex_json_v1",
+    "chunk_roots_bin_path": "row_archive/chunk_roots.bin",
+    "chunk_roots_bin_format": "raw32_v1",
+    "chunk_roots_digest": "c52304ef344fac2dba060abcb93886f2e3412629b48cb316246a74c91f9d4c04",
+    "chunk_handles": [
+      {
+        "id": 0,
+        "uri": "chunk_0.json",
+        "sha256": "16723784084ddf35cca6f27ac43fddf22daba556ebb0a6a434fd0c976af64b29",
+        "size": 281,
+        "content_type": "application/octet-stream"
+      },
+      {
+        "id": 1,
+        "uri": "chunk_1.json",
+        "sha256": "38fd2148702f39fac4e90ea05e80115852ade6983497ef8c97b35769cded7705",
+        "size": 289,
+        "content_type": "application/octet-stream"
+      },
+      {
+        "id": 2,
+        "uri": "chunk_2.json",
+        "sha256": "992dbd1292657ea0b27d4075d0fa02678b875fbc291b48c6a08835c053d8b37e",
+        "size": 288,
+        "content_type": "application/octet-stream"
+      },
+      {
+        "id": 3,
+        "uri": "chunk_3.json",
+        "sha256": "cba939383156bd9d91b0ba5ca4c86ff64731bb7ef226941623f9065c754c0ad1",
+        "size": 286,
+        "content_type": "application/octet-stream"
+      },
+      {
+        "id": 4,
+        "uri": "chunk_4.json",
+        "sha256": "341d79e744386193dd2baeb32a8dedd81bf805230f74125a6770fb61a81e2090",
+        "size": 286,
+        "content_type": "application/octet-stream"
+      },
+      {
+        "id": 5,
+        "uri": "chunk_5.json",
+        "sha256": "23c0d493dd2c2ddeeeb7faee957f2126b4118dd13ce203903143aaa0f64390eb",
+        "size": 286,
+        "content_type": "application/octet-stream"
+      },
+      {
+        "id": 6,
+        "uri": "chunk_6.json",
+        "sha256": "857b6e124de5930d4822c2ae987fd6b98d9d3e0cec988a38fbe1857d4363ed20",
+        "size": 290,
+        "content_type": "application/octet-stream"
+      },
+      {
+        "id": 7,
+        "uri": "chunk_7.json",
+        "sha256": "d49fb2d0add105ce0cb9189fc4889ba9df28479246919741273c104603766a6b",
+        "size": 287,
+        "content_type": "application/octet-stream"
+      },
+      {
+        "id": 8,
+        "uri": "chunk_8.json",
+        "sha256": "bdcb03d45262c0223602e3858269bb5cfcaf7bb9d0c5cf34eb511f329d916eaa",
+        "size": 289,
+        "content_type": "application/octet-stream"
+      },
+      {
+        "id": 9,
+        "uri": "chunk_9.json",
+        "sha256": "c723af74ddb59a6ea0173230f4d60247699860c1a405de72de560470a98ded14",
+        "size": 289,
+        "content_type": "application/octet-stream"
+      },
+      {
+        "id": 10,
+        "uri": "chunk_10.json",
+        "sha256": "c2a64fee2e04580cdbf68a8fcc2c8a4212fc6fcdcef34c80006446fb73e4f304",
+        "size": 285,
+        "content_type": "application/octet-stream"
+      },
+      {
+        "id": 11,
+        "uri": "chunk_11.json",
+        "sha256": "cf1c69a33c99a7d9d6e33be6872a7aea1ce97ff24e5b66c0b8c1a3697dac4515",
+        "size": 287,
+        "content_type": "application/octet-stream"
+      },
+      {
+        "id": 12,
+        "uri": "chunk_12.json",
+        "sha256": "c614d3867c2d4b4561f1c907dcebee827d6e305acc0d029b5856d11d75e43b96",
+        "size": 289,
+        "content_type": "application/octet-stream"
+      },
+      {
+        "id": 13,
+        "uri": "chunk_13.json",
+        "sha256": "8c09a998b7d2184adf0474151de7a71965c9cdbe0a9fef3848eb77e8bfff9911",
+        "size": 287,
+        "content_type": "application/octet-stream"
+      },
+      {
+        "id": 14,
+        "uri": "chunk_14.json",
+        "sha256": "7a51119486ea0b41889e010d56ebc3a473184b875293050dea004c040c5419f5",
+        "size": 289,
+        "content_type": "application/octet-stream"
+      },
+      {
+        "id": 15,
+        "uri": "chunk_15.json",
+        "sha256": "6fe7bdcf489ea386f7a1ce94696db354cf44d000ade491831caad14499c35053",
+        "size": 290,
+        "content_type": "application/octet-stream"
+      }
+    ],
+    "path": "row_archive",
+    "rel_path": "row_archive",
+    "chunk_roots_abs": "/home/ryan/BEF-main/tmp_test/test_run_output/row_archive/chunk_roots.json",
+    "chunk_roots_bin_abs": "/home/ryan/BEF-main/tmp_test/test_run_output/row_archive/chunk_roots.bin",
+    "chunk_roots_rel_path": "row_archive/chunk_roots.json",
+    "chunk_roots_bin_rel_path": "row_archive/chunk_roots.bin",
+    "chunk_manifest_path": "row_archive/chunk_manifest.json"
+  },
+  "da_policy": {
+    "policy_id": "light_sampling_local_v1",
+    "k_samples": 139,
+    "provider_timeout_ms": 5000,
+    "provider_retry_count": 2,
+    "verification_level": "probabilistic_da_sampling",
+    "provider": {
+      "mode": "LOCAL_FILE",
+      "archive_root": "/home/ryan/BEF-main/tmp_test/test_run_output/row_archive"
+    },
+    "deterministic_seed": "f17eb153998471ba449cdf64939d2a4a70d7422282f343411e46a4834edf1fa4"
+  },
+  "chunk_meta": {
+    "num_chunks": 16,
+    "chunk_len": 14,
+    "chunk_size_bytes": 112,
+    "data_length_bytes": 1792,
+    "chunking_rule_id": "fixed_range_v1"
+  },
+  "row_index_ref": {
+    "commitment_type": "merkle_root",
+    "commitment": "c52304ef344fac2dba060abcb93886f2e3412629b48cb316246a74c91f9d4c04",
+    "tree_arity": 16,
+    "proof_fetch_rule_id": "proof_attached_to_chunk_v1",
+    "pointer": {
+      "path": "row_archive",
+      "provider_root": "/home/ryan/BEF-main/tmp_test/test_run_output/row_archive"
+    }
+  }
+}

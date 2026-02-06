@@ -1,0 +1,10 @@
+[package]
+name = "bicep-sampler"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bicep-core = { path = "../bicep-core" }
+nalgebra = { workspace = true }
+rayon = { workspace = true }
+serde = { workspace = true }

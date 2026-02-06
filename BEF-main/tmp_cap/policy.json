@@ -1,0 +1,18 @@
+{
+  "schema": "bef_benchmark_policy_v1",
+  "policy_id": "demo_policy_v1",
+  "policy_version": "1.0",
+  "tracks": [
+    {
+      "track_id": "demo_geom_fast",
+      "description": "Demo track (GPU allowed, no deterministic build enforcement).",
+      "rules": {
+        "forbid_gpu": false,
+        "require_deterministic_build": false,
+        "required_public_outputs": ["final_cnt"],
+        "min_final_cnt": 0,
+        "max_final_cnt": 1000000
+      }
+    }
+  ]
+}

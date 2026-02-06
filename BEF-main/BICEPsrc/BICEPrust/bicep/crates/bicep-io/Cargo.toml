@@ -1,0 +1,25 @@
+[package]
+name = "bicep-io"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bicep-core = { path = "../bicep-core" }
+bicep-sampler = { path = "../bicep-sampler" }
+bicep-models = { path = "../bicep-models" }
+arrow = { workspace = true }
+parquet = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
+tokio = { workspace = true }
+chrono = { version = "0.4", features = ["serde"] }
+
+[[bin]]
+name = "bicep"
+path = "src/main.rs"
+
+[dev-dependencies]
+tempfile = "3.0"

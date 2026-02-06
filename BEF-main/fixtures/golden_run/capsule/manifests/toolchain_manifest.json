@@ -1,0 +1,32 @@
+{
+  "schema": "bef_toolchain_manifest_v1",
+  "generated_at": "2025-12-23T00:09:34.117888+00:00",
+  "python": "3.13.7 (main, Aug 15 2025, 12:34:02) [GCC 15.2.1 20250813]",
+  "rustc_version": "rustc 1.91.1 (ed61e7d7e 2025-11-07) (Arch Linux rust 1:1.91.1-2)",
+  "cargo_version": "cargo 1.91.1 (ea2d97820 2025-10-10) (Arch Linux rust 1:1.91.1-2)",
+  "git_commit": "7df836ae359817e4d8728858ce351b566b4ac151",
+  "commands": {
+    "rustc": {
+      "command": [
+        "rustc",
+        "--version"
+      ],
+      "stdout": "rustc 1.91.1 (ed61e7d7e 2025-11-07) (Arch Linux rust 1:1.91.1-2)"
+    },
+    "cargo": {
+      "command": [
+        "cargo",
+        "--version"
+      ],
+      "stdout": "cargo 1.91.1 (ea2d97820 2025-10-10) (Arch Linux rust 1:1.91.1-2)"
+    },
+    "git": {
+      "command": [
+        "git",
+        "rev-parse",
+        "HEAD"
+      ],
+      "stdout": "7df836ae359817e4d8728858ce351b566b4ac151"
+    }
+  }
+}

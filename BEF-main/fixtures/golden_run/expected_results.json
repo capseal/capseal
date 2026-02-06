@@ -1,0 +1,27 @@
+{
+  "fixture_version": 1,
+  "capsule_hash": "1a476abdba9f422d166e1a1df34d93e2c9024a7ba3ca38129ba1a4d72310cbea",
+  "payload_hash": "3c5de93ed70aeca3f23cc6c4ec5c6d495086fe9ac38e516b20865dcb3eeac754",
+  "header_commit_hash": "a64a41650e88fc3e2d18257ce972448722ef1536f1d129026ad0e9c84022c993",
+  "instance_hash": "c6674cf2d1a7f8f009a455c915d5453bf3502ec8bf7702355875f0808df431ba",
+  "profiles": {
+    "PROOF_ONLY": {
+      "status": "REJECTED",
+      "reason_codes": [
+        "E013_CAPSULE_HEADER_MISMATCH"
+      ]
+    },
+    "POLICY_ENFORCED": {
+      "status": "REJECTED",
+      "reason_codes": [
+        "E013_CAPSULE_HEADER_MISMATCH"
+      ]
+    },
+    "FULL": {
+      "status": "REJECTED",
+      "reason_codes": [
+        "E013_CAPSULE_HEADER_MISMATCH"
+      ]
+    }
+  }
+}

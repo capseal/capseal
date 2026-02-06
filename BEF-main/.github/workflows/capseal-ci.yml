@@ -1,0 +1,276 @@
+name: capseal-ci
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'bef_zk/**'
+      - 'pyproject.toml'
+      - '.github/workflows/capseal-ci.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'bef_zk/**'
+      - 'pyproject.toml'
+      - '.github/workflows/capseal-ci.yml'
+  workflow_dispatch:
+
+jobs:
+  # ==========================================================================
+  # Phase 1: Contract Validation
+  # ==========================================================================
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install capseal
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Verify CLI surface
+        run: |
+          # Check all stable commands exist
+          capsule --help | grep -q "init"
+          capsule --help | grep -q "fetch"
+          capsule --help | grep -q "run"
+          capsule --help | grep -q "verify"
+          capsule --help | grep -q "replay"
+          capsule --help | grep -q "doctor"
+          capsule --help | grep -q "demo"
+          capsule --help | grep -q "inspect"
+          capsule --help | grep -q "explain"
+          echo "CLI surface contract: PASS"
+
+      - name: Verify exit codes
+        run: |
+          python -c "
+          from bef_zk.capsule.cli.exit_codes import (
+              EXIT_VERIFIED, EXIT_PROOF_INVALID, EXIT_POLICY_MISMATCH,
+              EXIT_COMMITMENT_FAILED, EXIT_DA_AUDIT_FAILED, EXIT_REPLAY_DIVERGED,
+              EXIT_MALFORMED
+          )
+          assert EXIT_VERIFIED == 0
+          assert EXIT_PROOF_INVALID == 10
+          assert EXIT_POLICY_MISMATCH == 11
+          assert EXIT_COMMITMENT_FAILED == 12
+          assert EXIT_DA_AUDIT_FAILED == 13
+          assert EXIT_REPLAY_DIVERGED == 14
+          assert EXIT_MALFORMED == 20
+          print('Exit code contract: PASS')
+          "
+
+      - name: Verify schema versions
+        run: |
+          python -c "
+          from bef_zk.capsule.contracts import (
+              CAPSEAL_VERSION, RECEIPT_SCHEMA_VERSION, POLICY_SCHEMA_VERSION,
+              SUPPORTED_RECEIPT_SCHEMAS, SUPPORTED_POLICY_SCHEMAS
+          )
+          assert RECEIPT_SCHEMA_VERSION in SUPPORTED_RECEIPT_SCHEMAS
+          assert POLICY_SCHEMA_VERSION in SUPPORTED_POLICY_SCHEMAS
+          print(f'Schema contract: PASS (receipt={RECEIPT_SCHEMA_VERSION}, policy={POLICY_SCHEMA_VERSION})')
+          "
+
+  # ==========================================================================
+  # Phase 2: Demo Smoke Test
+  # ==========================================================================
+  demo:
+    runs-on: ubuntu-latest
+    needs: contracts
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install capseal
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Run demo (offline, deterministic)
+        run: |
+          capsule demo --json > demo_result.json
+          cat demo_result.json
+          # Verify demo passes
+          python -c "
+          import json
+          with open('demo_result.json') as f:
+              result = json.load(f)
+          assert result['status'] == 'created'
+          assert result['verification']['valid'] == True
+          print('Demo: PASS')
+          "
+
+      - name: Upload demo receipt
+        uses: actions/upload-artifact@v4
+        with:
+          name: demo-receipt
+          path: demo_result.json
+
+  # ==========================================================================
+  # Phase 3: Happy Path Integration
+  # ==========================================================================
+  happy-path:
+    runs-on: ubuntu-latest
+    needs: demo
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install capseal
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Initialize workspace
+        run: |
+          capsule init --json > init_result.json
+          cat init_result.json
+          # Verify init succeeded
+          test -d .capseal
+          test -f .capseal/config.json
+          test -f .capseal/policies/default.json
+
+      - name: Run doctor
+        run: |
+          capsule doctor || true  # Doctor may warn about missing sandbox
+
+      - name: Generate demo receipt and verify
+        run: |
+          capsule demo -o .capseal/receipts/demo.json
+          capsule inspect .capseal/receipts/demo.json
+          capsule explain .capseal/receipts/demo.json
+
+  # ==========================================================================
+  # Phase 4: Sandbox Backend Matrix
+  # ==========================================================================
+  sandbox-matrix:
+    runs-on: ${{ matrix.os }}
+    needs: contracts
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python-version: ['3.11', '3.12']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install capseal
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Install sandbox backend (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap || true
+
+      - name: Check sandbox detection
+        run: |
+          python -c "
+          from bef_zk.sandbox.detect import get_sandbox_info
+          import json
+          info = get_sandbox_info()
+          print(json.dumps(info, indent=2))
+          "
+
+      - name: Run demo with sandbox info
+        run: |
+          capsule demo --verbose
+
+  # ==========================================================================
+  # Phase 5: Build Artifacts
+  # ==========================================================================
+  build:
+    runs-on: ubuntu-latest
+    needs: [happy-path, sandbox-matrix]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install build tools
+        run: |
+          python -m pip install --upgrade pip build twine
+
+      - name: Build wheel
+        run: |
+          python -m build
+
+      - name: Verify wheel
+        run: |
+          pip install dist/*.whl
+          capsule --version
+          capsule demo
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+            dist/SHA256SUMS
+
+  # ==========================================================================
+  # Release (only on tags)
+  # ==========================================================================
+  release:
+    runs-on: ubuntu-latest
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Generate demo receipt for release
+        run: |
+          pip install dist/*.whl
+          capsule demo --json > release_demo_receipt.json
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            dist/*.whl
+            dist/*.tar.gz
+            dist/SHA256SUMS
+            release_demo_receipt.json
+          generate_release_notes: true

@@ -1,0 +1,20 @@
+{
+  "run_id": "78d40413-7a76-41a6-81a0-4e72db64ab56",
+  "timestamp": "2026-01-14T11:21:16.551950025+00:00",
+  "seed": 1768389676,
+  "calc": "ito",
+  "integrator": "euler_maruyama",
+  "dt": 0.003968253968253968,
+  "model_name": "gbm",
+  "model_params": {
+    "mu": 0.0,
+    "s0": 335.9700012207031,
+    "sigma": 0.0
+  },
+  "n_paths": 1000,
+  "n_steps": 10,
+  "save_stride": 1,
+  "total_time": 0.03968253968253968,
+  "commit_hash": null,
+  "rust_version": "rustc 1.92.0 (ded5c06cf 2025-12-08) (Arch Linux rust 1:1.92.0-1)"
+}

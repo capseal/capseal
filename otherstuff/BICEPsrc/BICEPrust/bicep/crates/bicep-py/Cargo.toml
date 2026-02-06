@@ -1,0 +1,9 @@
+[package]
+name = "bicep-py"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bicep-core = { path = "../bicep-core" }
+bicep-models = { path = "../bicep-models" }
+# pyo3 = { version = "0.21", features = ["extension-module"] } # Optional Python bindings

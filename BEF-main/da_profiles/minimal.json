@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "mode": "LIGHT_SAMPLING",
+  "sampling": {
+    "delta_min": 0.2,
+    "epsilon_max": 0.001,
+    "k_min": 32
+  },
+  "provider": {
+    "hint": "committee://alpha"
+  }
+}

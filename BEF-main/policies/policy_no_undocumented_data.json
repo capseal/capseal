@@ -1,0 +1,32 @@
+{
+  "policy_id": "archive_no_undocumented_data",
+  "policy_version": "v1",
+  "description": "Only allow explicitly declared datasets. Bind manifest + forbid hidden reads.",
+  "enforcement": {"mode": "RUN_ENFORCED", "fail_closed": true},
+  "signing": {
+    "required": true,
+    "scheme": "ed25519",
+    "min_signatures": 1,
+    "authorized_signers": [
+      {"name": "Dataset Owner", "role": "DATA_OWNER", "pubkey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}
+    ],
+    "signature_scope": "POLICY_HASH"
+  },
+  "rules": {
+    "dataset_integrity": {
+      "dataset_allowlist": ["archive3"],
+      "require_manifest_commitment": true,
+      "require_no_extra_files": true,
+      "max_total_files": 100000,
+      "max_total_bytes": 6000000000,
+      "hash_algorithm": "sha256"
+    },
+    "access_control": {
+      "require_access_log": true,
+      "access_log_mode": "READSET_COMMITTED",
+      "forbid_out_of_manifest_reads": true,
+      "max_bytes_read_total": 50000000000,
+      "max_files_read_total": 256
+    }
+  }
+}

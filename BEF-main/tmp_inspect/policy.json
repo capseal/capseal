@@ -1,0 +1,1 @@
+{"schema": "bef_benchmark_policy_v1", "policy_id": "test_policy", "policy_version": "v1", "tracks": [{"track_id": "test_track", "rules": {"forbid_gpu": true, "require_deterministic_build": true, "required_public_outputs": ["final_cnt"]}}]}

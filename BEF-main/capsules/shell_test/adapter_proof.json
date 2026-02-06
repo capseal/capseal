@@ -1,0 +1,1985 @@
+{
+  "statement": {
+    "params": {
+      "steps": 32,
+      "matrix": [
+        [
+          2,
+          1
+        ],
+        [
+          1,
+          1
+        ]
+      ],
+      "r_challenges": [
+        273862671806324645,
+        599604743020349418
+      ],
+      "seed": ""
+    },
+    "final_m11": 0,
+    "final_m12": 0,
+    "final_m22": 0,
+    "final_cnt": 32
+  },
+  "pc_commitment": {
+    "fri_params": {
+      "field_modulus": 2305843009213693951,
+      "domain_size": 32,
+      "max_degree": 31,
+      "num_rounds": 5,
+      "num_queries": 8
+    },
+    "base_commitment": {
+      "root": "3d3d89ce16a54d838956c55d4bde13c1bd1f854dbbbf17e4d8a82da6c1058032",
+      "length": 32,
+      "chunk_len": 14,
+      "num_chunks": 3,
+      "challenges": [
+        154311513631502466,
+        1426175954787876329
+      ],
+      "sketches": [
+        2130045684464470890,
+        1780514086069076940
+      ],
+      "powers": [
+        1605869510218207000,
+        129933177543642143
+      ],
+      "chain_root": "00000000000000000000000000000000000000000000000005a30ef807cca964",
+      "chunk_tree_arity": 16
+    }
+  },
+  "row_commitment": {
+    "backend": "geom_stc_fri",
+    "row_width": 14,
+    "params": {
+      "root": "d459f778b6d47f76098ca5212ca5a09d335ef4628fe7030bdfa7ca82f1778010",
+      "length": 448,
+      "chunk_len": 14,
+      "num_chunks": 32,
+      "chain_root": "0000000000000000000000000000000000000000000000000b28f8b7f7c2fc19",
+      "challenges": [
+        154311513631502466,
+        1426175954787876329
+      ],
+      "sketches": [
+        1546443290070157378,
+        1502404352008202551
+      ],
+      "powers": [
+        1576076765732496842,
+        560445142954730490
+      ],
+      "archive_root": "row_archive",
+      "chunk_tree_arity": 16,
+      "archive_root_abs": "/home/ryan/BEF-main/capsules/shell_test/row_archive"
+    }
+  },
+  "query_indices": [
+    6,
+    9,
+    11,
+    13,
+    19,
+    22,
+    25,
+    26
+  ],
+  "fri_proof": {
+    "layers": [
+      {
+        "commitment": {
+          "root": "3d3d89ce16a54d838956c55d4bde13c1bd1f854dbbbf17e4d8a82da6c1058032",
+          "length": 32,
+          "chunk_len": 14,
+          "num_chunks": 3,
+          "challenges": [
+            154311513631502466,
+            1426175954787876329
+          ],
+          "sketches": [
+            2130045684464470890,
+            1780514086069076940
+          ],
+          "powers": [
+            1605869510218207000,
+            129933177543642143
+          ],
+          "chain_root": "00000000000000000000000000000000000000000000000005a30ef807cca964",
+          "chunk_tree_arity": 16
+        },
+        "beta": 765472137002256881,
+        "length": 32
+      },
+      {
+        "commitment": {
+          "root": "1085d761a4f278bb0fffea416ef47e2d7b2888f5e3531d65646df01f7ddb6eec",
+          "length": 16,
+          "chunk_len": 14,
+          "num_chunks": 2,
+          "challenges": [
+            154311513631502466,
+            1426175954787876329
+          ],
+          "sketches": [
+            2001107209241798200,
+            1448493681300095928
+          ],
+          "powers": [
+            872841651116767376,
+            2269339850866911101
+          ],
+          "chain_root": "0000000000000000000000000000000000000000000000000554f4dadbc83204",
+          "chunk_tree_arity": 16
+        },
+        "beta": 76439483582214484,
+        "length": 16
+      },
+      {
+        "commitment": {
+          "root": "5ab01467c5ee7808de1e71323c63baf770b2e589270775e403d9277469e94cad",
+          "length": 8,
+          "chunk_len": 14,
+          "num_chunks": 1,
+          "challenges": [
+            154311513631502466,
+            1426175954787876329
+          ],
+          "sketches": [
+            96743603737086812,
+            2211046262102269909
+          ],
+          "powers": [
+            431605064099128247,
+            1566836376238298467
+          ],
+          "chain_root": "00000000000000000000000000000000000000000000000018709c0097fcd679",
+          "chunk_tree_arity": 16
+        },
+        "beta": 336785572417324094,
+        "length": 8
+      },
+      {
+        "commitment": {
+          "root": "bff93f6741bb9207c49d630d68b9a3bc67bb3c52bec6901f4f26d4c4825b03ff",
+          "length": 4,
+          "chunk_len": 14,
+          "num_chunks": 1,
+          "challenges": [
+            154311513631502466,
+            1426175954787876329
+          ],
+          "sketches": [
+            767334849114789841,
+            651623455578293977
+          ],
+          "powers": [
+            303228064289165806,
+            1577481717443734873
+          ],
+          "chain_root": "0000000000000000000000000000000000000000000000000125ad5fd9a209cd",
+          "chunk_tree_arity": 16
+        },
+        "beta": 1068760002324384042,
+        "length": 4
+      },
+      {
+        "commitment": {
+          "root": "a2034244ee7db5c87219b2f4d406f068d9d814bc4a67b1e3b83305d83718717c",
+          "length": 2,
+          "chunk_len": 14,
+          "num_chunks": 1,
+          "challenges": [
+            154311513631502466,
+            1426175954787876329
+          ],
+          "sketches": [
+            902341751880758023,
+            693973558799982445
+          ],
+          "powers": [
+            2195283050412063667,
+            1051427373669938822
+          ],
+          "chain_root": "000000000000000000000000000000000000000000000000140fe11142d1d3aa",
+          "chunk_tree_arity": 16
+        },
+        "beta": 1875551997613495750,
+        "length": 2
+      },
+      {
+        "commitment": {
+          "root": "b7f5f46750310b095a3799706317ffe694419fd2b10ae408f4dd10784062e0b3",
+          "length": 1,
+          "chunk_len": 14,
+          "num_chunks": 1,
+          "challenges": [
+            154311513631502466,
+            1426175954787876329
+          ],
+          "sketches": [
+            417683794994306326,
+            417683794994306326
+          ],
+          "powers": [
+            154311513631502466,
+            1426175954787876329
+          ],
+          "chain_root": "000000000000000000000000000000000000000000000000072c0b7025b0fe87",
+          "chunk_tree_arity": 16
+        },
+        "beta": 0,
+        "length": 1
+      }
+    ],
+    "batches": [
+      {
+        "layer_index": 0,
+        "proof": {
+          "entries": [
+            {
+              "index": 6,
+              "value": 531009489520088257,
+              "chunk_index": 0,
+              "chunk_offset": 0,
+              "leaf_pos": 6
+            },
+            {
+              "index": 7,
+              "value": 537285130845518399,
+              "chunk_index": 0,
+              "chunk_offset": 0,
+              "leaf_pos": 7
+            },
+            {
+              "index": 8,
+              "value": 2301635404368087855,
+              "chunk_index": 0,
+              "chunk_offset": 0,
+              "leaf_pos": 8
+            },
+            {
+              "index": 9,
+              "value": 1107753147611760668,
+              "chunk_index": 0,
+              "chunk_offset": 0,
+              "leaf_pos": 9
+            },
+            {
+              "index": 10,
+              "value": 396679981697618749,
+              "chunk_index": 0,
+              "chunk_offset": 0,
+              "leaf_pos": 10
+            },
+            {
+              "index": 11,
+              "value": 1216996082996690488,
+              "chunk_index": 0,
+              "chunk_offset": 0,
+              "leaf_pos": 11
+            },
+            {
+              "index": 12,
+              "value": 141783289263596334,
+              "chunk_index": 0,
+              "chunk_offset": 0,
+              "leaf_pos": 12
+            },
+            {
+              "index": 13,
+              "value": 762268369770423962,
+              "chunk_index": 0,
+              "chunk_offset": 0,
+              "leaf_pos": 13
+            },
+            {
+              "index": 18,
+              "value": 593674764309015833,
+              "chunk_index": 1,
+              "chunk_offset": 14,
+              "leaf_pos": 4
+            },
+            {
+              "index": 19,
+              "value": 221076543631541991,
+              "chunk_index": 1,
+              "chunk_offset": 14,
+              "leaf_pos": 5
+            },
+            {
+              "index": 22,
+              "value": 478700821485929594,
+              "chunk_index": 1,
+              "chunk_offset": 14,
+              "leaf_pos": 8
+            },
+            {
+              "index": 23,
+              "value": 2048878881588594975,
+              "chunk_index": 1,
+              "chunk_offset": 14,
+              "leaf_pos": 9
+            },
+            {
+              "index": 24,
+              "value": 1486600467731475984,
+              "chunk_index": 1,
+              "chunk_offset": 14,
+              "leaf_pos": 10
+            },
+            {
+              "index": 25,
+              "value": 43154669234812296,
+              "chunk_index": 1,
+              "chunk_offset": 14,
+              "leaf_pos": 11
+            },
+            {
+              "index": 26,
+              "value": 136934468673480151,
+              "chunk_index": 1,
+              "chunk_offset": 14,
+              "leaf_pos": 12
+            },
+            {
+              "index": 27,
+              "value": 52951197627512830,
+              "chunk_index": 1,
+              "chunk_offset": 14,
+              "leaf_pos": 13
+            }
+          ],
+          "chunk_positions": [
+            0,
+            1
+          ],
+          "chunk_roots": [
+            "8c0f4c886e3132c691e95ea006936df06bcc562bc4be4f083a647629e4d4b4dd",
+            "45bceb2179dcd94b405988bda5ca0f52c1080d5e8834c0ff39ec693f00705fe0"
+          ],
+          "chunk_proof": {
+            "tree_size": 3,
+            "arity": 16,
+            "sibling_levels": [
+              [
+                "291a0e65a498c8d69a511b9d2d8b99de4b09f8d7e46da98e5cd7691de7ee9f7e",
+                "291a0e65a498c8d69a511b9d2d8b99de4b09f8d7e46da98e5cd7691de7ee9f7e",
+                "291a0e65a498c8d69a511b9d2d8b99de4b09f8d7e46da98e5cd7691de7ee9f7e",
+                "291a0e65a498c8d69a511b9d2d8b99de4b09f8d7e46da98e5cd7691de7ee9f7e",
+                "291a0e65a498c8d69a511b9d2d8b99de4b09f8d7e46da98e5cd7691de7ee9f7e",
+                "291a0e65a498c8d69a511b9d2d8b99de4b09f8d7e46da98e5cd7691de7ee9f7e",
+                "291a0e65a498c8d69a511b9d2d8b99de4b09f8d7e46da98e5cd7691de7ee9f7e",
+                "291a0e65a498c8d69a511b9d2d8b99de4b09f8d7e46da98e5cd7691de7ee9f7e",
+                "291a0e65a498c8d69a511b9d2d8b99de4b09f8d7e46da98e5cd7691de7ee9f7e",
+                "291a0e65a498c8d69a511b9d2d8b99de4b09f8d7e46da98e5cd7691de7ee9f7e",
+                "291a0e65a498c8d69a511b9d2d8b99de4b09f8d7e46da98e5cd7691de7ee9f7e",
+                "291a0e65a498c8d69a511b9d2d8b99de4b09f8d7e46da98e5cd7691de7ee9f7e",
+                "291a0e65a498c8d69a511b9d2d8b99de4b09f8d7e46da98e5cd7691de7ee9f7e",
+                "291a0e65a498c8d69a511b9d2d8b99de4b09f8d7e46da98e5cd7691de7ee9f7e"
+              ]
+            ]
+          },
+          "chunk_leaf_proofs": [
+            {
+              "chunk_index": 0,
+              "chunk_offset": 0,
+              "leaf_positions": [
+                6,
+                7,
+                8,
+                9,
+                10,
+                11,
+                12,
+                13
+              ],
+              "proof": {
+                "tree_size": 14,
+                "arity": 2,
+                "sibling_levels": [
+                  [],
+                  [
+                    "386502f04fed824e3e849b99bd7ff1cada3040a7b9478f2149c868e2da0e5aa0"
+                  ],
+                  [
+                    "22bffb4f21c29e91e28e7b8c39c49db2e9761d7c6a03a5bfc8193db1f16cde46"
+                  ],
+                  []
+                ]
+              }
+            },
+            {
+              "chunk_index": 1,
+              "chunk_offset": 14,
+              "leaf_positions": [
+                4,
+                5,
+                8,
+                9,
+                10,
+                11,
+                12,
+                13
+              ],
+              "proof": {
+                "tree_size": 14,
+                "arity": 2,
+                "sibling_levels": [
+                  [],
+                  [
+                    "3e59df943528e05f32913910b630ffe210a59b07f20475d099bf3ac1f0f54532"
+                  ],
+                  [
+                    "e9ecbd71f4d4c8e126c3596a9533bc5997dd9b2302a5ab8e22a2329edc3d22e9"
+                  ],
+                  []
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "layer_index": 1,
+        "proof": {
+          "entries": [
+            {
+              "index": 2,
+              "value": 802036788671179436,
+              "chunk_index": 0,
+              "chunk_offset": 0,
+              "leaf_pos": 2
+            },
+            {
+              "index": 3,
+              "value": 387468616458171793,
+              "chunk_index": 0,
+              "chunk_offset": 0,
+              "leaf_pos": 3
+            },
+            {
+              "index": 4,
+              "value": 856885653135888290,
+              "chunk_index": 0,
+              "chunk_offset": 0,
+              "leaf_pos": 4
+            },
+            {
+              "index": 5,
+              "value": 243772236017920199,
+              "chunk_index": 0,
+              "chunk_offset": 0,
+              "leaf_pos": 5
+            },
+            {
+              "index": 6,
+              "value": 508824198458730864,
+              "chunk_index": 0,
+              "chunk_offset": 0,
+              "leaf_pos": 6
+            },
+            {
+              "index": 7,
+              "value": 64316056827813304,
+              "chunk_index": 0,
+              "chunk_offset": 0,
+              "leaf_pos": 7
+            },
+            {
+              "index": 8,
+              "value": 1216716799529774034,
+              "chunk_index": 0,
+              "chunk_offset": 0,
+              "leaf_pos": 8
+            },
+            {
+              "index": 9,
+              "value": 1939585541952955568,
+              "chunk_index": 0,
+              "chunk_offset": 0,
+              "leaf_pos": 9
+            },
+            {
+              "index": 10,
+              "value": 2188311770634888207,
+              "chunk_index": 0,
+              "chunk_offset": 0,
+              "leaf_pos": 10
+            },
+            {
+              "index": 11,
+              "value": 1327879331148164019,
+              "chunk_index": 0,
+              "chunk_offset": 0,
+              "leaf_pos": 11
+            },
+            {
+              "index": 12,
+              "value": 152336284864895226,
+              "chunk_index": 0,
+              "chunk_offset": 0,
+              "leaf_pos": 12
+            },
+            {
+              "index": 13,
+              "value": 1454967874174276158,
+              "chunk_index": 0,
+              "chunk_offset": 0,
+              "leaf_pos": 13
+            }
+          ],
+          "chunk_positions": [
+            0
+          ],
+          "chunk_roots": [
+            "e7ce287ecd59a5906142cefc2957ace6eff4827faaa6370e2c54dd8e89aa7d5c"
+          ],
+          "chunk_proof": {
+            "tree_size": 2,
+            "arity": 16,
+            "sibling_levels": [
+              [
+                "7dec83227ee8a0c8907db2222f670a10e552ac335624d23b2a6d4bbf433dd791",
+                "7dec83227ee8a0c8907db2222f670a10e552ac335624d23b2a6d4bbf433dd791",
+                "7dec83227ee8a0c8907db2222f670a10e552ac335624d23b2a6d4bbf433dd791",
+                "7dec83227ee8a0c8907db2222f670a10e552ac335624d23b2a6d4bbf433dd791",
+                "7dec83227ee8a0c8907db2222f670a10e552ac335624d23b2a6d4bbf433dd791",
+                "7dec83227ee8a0c8907db2222f670a10e552ac335624d23b2a6d4bbf433dd791",
+                "7dec83227ee8a0c8907db2222f670a10e552ac335624d23b2a6d4bbf433dd791",
+                "7dec83227ee8a0c8907db2222f670a10e552ac335624d23b2a6d4bbf433dd791",
+                "7dec83227ee8a0c8907db2222f670a10e552ac335624d23b2a6d4bbf433dd791",
+                "7dec83227ee8a0c8907db2222f670a10e552ac335624d23b2a6d4bbf433dd791",
+                "7dec83227ee8a0c8907db2222f670a10e552ac335624d23b2a6d4bbf433dd791",
+                "7dec83227ee8a0c8907db2222f670a10e552ac335624d23b2a6d4bbf433dd791",
+                "7dec83227ee8a0c8907db2222f670a10e552ac335624d23b2a6d4bbf433dd791",
+                "7dec83227ee8a0c8907db2222f670a10e552ac335624d23b2a6d4bbf433dd791",
+                "7dec83227ee8a0c8907db2222f670a10e552ac335624d23b2a6d4bbf433dd791"
+              ]
+            ]
+          },
+          "chunk_leaf_proofs": [
+            {
+              "chunk_index": 0,
+              "chunk_offset": 0,
+              "leaf_positions": [
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9,
+                10,
+                11,
+                12,
+                13
+              ],
+              "proof": {
+                "tree_size": 14,
+                "arity": 2,
+                "sibling_levels": [
+                  [],
+                  [
+                    "15dc08d19c0109f77ef0143bfdbfa429415dbd4975742e751ac5af6a8416df82"
+                  ],
+                  [],
+                  []
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "layer_index": 2,
+        "proof": {
+          "entries": [
+            {
+              "index": 0,
+              "value": 1739581158698382514,
+              "chunk_index": 0,
+              "chunk_offset": 0,
+              "leaf_pos": 0
+            },
+            {
+              "index": 1,
+              "value": 1483474959842533340,
+              "chunk_index": 0,
+              "chunk_offset": 0,
+              "leaf_pos": 1
+            },
+            {
+              "index": 2,
+              "value": 1715415646946764542,
+              "chunk_index": 0,
+              "chunk_offset": 0,
+              "leaf_pos": 2
+            },
+            {
+              "index": 3,
+              "value": 1463111228058424177,
+              "chunk_index": 0,
+              "chunk_offset": 0,
+              "leaf_pos": 3
+            },
+            {
+              "index": 4,
+              "value": 232647942955569418,
+              "chunk_index": 0,
+              "chunk_offset": 0,
+              "leaf_pos": 4
+            },
+            {
+              "index": 5,
+              "value": 1519023825748840223,
+              "chunk_index": 0,
+              "chunk_offset": 0,
+              "leaf_pos": 5
+            },
+            {
+              "index": 6,
+              "value": 178863662390953707,
+              "chunk_index": 0,
+              "chunk_offset": 0,
+              "leaf_pos": 6
+            },
+            {
+              "index": 7,
+              "value": 1420006092044785613,
+              "chunk_index": 0,
+              "chunk_offset": 0,
+              "leaf_pos": 7
+            }
+          ],
+          "chunk_positions": [
+            0
+          ],
+          "chunk_roots": [
+            "5ab01467c5ee7808de1e71323c63baf770b2e589270775e403d9277469e94cad"
+          ],
+          "chunk_proof": {
+            "tree_size": 1,
+            "arity": 16,
+            "sibling_levels": []
+          },
+          "chunk_leaf_proofs": [
+            {
+              "chunk_index": 0,
+              "chunk_offset": 0,
+              "leaf_positions": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7
+              ],
+              "proof": {
+                "tree_size": 8,
+                "arity": 2,
+                "sibling_levels": [
+                  [],
+                  [],
+                  []
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "layer_index": 3,
+        "proof": {
+          "entries": [
+            {
+              "index": 0,
+              "value": 2011211561723640336,
+              "chunk_index": 0,
+              "chunk_offset": 0,
+              "leaf_pos": 0
+            },
+            {
+              "index": 1,
+              "value": 1167742771857935946,
+              "chunk_index": 0,
+              "chunk_offset": 0,
+              "leaf_pos": 1
+            },
+            {
+              "index": 2,
+              "value": 633399227625812705,
+              "chunk_index": 0,
+              "chunk_offset": 0,
+              "leaf_pos": 2
+            },
+            {
+              "index": 3,
+              "value": 1567796729513422905,
+              "chunk_index": 0,
+              "chunk_offset": 0,
+              "leaf_pos": 3
+            }
+          ],
+          "chunk_positions": [
+            0
+          ],
+          "chunk_roots": [
+            "bff93f6741bb9207c49d630d68b9a3bc67bb3c52bec6901f4f26d4c4825b03ff"
+          ],
+          "chunk_proof": {
+            "tree_size": 1,
+            "arity": 16,
+            "sibling_levels": []
+          },
+          "chunk_leaf_proofs": [
+            {
+              "chunk_index": 0,
+              "chunk_offset": 0,
+              "leaf_positions": [
+                0,
+                1,
+                2,
+                3
+              ],
+              "proof": {
+                "tree_size": 4,
+                "arity": 2,
+                "sibling_levels": [
+                  [],
+                  []
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "layer_index": 4,
+        "proof": {
+          "entries": [
+            {
+              "index": 0,
+              "value": 42435264744209653,
+              "chunk_index": 0,
+              "chunk_offset": 0,
+              "leaf_pos": 0
+            },
+            {
+              "index": 1,
+              "value": 1087116602656368432,
+              "chunk_index": 0,
+              "chunk_offset": 0,
+              "leaf_pos": 1
+            }
+          ],
+          "chunk_positions": [
+            0
+          ],
+          "chunk_roots": [
+            "a2034244ee7db5c87219b2f4d406f068d9d814bc4a67b1e3b83305d83718717c"
+          ],
+          "chunk_proof": {
+            "tree_size": 1,
+            "arity": 16,
+            "sibling_levels": []
+          },
+          "chunk_leaf_proofs": [
+            {
+              "chunk_index": 0,
+              "chunk_offset": 0,
+              "leaf_positions": [
+                0,
+                1
+              ],
+              "proof": {
+                "tree_size": 2,
+                "arity": 2,
+                "sibling_levels": [
+                  []
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "layer_index": 5,
+        "proof": {
+          "entries": [
+            {
+              "index": 0,
+              "value": 417683794994306326,
+              "chunk_index": 0,
+              "chunk_offset": 0,
+              "leaf_pos": 0
+            }
+          ],
+          "chunk_positions": [
+            0
+          ],
+          "chunk_roots": [
+            "b7f5f46750310b095a3799706317ffe694419fd2b10ae408f4dd10784062e0b3"
+          ],
+          "chunk_proof": {
+            "tree_size": 1,
+            "arity": 16,
+            "sibling_levels": []
+          },
+          "chunk_leaf_proofs": [
+            {
+              "chunk_index": 0,
+              "chunk_offset": 0,
+              "leaf_positions": [
+                0
+              ],
+              "proof": {
+                "tree_size": 1,
+                "arity": 2,
+                "sibling_levels": []
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "alpha_digest": "c33bfdc90baae888e85b2f378ec804254aa481743d1196d2cdf23c2eede018d7",
+  "mask_digest": "22e020052d9cf08b2d5bb2ff80f55b7fe275e8f265afe4fea3c68b690cc55fe7",
+  "row_openings": [
+    {
+      "backend": "geom_stc_fri",
+      "row_index": 6,
+      "row_values": [
+        921172864788100118,
+        517111403996329299,
+        192984111464396097,
+        910794957341428500,
+        261790397255650223,
+        1090844641858127428,
+        935158472046565319,
+        2207925566844010281,
+        1510489241609660051,
+        1197637114588836873,
+        271121218231426696,
+        2209508661288335104,
+        1534336500277195493,
+        1112075786702685901
+      ],
+      "proof": {
+        "schema": "bef_pc_chunk_open_v1",
+        "chunk_index": 6,
+        "chunk_offset": 84,
+        "values": [
+          921172864788100118,
+          517111403996329299,
+          192984111464396097,
+          910794957341428500,
+          261790397255650223,
+          1090844641858127428,
+          935158472046565319,
+          2207925566844010281,
+          1510489241609660051,
+          1197637114588836873,
+          271121218231426696,
+          2209508661288335104,
+          1534336500277195493,
+          1112075786702685901
+        ],
+        "chunk_root": "baca797df84c1bd47d88a79371dee28f3700281ef2195b945c4021fa8d02684a",
+        "chunk_pos": 6,
+        "chunk_root_path": [
+          [
+            "f393eb589e6c8cd5617114ae0ee49d4c5df5c1b7e7b755918e6b16b553b58424",
+            "530414dc90516862d61f944cbf9412e01a9a2b8cb126fd8ef4cd8db246243e50",
+            "c719b967d35045cdcf4c0413567d491babd6b522b07af59d96245ce062177265",
+            "af0ff3fa4b4d88d46b25a7d3343e044dee90f19e241ddf4a62f415096c825589",
+            "921a185165a0d8069f4ff30fb2a5392b88c1557b9cb63fb310a07fa4811fa652",
+            "0b706dc13352ac12cda88ef788c41d5d07bdf3fe81f25fe718b186bdcc2a9b57",
+            "d90d3a72502970909886d91bd007d1934de499cb8ba91497cca207c5a4c03bc1",
+            "6f524612451fd37f68a886ce90887d30b4bbe430cfb5494b32e02cbb88ee6395",
+            "e2f250789043f8cb8c3d94f8eab4206adb81558d240e80cb2511717415514a2c",
+            "4342be0b4862a10ff1b0a34dce2f0c55b99440a5f82da9f49b168829d1902fe6",
+            "dcca70a64c2dd1c7ad9e2c1b2df33e00190b94bd9f9d26f6e528410e3fa0e1a4",
+            "cea3b6f87cd59810342f22b74d3c41eb9e12c7336262c3c3950bd2e547f7fb3c",
+            "c7607c9d547f02f5d3d2b8edbfc5d62ac0634ba15caa1f1c2ab6af140c6c55f3",
+            "528e2ffa46badeb845f8f71553769f0a2633345448a3c2b45ad7ba1de354d23c",
+            "765f4fbab44b0b8e1c49e3978bf532921285328be1abd9824530013591f7960c"
+          ],
+          [
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354"
+          ]
+        ]
+      },
+      "next_index": 7,
+      "next_row_values": [
+        1798103753691397424,
+        302247174618476377,
+        325113388123387221,
+        123316450974289917,
+        1907780752253440868,
+        140314942474135790,
+        814554657354736661,
+        214174416471890881,
+        1315122337780077369,
+        864727449529103325,
+        83243437199222447,
+        1603183649972794566,
+        239953129947501086,
+        1750882167916990666
+      ],
+      "next_proof": {
+        "schema": "bef_pc_chunk_open_v1",
+        "chunk_index": 7,
+        "chunk_offset": 98,
+        "values": [
+          1798103753691397424,
+          302247174618476377,
+          325113388123387221,
+          123316450974289917,
+          1907780752253440868,
+          140314942474135790,
+          814554657354736661,
+          214174416471890881,
+          1315122337780077369,
+          864727449529103325,
+          83243437199222447,
+          1603183649972794566,
+          239953129947501086,
+          1750882167916990666
+        ],
+        "chunk_root": "d90d3a72502970909886d91bd007d1934de499cb8ba91497cca207c5a4c03bc1",
+        "chunk_pos": 7,
+        "chunk_root_path": [
+          [
+            "f393eb589e6c8cd5617114ae0ee49d4c5df5c1b7e7b755918e6b16b553b58424",
+            "530414dc90516862d61f944cbf9412e01a9a2b8cb126fd8ef4cd8db246243e50",
+            "c719b967d35045cdcf4c0413567d491babd6b522b07af59d96245ce062177265",
+            "af0ff3fa4b4d88d46b25a7d3343e044dee90f19e241ddf4a62f415096c825589",
+            "921a185165a0d8069f4ff30fb2a5392b88c1557b9cb63fb310a07fa4811fa652",
+            "0b706dc13352ac12cda88ef788c41d5d07bdf3fe81f25fe718b186bdcc2a9b57",
+            "baca797df84c1bd47d88a79371dee28f3700281ef2195b945c4021fa8d02684a",
+            "6f524612451fd37f68a886ce90887d30b4bbe430cfb5494b32e02cbb88ee6395",
+            "e2f250789043f8cb8c3d94f8eab4206adb81558d240e80cb2511717415514a2c",
+            "4342be0b4862a10ff1b0a34dce2f0c55b99440a5f82da9f49b168829d1902fe6",
+            "dcca70a64c2dd1c7ad9e2c1b2df33e00190b94bd9f9d26f6e528410e3fa0e1a4",
+            "cea3b6f87cd59810342f22b74d3c41eb9e12c7336262c3c3950bd2e547f7fb3c",
+            "c7607c9d547f02f5d3d2b8edbfc5d62ac0634ba15caa1f1c2ab6af140c6c55f3",
+            "528e2ffa46badeb845f8f71553769f0a2633345448a3c2b45ad7ba1de354d23c",
+            "765f4fbab44b0b8e1c49e3978bf532921285328be1abd9824530013591f7960c"
+          ],
+          [
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354"
+          ]
+        ]
+      }
+    },
+    {
+      "backend": "geom_stc_fri",
+      "row_index": 9,
+      "row_values": [
+        864623332945205941,
+        1384489773130512474,
+        1017543614698906762,
+        1558546268057062653,
+        1523799130549570684,
+        797526368070777498,
+        873467703240468150,
+        1713517722581030659,
+        1252906692302578076,
+        2108244167716766230,
+        828996952886612760,
+        535372918297003736,
+        1565303028862297199,
+        1195594366209313938
+      ],
+      "proof": {
+        "schema": "bef_pc_chunk_open_v1",
+        "chunk_index": 9,
+        "chunk_offset": 126,
+        "values": [
+          864623332945205941,
+          1384489773130512474,
+          1017543614698906762,
+          1558546268057062653,
+          1523799130549570684,
+          797526368070777498,
+          873467703240468150,
+          1713517722581030659,
+          1252906692302578076,
+          2108244167716766230,
+          828996952886612760,
+          535372918297003736,
+          1565303028862297199,
+          1195594366209313938
+        ],
+        "chunk_root": "e2f250789043f8cb8c3d94f8eab4206adb81558d240e80cb2511717415514a2c",
+        "chunk_pos": 9,
+        "chunk_root_path": [
+          [
+            "f393eb589e6c8cd5617114ae0ee49d4c5df5c1b7e7b755918e6b16b553b58424",
+            "530414dc90516862d61f944cbf9412e01a9a2b8cb126fd8ef4cd8db246243e50",
+            "c719b967d35045cdcf4c0413567d491babd6b522b07af59d96245ce062177265",
+            "af0ff3fa4b4d88d46b25a7d3343e044dee90f19e241ddf4a62f415096c825589",
+            "921a185165a0d8069f4ff30fb2a5392b88c1557b9cb63fb310a07fa4811fa652",
+            "0b706dc13352ac12cda88ef788c41d5d07bdf3fe81f25fe718b186bdcc2a9b57",
+            "baca797df84c1bd47d88a79371dee28f3700281ef2195b945c4021fa8d02684a",
+            "d90d3a72502970909886d91bd007d1934de499cb8ba91497cca207c5a4c03bc1",
+            "6f524612451fd37f68a886ce90887d30b4bbe430cfb5494b32e02cbb88ee6395",
+            "4342be0b4862a10ff1b0a34dce2f0c55b99440a5f82da9f49b168829d1902fe6",
+            "dcca70a64c2dd1c7ad9e2c1b2df33e00190b94bd9f9d26f6e528410e3fa0e1a4",
+            "cea3b6f87cd59810342f22b74d3c41eb9e12c7336262c3c3950bd2e547f7fb3c",
+            "c7607c9d547f02f5d3d2b8edbfc5d62ac0634ba15caa1f1c2ab6af140c6c55f3",
+            "528e2ffa46badeb845f8f71553769f0a2633345448a3c2b45ad7ba1de354d23c",
+            "765f4fbab44b0b8e1c49e3978bf532921285328be1abd9824530013591f7960c"
+          ],
+          [
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354"
+          ]
+        ]
+      },
+      "next_index": 10,
+      "next_row_values": [
+        1086877815257289539,
+        271216673620000355,
+        671119585161012584,
+        1558140816833382004,
+        138405264013958762,
+        1521986349177877211,
+        882508294159603965,
+        1906325417976941500,
+        2156832207290140789,
+        508913077588873368,
+        39664570171036863,
+        728853775165910204,
+        675347841588148327,
+        2266022276750365686
+      ],
+      "next_proof": {
+        "schema": "bef_pc_chunk_open_v1",
+        "chunk_index": 10,
+        "chunk_offset": 140,
+        "values": [
+          1086877815257289539,
+          271216673620000355,
+          671119585161012584,
+          1558140816833382004,
+          138405264013958762,
+          1521986349177877211,
+          882508294159603965,
+          1906325417976941500,
+          2156832207290140789,
+          508913077588873368,
+          39664570171036863,
+          728853775165910204,
+          675347841588148327,
+          2266022276750365686
+        ],
+        "chunk_root": "4342be0b4862a10ff1b0a34dce2f0c55b99440a5f82da9f49b168829d1902fe6",
+        "chunk_pos": 10,
+        "chunk_root_path": [
+          [
+            "f393eb589e6c8cd5617114ae0ee49d4c5df5c1b7e7b755918e6b16b553b58424",
+            "530414dc90516862d61f944cbf9412e01a9a2b8cb126fd8ef4cd8db246243e50",
+            "c719b967d35045cdcf4c0413567d491babd6b522b07af59d96245ce062177265",
+            "af0ff3fa4b4d88d46b25a7d3343e044dee90f19e241ddf4a62f415096c825589",
+            "921a185165a0d8069f4ff30fb2a5392b88c1557b9cb63fb310a07fa4811fa652",
+            "0b706dc13352ac12cda88ef788c41d5d07bdf3fe81f25fe718b186bdcc2a9b57",
+            "baca797df84c1bd47d88a79371dee28f3700281ef2195b945c4021fa8d02684a",
+            "d90d3a72502970909886d91bd007d1934de499cb8ba91497cca207c5a4c03bc1",
+            "6f524612451fd37f68a886ce90887d30b4bbe430cfb5494b32e02cbb88ee6395",
+            "e2f250789043f8cb8c3d94f8eab4206adb81558d240e80cb2511717415514a2c",
+            "dcca70a64c2dd1c7ad9e2c1b2df33e00190b94bd9f9d26f6e528410e3fa0e1a4",
+            "cea3b6f87cd59810342f22b74d3c41eb9e12c7336262c3c3950bd2e547f7fb3c",
+            "c7607c9d547f02f5d3d2b8edbfc5d62ac0634ba15caa1f1c2ab6af140c6c55f3",
+            "528e2ffa46badeb845f8f71553769f0a2633345448a3c2b45ad7ba1de354d23c",
+            "765f4fbab44b0b8e1c49e3978bf532921285328be1abd9824530013591f7960c"
+          ],
+          [
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354"
+          ]
+        ]
+      }
+    },
+    {
+      "backend": "geom_stc_fri",
+      "row_index": 11,
+      "row_values": [
+        627459831709845420,
+        1894927549375243425,
+        1968391923116878258,
+        709536155838130393,
+        2250925024824107785,
+        532689187871920295,
+        1427109257620455165,
+        1269166081273950830,
+        642513330042611934,
+        1068157973657056308,
+        999905444660213147,
+        604203265903077520,
+        236065813672442074,
+        1748872593543453006
+      ],
+      "proof": {
+        "schema": "bef_pc_chunk_open_v1",
+        "chunk_index": 11,
+        "chunk_offset": 154,
+        "values": [
+          627459831709845420,
+          1894927549375243425,
+          1968391923116878258,
+          709536155838130393,
+          2250925024824107785,
+          532689187871920295,
+          1427109257620455165,
+          1269166081273950830,
+          642513330042611934,
+          1068157973657056308,
+          999905444660213147,
+          604203265903077520,
+          236065813672442074,
+          1748872593543453006
+        ],
+        "chunk_root": "dcca70a64c2dd1c7ad9e2c1b2df33e00190b94bd9f9d26f6e528410e3fa0e1a4",
+        "chunk_pos": 11,
+        "chunk_root_path": [
+          [
+            "f393eb589e6c8cd5617114ae0ee49d4c5df5c1b7e7b755918e6b16b553b58424",
+            "530414dc90516862d61f944cbf9412e01a9a2b8cb126fd8ef4cd8db246243e50",
+            "c719b967d35045cdcf4c0413567d491babd6b522b07af59d96245ce062177265",
+            "af0ff3fa4b4d88d46b25a7d3343e044dee90f19e241ddf4a62f415096c825589",
+            "921a185165a0d8069f4ff30fb2a5392b88c1557b9cb63fb310a07fa4811fa652",
+            "0b706dc13352ac12cda88ef788c41d5d07bdf3fe81f25fe718b186bdcc2a9b57",
+            "baca797df84c1bd47d88a79371dee28f3700281ef2195b945c4021fa8d02684a",
+            "d90d3a72502970909886d91bd007d1934de499cb8ba91497cca207c5a4c03bc1",
+            "6f524612451fd37f68a886ce90887d30b4bbe430cfb5494b32e02cbb88ee6395",
+            "e2f250789043f8cb8c3d94f8eab4206adb81558d240e80cb2511717415514a2c",
+            "4342be0b4862a10ff1b0a34dce2f0c55b99440a5f82da9f49b168829d1902fe6",
+            "cea3b6f87cd59810342f22b74d3c41eb9e12c7336262c3c3950bd2e547f7fb3c",
+            "c7607c9d547f02f5d3d2b8edbfc5d62ac0634ba15caa1f1c2ab6af140c6c55f3",
+            "528e2ffa46badeb845f8f71553769f0a2633345448a3c2b45ad7ba1de354d23c",
+            "765f4fbab44b0b8e1c49e3978bf532921285328be1abd9824530013591f7960c"
+          ],
+          [
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354"
+          ]
+        ]
+      },
+      "next_index": 12,
+      "next_row_values": [
+        2110969628857746447,
+        1210587928405420068,
+        1552159702773853195,
+        1989454073252916490,
+        2131631663262362770,
+        998164617402124911,
+        802722771533224411,
+        1105269104071397139,
+        1395140029783239465,
+        1091342479872091217,
+        1564798405258059248,
+        1004170251015395956,
+        660287305478066016,
+        788775706106402151
+      ],
+      "next_proof": {
+        "schema": "bef_pc_chunk_open_v1",
+        "chunk_index": 12,
+        "chunk_offset": 168,
+        "values": [
+          2110969628857746447,
+          1210587928405420068,
+          1552159702773853195,
+          1989454073252916490,
+          2131631663262362770,
+          998164617402124911,
+          802722771533224411,
+          1105269104071397139,
+          1395140029783239465,
+          1091342479872091217,
+          1564798405258059248,
+          1004170251015395956,
+          660287305478066016,
+          788775706106402151
+        ],
+        "chunk_root": "cea3b6f87cd59810342f22b74d3c41eb9e12c7336262c3c3950bd2e547f7fb3c",
+        "chunk_pos": 12,
+        "chunk_root_path": [
+          [
+            "f393eb589e6c8cd5617114ae0ee49d4c5df5c1b7e7b755918e6b16b553b58424",
+            "530414dc90516862d61f944cbf9412e01a9a2b8cb126fd8ef4cd8db246243e50",
+            "c719b967d35045cdcf4c0413567d491babd6b522b07af59d96245ce062177265",
+            "af0ff3fa4b4d88d46b25a7d3343e044dee90f19e241ddf4a62f415096c825589",
+            "921a185165a0d8069f4ff30fb2a5392b88c1557b9cb63fb310a07fa4811fa652",
+            "0b706dc13352ac12cda88ef788c41d5d07bdf3fe81f25fe718b186bdcc2a9b57",
+            "baca797df84c1bd47d88a79371dee28f3700281ef2195b945c4021fa8d02684a",
+            "d90d3a72502970909886d91bd007d1934de499cb8ba91497cca207c5a4c03bc1",
+            "6f524612451fd37f68a886ce90887d30b4bbe430cfb5494b32e02cbb88ee6395",
+            "e2f250789043f8cb8c3d94f8eab4206adb81558d240e80cb2511717415514a2c",
+            "4342be0b4862a10ff1b0a34dce2f0c55b99440a5f82da9f49b168829d1902fe6",
+            "dcca70a64c2dd1c7ad9e2c1b2df33e00190b94bd9f9d26f6e528410e3fa0e1a4",
+            "c7607c9d547f02f5d3d2b8edbfc5d62ac0634ba15caa1f1c2ab6af140c6c55f3",
+            "528e2ffa46badeb845f8f71553769f0a2633345448a3c2b45ad7ba1de354d23c",
+            "765f4fbab44b0b8e1c49e3978bf532921285328be1abd9824530013591f7960c"
+          ],
+          [
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354"
+          ]
+        ]
+      }
+    },
+    {
+      "backend": "geom_stc_fri",
+      "row_index": 13,
+      "row_values": [
+        1779282551124880528,
+        1961627164811718031,
+        945053360664073658,
+        95014611317063559,
+        1067613084472614551,
+        1953640869027328655,
+        1984110791136755799,
+        297559098616774291,
+        1304104966222015385,
+        476916584525110476,
+        317235358584601625,
+        1039610236395226749,
+        2137556234204685013,
+        2200772428314648923
+      ],
+      "proof": {
+        "schema": "bef_pc_chunk_open_v1",
+        "chunk_index": 13,
+        "chunk_offset": 182,
+        "values": [
+          1779282551124880528,
+          1961627164811718031,
+          945053360664073658,
+          95014611317063559,
+          1067613084472614551,
+          1953640869027328655,
+          1984110791136755799,
+          297559098616774291,
+          1304104966222015385,
+          476916584525110476,
+          317235358584601625,
+          1039610236395226749,
+          2137556234204685013,
+          2200772428314648923
+        ],
+        "chunk_root": "c7607c9d547f02f5d3d2b8edbfc5d62ac0634ba15caa1f1c2ab6af140c6c55f3",
+        "chunk_pos": 13,
+        "chunk_root_path": [
+          [
+            "f393eb589e6c8cd5617114ae0ee49d4c5df5c1b7e7b755918e6b16b553b58424",
+            "530414dc90516862d61f944cbf9412e01a9a2b8cb126fd8ef4cd8db246243e50",
+            "c719b967d35045cdcf4c0413567d491babd6b522b07af59d96245ce062177265",
+            "af0ff3fa4b4d88d46b25a7d3343e044dee90f19e241ddf4a62f415096c825589",
+            "921a185165a0d8069f4ff30fb2a5392b88c1557b9cb63fb310a07fa4811fa652",
+            "0b706dc13352ac12cda88ef788c41d5d07bdf3fe81f25fe718b186bdcc2a9b57",
+            "baca797df84c1bd47d88a79371dee28f3700281ef2195b945c4021fa8d02684a",
+            "d90d3a72502970909886d91bd007d1934de499cb8ba91497cca207c5a4c03bc1",
+            "6f524612451fd37f68a886ce90887d30b4bbe430cfb5494b32e02cbb88ee6395",
+            "e2f250789043f8cb8c3d94f8eab4206adb81558d240e80cb2511717415514a2c",
+            "4342be0b4862a10ff1b0a34dce2f0c55b99440a5f82da9f49b168829d1902fe6",
+            "dcca70a64c2dd1c7ad9e2c1b2df33e00190b94bd9f9d26f6e528410e3fa0e1a4",
+            "cea3b6f87cd59810342f22b74d3c41eb9e12c7336262c3c3950bd2e547f7fb3c",
+            "528e2ffa46badeb845f8f71553769f0a2633345448a3c2b45ad7ba1de354d23c",
+            "765f4fbab44b0b8e1c49e3978bf532921285328be1abd9824530013591f7960c"
+          ],
+          [
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354"
+          ]
+        ]
+      },
+      "next_index": 14,
+      "next_row_values": [
+        1355595020744707164,
+        1072088387290961371,
+        20868290729689145,
+        725402600943454591,
+        347407928406382071,
+        1772134615955752911,
+        99774703034012227,
+        750232139443470653,
+        1679085997268504261,
+        690958580361651024,
+        1820191832668551892,
+        1452705454381012199,
+        2205478268899634436,
+        226523414568568140
+      ],
+      "next_proof": {
+        "schema": "bef_pc_chunk_open_v1",
+        "chunk_index": 14,
+        "chunk_offset": 196,
+        "values": [
+          1355595020744707164,
+          1072088387290961371,
+          20868290729689145,
+          725402600943454591,
+          347407928406382071,
+          1772134615955752911,
+          99774703034012227,
+          750232139443470653,
+          1679085997268504261,
+          690958580361651024,
+          1820191832668551892,
+          1452705454381012199,
+          2205478268899634436,
+          226523414568568140
+        ],
+        "chunk_root": "528e2ffa46badeb845f8f71553769f0a2633345448a3c2b45ad7ba1de354d23c",
+        "chunk_pos": 14,
+        "chunk_root_path": [
+          [
+            "f393eb589e6c8cd5617114ae0ee49d4c5df5c1b7e7b755918e6b16b553b58424",
+            "530414dc90516862d61f944cbf9412e01a9a2b8cb126fd8ef4cd8db246243e50",
+            "c719b967d35045cdcf4c0413567d491babd6b522b07af59d96245ce062177265",
+            "af0ff3fa4b4d88d46b25a7d3343e044dee90f19e241ddf4a62f415096c825589",
+            "921a185165a0d8069f4ff30fb2a5392b88c1557b9cb63fb310a07fa4811fa652",
+            "0b706dc13352ac12cda88ef788c41d5d07bdf3fe81f25fe718b186bdcc2a9b57",
+            "baca797df84c1bd47d88a79371dee28f3700281ef2195b945c4021fa8d02684a",
+            "d90d3a72502970909886d91bd007d1934de499cb8ba91497cca207c5a4c03bc1",
+            "6f524612451fd37f68a886ce90887d30b4bbe430cfb5494b32e02cbb88ee6395",
+            "e2f250789043f8cb8c3d94f8eab4206adb81558d240e80cb2511717415514a2c",
+            "4342be0b4862a10ff1b0a34dce2f0c55b99440a5f82da9f49b168829d1902fe6",
+            "dcca70a64c2dd1c7ad9e2c1b2df33e00190b94bd9f9d26f6e528410e3fa0e1a4",
+            "cea3b6f87cd59810342f22b74d3c41eb9e12c7336262c3c3950bd2e547f7fb3c",
+            "c7607c9d547f02f5d3d2b8edbfc5d62ac0634ba15caa1f1c2ab6af140c6c55f3",
+            "765f4fbab44b0b8e1c49e3978bf532921285328be1abd9824530013591f7960c"
+          ],
+          [
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354",
+            "d4e95f9c88ea0fa868e3ac8cfb0d11f31c75713c8ff922c87080a6006de98354"
+          ]
+        ]
+      }
+    },
+    {
+      "backend": "geom_stc_fri",
+      "row_index": 19,
+      "row_values": [
+        72112625986849939,
+        1948050270438379834,
+        1804435704803951278,
+        1359805047293254216,
+        2031797698300334637,
+        296576950685399039,
+        689571877299811340,
+        232234719414483313,
+        1844574397547499755,
+        2121838434352759844,
+        524820920994330420,
+        1652053787132082752,
+        1107435668494164841,
+        1085022936995920591
+      ],
+      "proof": {
+        "schema": "bef_pc_chunk_open_v1",
+        "chunk_index": 19,
+        "chunk_offset": 266,
+        "values": [
+          72112625986849939,
+          1948050270438379834,
+          1804435704803951278,
+          1359805047293254216,
+          2031797698300334637,
+          296576950685399039,
+          689571877299811340,
+          232234719414483313,
+          1844574397547499755,
+          2121838434352759844,
+          524820920994330420,
+          1652053787132082752,
+          1107435668494164841,
+          1085022936995920591
+        ],
+        "chunk_root": "71924db048114d3de8f0c4285c39a9a71610f0c539ac5bb71fd9b547bae267ba",
+        "chunk_pos": 19,
+        "chunk_root_path": [
+          [
+            "186484a79303a0c9a289b0fee0236ee79b32859fcded1714bbdd33a08006360d",
+            "be5b0e70a5c57ab09b34973b7c26422c44bd6cfd6f39130138d69a1eb5c6c2b4",
+            "09b7d52beed441c74578f47a1f3a9874773f636f9dcb705281218c7930785908",
+            "f9cd69c6f25f6022972a41de58224ecdeaba439499b9cacc5121088c090df42a",
+            "172bf42512c5a0d027446b8d8048758c694b666b6e207c39c9497b7b49982da8",
+            "47be5dd8a15f5ac6bb3cb04d43d4a31dc98c800b48a0b9873cf556e994371f03",
+            "abf9dc523c5332c9d0296c858bf2b5ea5373efd2e772e21164a8d205fac9a1b7",
+            "21acba0d7646cb5930c7c848762f7be8c780678bc34df9e9fa16729480d81302",
+            "25de1fa5ec7981507367851af0082d227958d16d2874b5fcfea232f7ce5f9b6c",
+            "03dc1e56142480545b2e084b306e442547702e11d9aed93a3d65f16ffeacc12f",
+            "c02c3bad16073bd8e8b3f673fb72f7bff4472f4eb6e5cae7f9863b9fab40a316",
+            "ed8ad1541352adb8f4b49c72eb918b16b57c5132dbe53fd23791f28d4a919ee1",
+            "f85c91176dd9fb48c39aa65dbfbb2768b3c5b656507d5a89ab1c498cacb138ad",
+            "34dd0a7650ec238bb2076066a296511f5cae534159ef7c50fb3909c3d810e72c",
+            "0f57ef51e1ec65abc6c50b8fe826d6cccb83d03e4d4daafbdbcfaca89f143cf8"
+          ],
+          [
+            "7d5f4367da30555b4bbc287f6cec8232c5589789d7fb03b191c29bab86f3c992"
+          ]
+        ]
+      },
+      "next_index": 20,
+      "next_row_values": [
+        711199691028250291,
+        390870202381509500,
+        1304048552821838168,
+        1850962158112980478,
+        871038300906583238,
+        1066352728292045504,
+        1862383266946328823,
+        1264241023468904323,
+        1708884215937866133,
+        648100577651229086,
+        678029608156759225,
+        31569850087684024,
+        1026564751344291692,
+        1845019158901871569
+      ],
+      "next_proof": {
+        "schema": "bef_pc_chunk_open_v1",
+        "chunk_index": 20,
+        "chunk_offset": 280,
+        "values": [
+          711199691028250291,
+          390870202381509500,
+          1304048552821838168,
+          1850962158112980478,
+          871038300906583238,
+          1066352728292045504,
+          1862383266946328823,
+          1264241023468904323,
+          1708884215937866133,
+          648100577651229086,
+          678029608156759225,
+          31569850087684024,
+          1026564751344291692,
+          1845019158901871569
+        ],
+        "chunk_root": "f9cd69c6f25f6022972a41de58224ecdeaba439499b9cacc5121088c090df42a",
+        "chunk_pos": 20,
+        "chunk_root_path": [
+          [
+            "186484a79303a0c9a289b0fee0236ee79b32859fcded1714bbdd33a08006360d",
+            "be5b0e70a5c57ab09b34973b7c26422c44bd6cfd6f39130138d69a1eb5c6c2b4",
+            "09b7d52beed441c74578f47a1f3a9874773f636f9dcb705281218c7930785908",
+            "71924db048114d3de8f0c4285c39a9a71610f0c539ac5bb71fd9b547bae267ba",
+            "172bf42512c5a0d027446b8d8048758c694b666b6e207c39c9497b7b49982da8",
+            "47be5dd8a15f5ac6bb3cb04d43d4a31dc98c800b48a0b9873cf556e994371f03",
+            "abf9dc523c5332c9d0296c858bf2b5ea5373efd2e772e21164a8d205fac9a1b7",
+            "21acba0d7646cb5930c7c848762f7be8c780678bc34df9e9fa16729480d81302",
+            "25de1fa5ec7981507367851af0082d227958d16d2874b5fcfea232f7ce5f9b6c",
+            "03dc1e56142480545b2e084b306e442547702e11d9aed93a3d65f16ffeacc12f",
+            "c02c3bad16073bd8e8b3f673fb72f7bff4472f4eb6e5cae7f9863b9fab40a316",
+            "ed8ad1541352adb8f4b49c72eb918b16b57c5132dbe53fd23791f28d4a919ee1",
+            "f85c91176dd9fb48c39aa65dbfbb2768b3c5b656507d5a89ab1c498cacb138ad",
+            "34dd0a7650ec238bb2076066a296511f5cae534159ef7c50fb3909c3d810e72c",
+            "0f57ef51e1ec65abc6c50b8fe826d6cccb83d03e4d4daafbdbcfaca89f143cf8"
+          ],
+          [
+            "7d5f4367da30555b4bbc287f6cec8232c5589789d7fb03b191c29bab86f3c992"
+          ]
+        ]
+      }
+    },
+    {
+      "backend": "geom_stc_fri",
+      "row_index": 22,
+      "row_values": [
+        928759056940319254,
+        1388294147933854009,
+        432184128615862664,
+        2231324954689601319,
+        1586421015025567756,
+        2062934101212231041,
+        2056741212428352170,
+        1251178620331022890,
+        1523431484908534032,
+        1379413160202779543,
+        501782674934237503,
+        1329379009263450288,
+        713081230348111492,
+        1826865945854532000
+      ],
+      "proof": {
+        "schema": "bef_pc_chunk_open_v1",
+        "chunk_index": 22,
+        "chunk_offset": 308,
+        "values": [
+          928759056940319254,
+          1388294147933854009,
+          432184128615862664,
+          2231324954689601319,
+          1586421015025567756,
+          2062934101212231041,
+          2056741212428352170,
+          1251178620331022890,
+          1523431484908534032,
+          1379413160202779543,
+          501782674934237503,
+          1329379009263450288,
+          713081230348111492,
+          1826865945854532000
+        ],
+        "chunk_root": "47be5dd8a15f5ac6bb3cb04d43d4a31dc98c800b48a0b9873cf556e994371f03",
+        "chunk_pos": 22,
+        "chunk_root_path": [
+          [
+            "186484a79303a0c9a289b0fee0236ee79b32859fcded1714bbdd33a08006360d",
+            "be5b0e70a5c57ab09b34973b7c26422c44bd6cfd6f39130138d69a1eb5c6c2b4",
+            "09b7d52beed441c74578f47a1f3a9874773f636f9dcb705281218c7930785908",
+            "71924db048114d3de8f0c4285c39a9a71610f0c539ac5bb71fd9b547bae267ba",
+            "f9cd69c6f25f6022972a41de58224ecdeaba439499b9cacc5121088c090df42a",
+            "172bf42512c5a0d027446b8d8048758c694b666b6e207c39c9497b7b49982da8",
+            "abf9dc523c5332c9d0296c858bf2b5ea5373efd2e772e21164a8d205fac9a1b7",
+            "21acba0d7646cb5930c7c848762f7be8c780678bc34df9e9fa16729480d81302",
+            "25de1fa5ec7981507367851af0082d227958d16d2874b5fcfea232f7ce5f9b6c",
+            "03dc1e56142480545b2e084b306e442547702e11d9aed93a3d65f16ffeacc12f",
+            "c02c3bad16073bd8e8b3f673fb72f7bff4472f4eb6e5cae7f9863b9fab40a316",
+            "ed8ad1541352adb8f4b49c72eb918b16b57c5132dbe53fd23791f28d4a919ee1",
+            "f85c91176dd9fb48c39aa65dbfbb2768b3c5b656507d5a89ab1c498cacb138ad",
+            "34dd0a7650ec238bb2076066a296511f5cae534159ef7c50fb3909c3d810e72c",
+            "0f57ef51e1ec65abc6c50b8fe826d6cccb83d03e4d4daafbdbcfaca89f143cf8"
+          ],
+          [
+            "7d5f4367da30555b4bbc287f6cec8232c5589789d7fb03b191c29bab86f3c992"
+          ]
+        ]
+      },
+      "next_index": 23,
+      "next_row_values": [
+        196644867541167418,
+        1186719020620201692,
+        1599535008709496789,
+        1520819089123951798,
+        2050882158565126551,
+        211435933364890148,
+        1426970954136738854,
+        2091643621579600904,
+        2135219620109157847,
+        2151715303091996911,
+        604938433956270711,
+        1292466084502262557,
+        1075074554349201946,
+        1946958745950158303
+      ],
+      "next_proof": {
+        "schema": "bef_pc_chunk_open_v1",
+        "chunk_index": 23,
+        "chunk_offset": 322,
+        "values": [
+          196644867541167418,
+          1186719020620201692,
+          1599535008709496789,
+          1520819089123951798,
+          2050882158565126551,
+          211435933364890148,
+          1426970954136738854,
+          2091643621579600904,
+          2135219620109157847,
+          2151715303091996911,
+          604938433956270711,
+          1292466084502262557,
+          1075074554349201946,
+          1946958745950158303
+        ],
+        "chunk_root": "abf9dc523c5332c9d0296c858bf2b5ea5373efd2e772e21164a8d205fac9a1b7",
+        "chunk_pos": 23,
+        "chunk_root_path": [
+          [
+            "186484a79303a0c9a289b0fee0236ee79b32859fcded1714bbdd33a08006360d",
+            "be5b0e70a5c57ab09b34973b7c26422c44bd6cfd6f39130138d69a1eb5c6c2b4",
+            "09b7d52beed441c74578f47a1f3a9874773f636f9dcb705281218c7930785908",
+            "71924db048114d3de8f0c4285c39a9a71610f0c539ac5bb71fd9b547bae267ba",
+            "f9cd69c6f25f6022972a41de58224ecdeaba439499b9cacc5121088c090df42a",
+            "172bf42512c5a0d027446b8d8048758c694b666b6e207c39c9497b7b49982da8",
+            "47be5dd8a15f5ac6bb3cb04d43d4a31dc98c800b48a0b9873cf556e994371f03",
+            "21acba0d7646cb5930c7c848762f7be8c780678bc34df9e9fa16729480d81302",
+            "25de1fa5ec7981507367851af0082d227958d16d2874b5fcfea232f7ce5f9b6c",
+            "03dc1e56142480545b2e084b306e442547702e11d9aed93a3d65f16ffeacc12f",
+            "c02c3bad16073bd8e8b3f673fb72f7bff4472f4eb6e5cae7f9863b9fab40a316",
+            "ed8ad1541352adb8f4b49c72eb918b16b57c5132dbe53fd23791f28d4a919ee1",
+            "f85c91176dd9fb48c39aa65dbfbb2768b3c5b656507d5a89ab1c498cacb138ad",
+            "34dd0a7650ec238bb2076066a296511f5cae534159ef7c50fb3909c3d810e72c",
+            "0f57ef51e1ec65abc6c50b8fe826d6cccb83d03e4d4daafbdbcfaca89f143cf8"
+          ],
+          [
+            "7d5f4367da30555b4bbc287f6cec8232c5589789d7fb03b191c29bab86f3c992"
+          ]
+        ]
+      }
+    },
+    {
+      "backend": "geom_stc_fri",
+      "row_index": 25,
+      "row_values": [
+        708895663058519506,
+        212725469407822144,
+        150601714613490604,
+        1157407965039711897,
+        883208289297946916,
+        1296037495186107884,
+        1467979716889060723,
+        927275560063504337,
+        1892854696395848353,
+        2234225800960438685,
+        825709233170368268,
+        1367913347910274784,
+        1251761109936333357,
+        1559064058565050787
+      ],
+      "proof": {
+        "schema": "bef_pc_chunk_open_v1",
+        "chunk_index": 25,
+        "chunk_offset": 350,
+        "values": [
+          708895663058519506,
+          212725469407822144,
+          150601714613490604,
+          1157407965039711897,
+          883208289297946916,
+          1296037495186107884,
+          1467979716889060723,
+          927275560063504337,
+          1892854696395848353,
+          2234225800960438685,
+          825709233170368268,
+          1367913347910274784,
+          1251761109936333357,
+          1559064058565050787
+        ],
+        "chunk_root": "25de1fa5ec7981507367851af0082d227958d16d2874b5fcfea232f7ce5f9b6c",
+        "chunk_pos": 25,
+        "chunk_root_path": [
+          [
+            "186484a79303a0c9a289b0fee0236ee79b32859fcded1714bbdd33a08006360d",
+            "be5b0e70a5c57ab09b34973b7c26422c44bd6cfd6f39130138d69a1eb5c6c2b4",
+            "09b7d52beed441c74578f47a1f3a9874773f636f9dcb705281218c7930785908",
+            "71924db048114d3de8f0c4285c39a9a71610f0c539ac5bb71fd9b547bae267ba",
+            "f9cd69c6f25f6022972a41de58224ecdeaba439499b9cacc5121088c090df42a",
+            "172bf42512c5a0d027446b8d8048758c694b666b6e207c39c9497b7b49982da8",
+            "47be5dd8a15f5ac6bb3cb04d43d4a31dc98c800b48a0b9873cf556e994371f03",
+            "abf9dc523c5332c9d0296c858bf2b5ea5373efd2e772e21164a8d205fac9a1b7",
+            "21acba0d7646cb5930c7c848762f7be8c780678bc34df9e9fa16729480d81302",
+            "03dc1e56142480545b2e084b306e442547702e11d9aed93a3d65f16ffeacc12f",
+            "c02c3bad16073bd8e8b3f673fb72f7bff4472f4eb6e5cae7f9863b9fab40a316",
+            "ed8ad1541352adb8f4b49c72eb918b16b57c5132dbe53fd23791f28d4a919ee1",
+            "f85c91176dd9fb48c39aa65dbfbb2768b3c5b656507d5a89ab1c498cacb138ad",
+            "34dd0a7650ec238bb2076066a296511f5cae534159ef7c50fb3909c3d810e72c",
+            "0f57ef51e1ec65abc6c50b8fe826d6cccb83d03e4d4daafbdbcfaca89f143cf8"
+          ],
+          [
+            "7d5f4367da30555b4bbc287f6cec8232c5589789d7fb03b191c29bab86f3c992"
+          ]
+        ]
+      },
+      "next_index": 26,
+      "next_row_values": [
+        1757951072826518110,
+        1841233110857214704,
+        2268934776739996676,
+        2237988241576985244,
+        1720753289304529299,
+        629119816816529344,
+        2231999179814714449,
+        1343873021746934301,
+        1379092646764381730,
+        293396553671438504,
+        925318951546720607,
+        596325348149231352,
+        581967135559228880,
+        2130991470196678386
+      ],
+      "next_proof": {
+        "schema": "bef_pc_chunk_open_v1",
+        "chunk_index": 26,
+        "chunk_offset": 364,
+        "values": [
+          1757951072826518110,
+          1841233110857214704,
+          2268934776739996676,
+          2237988241576985244,
+          1720753289304529299,
+          629119816816529344,
+          2231999179814714449,
+          1343873021746934301,
+          1379092646764381730,
+          293396553671438504,
+          925318951546720607,
+          596325348149231352,
+          581967135559228880,
+          2130991470196678386
+        ],
+        "chunk_root": "03dc1e56142480545b2e084b306e442547702e11d9aed93a3d65f16ffeacc12f",
+        "chunk_pos": 26,
+        "chunk_root_path": [
+          [
+            "186484a79303a0c9a289b0fee0236ee79b32859fcded1714bbdd33a08006360d",
+            "be5b0e70a5c57ab09b34973b7c26422c44bd6cfd6f39130138d69a1eb5c6c2b4",
+            "09b7d52beed441c74578f47a1f3a9874773f636f9dcb705281218c7930785908",
+            "71924db048114d3de8f0c4285c39a9a71610f0c539ac5bb71fd9b547bae267ba",
+            "f9cd69c6f25f6022972a41de58224ecdeaba439499b9cacc5121088c090df42a",
+            "172bf42512c5a0d027446b8d8048758c694b666b6e207c39c9497b7b49982da8",
+            "47be5dd8a15f5ac6bb3cb04d43d4a31dc98c800b48a0b9873cf556e994371f03",
+            "abf9dc523c5332c9d0296c858bf2b5ea5373efd2e772e21164a8d205fac9a1b7",
+            "21acba0d7646cb5930c7c848762f7be8c780678bc34df9e9fa16729480d81302",
+            "25de1fa5ec7981507367851af0082d227958d16d2874b5fcfea232f7ce5f9b6c",
+            "c02c3bad16073bd8e8b3f673fb72f7bff4472f4eb6e5cae7f9863b9fab40a316",
+            "ed8ad1541352adb8f4b49c72eb918b16b57c5132dbe53fd23791f28d4a919ee1",
+            "f85c91176dd9fb48c39aa65dbfbb2768b3c5b656507d5a89ab1c498cacb138ad",
+            "34dd0a7650ec238bb2076066a296511f5cae534159ef7c50fb3909c3d810e72c",
+            "0f57ef51e1ec65abc6c50b8fe826d6cccb83d03e4d4daafbdbcfaca89f143cf8"
+          ],
+          [
+            "7d5f4367da30555b4bbc287f6cec8232c5589789d7fb03b191c29bab86f3c992"
+          ]
+        ]
+      }
+    },
+    {
+      "backend": "geom_stc_fri",
+      "row_index": 26,
+      "row_values": [
+        1757951072826518110,
+        1841233110857214704,
+        2268934776739996676,
+        2237988241576985244,
+        1720753289304529299,
+        629119816816529344,
+        2231999179814714449,
+        1343873021746934301,
+        1379092646764381730,
+        293396553671438504,
+        925318951546720607,
+        596325348149231352,
+        581967135559228880,
+        2130991470196678386
+      ],
+      "proof": {
+        "schema": "bef_pc_chunk_open_v1",
+        "chunk_index": 26,
+        "chunk_offset": 364,
+        "values": [
+          1757951072826518110,
+          1841233110857214704,
+          2268934776739996676,
+          2237988241576985244,
+          1720753289304529299,
+          629119816816529344,
+          2231999179814714449,
+          1343873021746934301,
+          1379092646764381730,
+          293396553671438504,
+          925318951546720607,
+          596325348149231352,
+          581967135559228880,
+          2130991470196678386
+        ],
+        "chunk_root": "03dc1e56142480545b2e084b306e442547702e11d9aed93a3d65f16ffeacc12f",
+        "chunk_pos": 26,
+        "chunk_root_path": [
+          [
+            "186484a79303a0c9a289b0fee0236ee79b32859fcded1714bbdd33a08006360d",
+            "be5b0e70a5c57ab09b34973b7c26422c44bd6cfd6f39130138d69a1eb5c6c2b4",
+            "09b7d52beed441c74578f47a1f3a9874773f636f9dcb705281218c7930785908",
+            "71924db048114d3de8f0c4285c39a9a71610f0c539ac5bb71fd9b547bae267ba",
+            "f9cd69c6f25f6022972a41de58224ecdeaba439499b9cacc5121088c090df42a",
+            "172bf42512c5a0d027446b8d8048758c694b666b6e207c39c9497b7b49982da8",
+            "47be5dd8a15f5ac6bb3cb04d43d4a31dc98c800b48a0b9873cf556e994371f03",
+            "abf9dc523c5332c9d0296c858bf2b5ea5373efd2e772e21164a8d205fac9a1b7",
+            "21acba0d7646cb5930c7c848762f7be8c780678bc34df9e9fa16729480d81302",
+            "25de1fa5ec7981507367851af0082d227958d16d2874b5fcfea232f7ce5f9b6c",
+            "c02c3bad16073bd8e8b3f673fb72f7bff4472f4eb6e5cae7f9863b9fab40a316",
+            "ed8ad1541352adb8f4b49c72eb918b16b57c5132dbe53fd23791f28d4a919ee1",
+            "f85c91176dd9fb48c39aa65dbfbb2768b3c5b656507d5a89ab1c498cacb138ad",
+            "34dd0a7650ec238bb2076066a296511f5cae534159ef7c50fb3909c3d810e72c",
+            "0f57ef51e1ec65abc6c50b8fe826d6cccb83d03e4d4daafbdbcfaca89f143cf8"
+          ],
+          [
+            "7d5f4367da30555b4bbc287f6cec8232c5589789d7fb03b191c29bab86f3c992"
+          ]
+        ]
+      },
+      "next_index": 27,
+      "next_row_values": [
+        1123248244860557360,
+        1444580209397457189,
+        539302279154307357,
+        872361956612318714,
+        2189710154182139840,
+        2080331621034819689,
+        1565344587758456153,
+        1715969817576968838,
+        1503272058749228332,
+        1392085022576220927,
+        1819700656248837476,
+        1732651216061642608,
+        1704245569746242815,
+        500525998341644789
+      ],
+      "next_proof": {
+        "schema": "bef_pc_chunk_open_v1",
+        "chunk_index": 27,
+        "chunk_offset": 378,
+        "values": [
+          1123248244860557360,
+          1444580209397457189,
+          539302279154307357,
+          872361956612318714,
+          2189710154182139840,
+          2080331621034819689,
+          1565344587758456153,
+          1715969817576968838,
+          1503272058749228332,
+          1392085022576220927,
+          1819700656248837476,
+          1732651216061642608,
+          1704245569746242815,
+          500525998341644789
+        ],
+        "chunk_root": "c02c3bad16073bd8e8b3f673fb72f7bff4472f4eb6e5cae7f9863b9fab40a316",
+        "chunk_pos": 27,
+        "chunk_root_path": [
+          [
+            "186484a79303a0c9a289b0fee0236ee79b32859fcded1714bbdd33a08006360d",
+            "be5b0e70a5c57ab09b34973b7c26422c44bd6cfd6f39130138d69a1eb5c6c2b4",
+            "09b7d52beed441c74578f47a1f3a9874773f636f9dcb705281218c7930785908",
+            "71924db048114d3de8f0c4285c39a9a71610f0c539ac5bb71fd9b547bae267ba",
+            "f9cd69c6f25f6022972a41de58224ecdeaba439499b9cacc5121088c090df42a",
+            "172bf42512c5a0d027446b8d8048758c694b666b6e207c39c9497b7b49982da8",
+            "47be5dd8a15f5ac6bb3cb04d43d4a31dc98c800b48a0b9873cf556e994371f03",
+            "abf9dc523c5332c9d0296c858bf2b5ea5373efd2e772e21164a8d205fac9a1b7",
+            "21acba0d7646cb5930c7c848762f7be8c780678bc34df9e9fa16729480d81302",
+            "25de1fa5ec7981507367851af0082d227958d16d2874b5fcfea232f7ce5f9b6c",
+            "03dc1e56142480545b2e084b306e442547702e11d9aed93a3d65f16ffeacc12f",
+            "ed8ad1541352adb8f4b49c72eb918b16b57c5132dbe53fd23791f28d4a919ee1",
+            "f85c91176dd9fb48c39aa65dbfbb2768b3c5b656507d5a89ab1c498cacb138ad",
+            "34dd0a7650ec238bb2076066a296511f5cae534159ef7c50fb3909c3d810e72c",
+            "0f57ef51e1ec65abc6c50b8fe826d6cccb83d03e4d4daafbdbcfaca89f143cf8"
+          ],
+          [
+            "7d5f4367da30555b4bbc287f6cec8232c5589789d7fb03b191c29bab86f3c992"
+          ]
+        ]
+      }
+    }
+  ]
+}

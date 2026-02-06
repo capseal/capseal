@@ -1,0 +1,21 @@
+{
+  "schema": "bef_manifest_index_v1",
+  "generated_at": "2025-12-23T00:09:34.118384+00:00",
+  "entries": [
+    {
+      "name": "hardware_manifest",
+      "path": "/home/ryan/BEF-main/out/capsule_runs/run_20251223_000934/manifests/hardware_manifest.json",
+      "sha256": "sha256:260073d46021d79beb98585abb5a48f80d6d1747976522a97134db9ffc03d0a1"
+    },
+    {
+      "name": "os_fingerprint",
+      "path": "/home/ryan/BEF-main/out/capsule_runs/run_20251223_000934/manifests/os_fingerprint.json",
+      "sha256": "sha256:5385bb12aa78a55673c4d1a2c0969e9d561e7ae6326d727b743ae314d8fc244d"
+    },
+    {
+      "name": "toolchain_manifest",
+      "path": "/home/ryan/BEF-main/out/capsule_runs/run_20251223_000934/manifests/toolchain_manifest.json",
+      "sha256": "sha256:850d36236799b0cfce285e43a2970ddb42791fea8af4d42780a31198ba69c4e4"
+    }
+  ]
+}

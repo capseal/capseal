@@ -1,0 +1,94 @@
+{
+  "schema": "capsule_receipt_v2",
+  "capsule_id": "a0c97ea6ffbc9e016287a7543e4e638fbf733364b5edbf209ce73276cb191db9",
+  "capseal_version": "0.2.0",
+  "header": {
+    "schema": "capsule_header_v2",
+    "verification_profile": "minimal",
+    "vm_id": "demo_vm",
+    "backend_id": "none",
+    "circuit_id": "demo_circuit",
+    "trace_id": "demo_1769410429",
+    "prev_capsule_hash": null,
+    "trace_spec_hash": "fa093fcad8fbb073fea642ad8b5e2a6bb1927196995a9f8996dedad25c16ed0d",
+    "statement_hash": "77a57ac86c5a79781014cfa185741502779900827eeceae502bb483cf8ada362",
+    "params_hash": "0ea5d327d2a640cc264606d1481629876217682327ec6ab2c2cf9f59df9b2104",
+    "row_commitment": {
+      "root": "fa093fcad8fbb073fea642ad8b5e2a6bb1927196995a9f8996dedad25c16ed0d",
+      "tree_arity": 2,
+      "row_index_ref_hash": "289a2c2df3c6ae296a293b1658c79c8384ece4b1b66098fe80acc483bed3894d",
+      "chunk_meta_hash": "d888aaa089cdf9bef0b6a9ee10d10478261f0d3300f6a4aef87b1351636008ea",
+      "chunk_handles_root": "c9e118606d3f884e50f7e8ab78149f1a252e9f7174a7903f794e4ce51771f3cd",
+      "chunk_manifest_hash": "c9e118606d3f884e50f7e8ab78149f1a252e9f7174a7903f794e4ce51771f3cd"
+    },
+    "policy_ref": {
+      "policy_id": "demo_offline",
+      "policy_version": "1.0.0",
+      "policy_hash": "fb44e257c7653440511c549485fc09349ff9e8e925ba20bfb605e0cd02729a97"
+    },
+    "da_ref": {
+      "policy_hash": "a3a5772b98a26ad9194b9a79fdc885830ba2aca780d37a379a1f5037524847bd",
+      "challenge_hash": null
+    },
+    "proof_system": {},
+    "artifact_manifest_hash": null,
+    "anchor": {
+      "timestamp": 1769410429
+    }
+  },
+  "payload": {
+    "proof_format": "demo_v1",
+    "proof_data": "{\"format\": \"demo_v1\", \"commitment\": \"fa093fcad8fbb073fea642ad8b5e2a6bb1927196995a9f8996dedad25c16ed0d\", \"public_outputs\": {\"final_value\": 60}}",
+    "trace_summary": {
+      "row_count": 5,
+      "public_outputs": {
+        "final_value": 60
+      }
+    }
+  },
+  "policy": {
+    "schema": "bef_benchmark_policy_v1",
+    "policy_id": "demo_offline",
+    "policy_version": "1.0.0",
+    "tracks": [
+      {
+        "track_id": "demo",
+        "description": "Demo track for offline testing.",
+        "rules": {
+          "forbid_gpu": false,
+          "require_deterministic_build": false,
+          "required_public_outputs": [
+            "final_value"
+          ]
+        }
+      }
+    ]
+  },
+  "trace": [
+    {
+      "row": 0,
+      "action": "init",
+      "value": 0
+    },
+    {
+      "row": 1,
+      "action": "add",
+      "value": 10
+    },
+    {
+      "row": 2,
+      "action": "add",
+      "value": 20
+    },
+    {
+      "row": 3,
+      "action": "multiply",
+      "value": 2
+    },
+    {
+      "row": 4,
+      "action": "final",
+      "value": 60
+    }
+  ]
+}

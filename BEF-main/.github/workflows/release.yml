@@ -1,0 +1,263 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 0.2.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  id-token: write  # For PyPI trusted publishing
+
+jobs:
+  # ==========================================================================
+  # Pre-release Validation
+  # ==========================================================================
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install capseal
+        run: pip install -e .
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Releasing version: $VERSION"
+
+      - name: Validate version matches pyproject.toml
+        run: |
+          PYPROJECT_VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
+          if [ "$PYPROJECT_VERSION" != "${{ steps.version.outputs.version }}" ]; then
+            echo "ERROR: Version mismatch!"
+            echo "  Tag version: ${{ steps.version.outputs.version }}"
+            echo "  pyproject.toml version: $PYPROJECT_VERSION"
+            exit 1
+          fi
+          echo "Version validated: $PYPROJECT_VERSION"
+
+      - name: Run contract validation
+        run: |
+          python -c "
+          from bef_zk.capsule.contracts import (
+              CAPSEAL_VERSION, RECEIPT_SCHEMA_VERSION, POLICY_SCHEMA_VERSION
+          )
+          print(f'CapSeal version: {CAPSEAL_VERSION}')
+          print(f'Receipt schema: {RECEIPT_SCHEMA_VERSION}')
+          print(f'Policy schema: {POLICY_SCHEMA_VERSION}')
+          assert CAPSEAL_VERSION == '${{ steps.version.outputs.version }}', 'Version mismatch in contracts.py'
+          "
+
+      - name: Run demo smoke test
+        run: |
+          capseal demo --json > demo_result.json
+          cat demo_result.json
+
+      - name: Run happy path
+        run: |
+          python scripts/happy_path.py --capseal capseal
+
+  # ==========================================================================
+  # Build Matrix
+  # ==========================================================================
+  build:
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python: '3.11'
+            artifact: linux-x86_64
+          - os: ubuntu-latest
+            python: '3.12'
+            artifact: linux-x86_64-py312
+          - os: macos-latest
+            python: '3.11'
+            artifact: macos-x86_64
+          - os: macos-14
+            python: '3.11'
+            artifact: macos-arm64
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install build tools
+        run: pip install build
+
+      - name: Build wheel
+        run: python -m build
+
+      - name: Verify wheel
+        run: |
+          pip install dist/*.whl
+          capseal demo --json
+          capseal --version
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.artifact }}
+          path: dist/
+
+  # ==========================================================================
+  # Generate Checksums and Sign
+  # ==========================================================================
+  sign:
+    needs: [validate, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Consolidate artifacts
+        run: |
+          mkdir -p dist
+          find artifacts -name "*.whl" -exec cp {} dist/ \;
+          find artifacts -name "*.tar.gz" -exec cp {} dist/ \;
+          ls -la dist/
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install capseal
+        run: pip install dist/*.whl
+
+      - name: Generate release demo receipt
+        run: |
+          capseal demo --json > dist/release_demo_receipt.json
+          cat dist/release_demo_receipt.json
+
+      - name: Upload signed artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-signed
+          path: |
+            dist/SHA256SUMS
+            dist/release_demo_receipt.json
+            dist/*.whl
+            dist/*.tar.gz
+
+  # ==========================================================================
+  # Publish to PyPI
+  # ==========================================================================
+  publish-pypi:
+    needs: sign
+    runs-on: ubuntu-latest
+    environment: pypi
+    steps:
+      - name: Download signed artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-signed
+          path: dist
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+          skip-existing: true
+
+  # ==========================================================================
+  # Create GitHub Release
+  # ==========================================================================
+  release:
+    needs: [validate, sign, publish-pypi]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download signed artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-signed
+          path: dist
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # Extract changelog for this version from CHANGELOG.md if it exists
+          if [ -f CHANGELOG.md ]; then
+            # Simple extraction (improve as needed)
+            echo "See CHANGELOG.md for details" > release_notes.md
+          else
+            echo "## CapSeal v${{ needs.validate.outputs.version }}" > release_notes.md
+            echo "" >> release_notes.md
+            echo "### Installation" >> release_notes.md
+            echo '```bash' >> release_notes.md
+            echo "pip install capseal==${{ needs.validate.outputs.version }}" >> release_notes.md
+            echo '```' >> release_notes.md
+            echo "" >> release_notes.md
+            echo "### Verification" >> release_notes.md
+            echo '```bash' >> release_notes.md
+            echo "capseal demo  # Quick self-test" >> release_notes.md
+            echo '```' >> release_notes.md
+            echo "" >> release_notes.md
+            echo "### Checksums" >> release_notes.md
+            echo '```' >> release_notes.md
+            cat dist/SHA256SUMS >> release_notes.md
+            echo '```' >> release_notes.md
+            echo "" >> release_notes.md
+            echo "### Demo Receipt" >> release_notes.md
+            echo "The \`release_demo_receipt.json\` artifact proves this release was tested before publishing." >> release_notes.md
+          fi
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: CapSeal v${{ needs.validate.outputs.version }}
+          tag_name: v${{ needs.validate.outputs.version }}
+          body_path: release_notes.md
+          draft: false
+          prerelease: ${{ contains(needs.validate.outputs.version, '-') }}
+          files: |
+            dist/*.whl
+            dist/*.tar.gz
+            dist/SHA256SUMS
+            dist/release_demo_receipt.json
+          generate_release_notes: true
+
+      - name: Post-release verification
+        run: |
+          echo "Release v${{ needs.validate.outputs.version }} created successfully!"
+          echo ""
+          echo "PyPI: https://pypi.org/project/capseal/${{ needs.validate.outputs.version }}/"
+          echo "GitHub: https://github.com/${{ github.repository }}/releases/tag/v${{ needs.validate.outputs.version }}"

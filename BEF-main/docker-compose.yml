@@ -1,0 +1,37 @@
+version: "3.9"
+services:
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+  capseal-api:
+    build: .
+    depends_on:
+      - redis
+    ports:
+      - "5000:5000"
+    environment:
+      - FLASK_ENV=production
+      - CAPSEAL_PROJECT_ROOT=/app
+      - CAPSEAL_EVENT_ROOT=/app/server_data/events
+      - REDIS_URL=redis://redis:6379/0
+      - CAPSEAL_ARTIFACT_ROOT=/app/server_data/artifacts
+      - CAPSEAL_API_KEYS=demo-key
+    volumes:
+      - ./server_data:/app/server_data
+      - ./out:/app/out
+  worker:
+    build: .
+    depends_on:
+      - redis
+    environment:
+      - CAPSEAL_PROJECT_ROOT=/app
+      - CAPSEAL_EVENT_ROOT=/app/server_data/events
+      - CAPSEAL_ARTIFACT_ROOT=/app/server_data/artifacts
+      - REDIS_URL=redis://redis:6379/0
+      - CAPSEAL_API_KEYS=demo-key
+    volumes:
+      - ./server_data:/app/server_data
+      - ./out:/app/out
+    command: ["python", "-m", "server.flask_app.worker"]

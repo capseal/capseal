@@ -1,0 +1,21 @@
+======================================================================
+                    EVALUATION STATUS
+======================================================================
+
+  Total configurations:     1,024
+
+  CLASSIFICATION (tau = 20% failure threshold)
+  --------------------------------------------------
+  Confidently SAFE:            0  (  0.0%)  [upper95 < tau]
+  Confidently UNSAFE:          0  (  0.0%)  [lower95 > tau]
+  BOUNDARY (uncertain):        0  (  0.0%)  [CI spans tau]
+  UNKNOWN (no data):        1024  (100.0%)  [still at prior]
+
+  CURRENT ROUND
+  --------------------------------------------------
+  Round:            1
+  Pending episodes: 8
+
+======================================================================
+NEXT: Finish pending episodes, then press VERIFY + INGEST
+======================================================================

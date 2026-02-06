@@ -1,0 +1,20 @@
+[package]
+name = "fusion-envs"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+fusion-core = { path = "../fusion-core" }
+nalgebra = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+rand = { workspace = true }
+rand_chacha = { workspace = true }
+
+[dev-dependencies]
+rand_chacha = { workspace = true }
+
+[[example]]
+name = "simple_demo"
+path = "../../examples/simple_demo.rs"

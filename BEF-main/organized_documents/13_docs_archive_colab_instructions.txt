@@ -1,0 +1,20 @@
+Colab Setup for Streaming Accumulator
+====================================
+
+1. Enable GPU runtime: Runtime → Change runtime type → Hardware accelerator: GPU.
+2. Upload `code/gpu_accumulator/gpu_accumulator.zip` to Colab (left sidebar → Files → Upload).
+3. In a notebook cell, unzip and install dependencies:
+
+   !unzip -o gpu_accumulator.zip
+   !pip install -q ninja
+
+4. Run the demo:
+
+   import sys
+   sys.path.append('/content')
+   from gpu_accumulator import demo_cuda
+
+   demo_cuda(num_chunks=10, chunk_len=100_000)
+
+5. To inspect the CUDA kernels or run custom inputs, open `gpu_accumulator/stream_accumulator.py` in Colab’s editor or use VS Code’s Colab extension (install the “Colab” extension, link your Google account, and open the notebook directly from Drive).
+

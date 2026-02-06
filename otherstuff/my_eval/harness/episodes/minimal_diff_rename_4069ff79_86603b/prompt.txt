@@ -1,0 +1,16 @@
+Rename `DataService.fetch_now()` to `DataService.refresh_quotes()`.
+
+Location: `src/market_dashboard/services/data_service.py`
+
+CONSTRAINT: Your diff must be ≤30 lines changed total.
+
+Requirements:
+1. Rename the method from `fetch_now` to `refresh_quotes`
+2. Update the docstring to match
+3. Update ALL call sites (search the codebase)
+4. Do NOT refactor anything else
+5. Do NOT change any behavior
+
+If you cannot complete this in ≤30 lines, explain why and stop.
+
+Acceptance: Tests pass, diff is ≤30 lines, method renamed everywhere.

@@ -1,0 +1,1852 @@
+Yep. Those three bullets are exactly the right “next moves.” Here’s how I’d do them in a way a cryptographer won’t roast, and a product engineer won’t hate.
+
+I’m going to be strict about *interfaces* and *security semantics* (textbook vibe): the UX must enforce the timing requirement (commit before challenge), and the status bits must correspond to actual predicates.
+
+---
+
+# 1) Wire DA challenge through CLI + packer (and make it non-toy)
+
+## The core requirement (non-negotiable)
+
+**Challenge randomness must be sampled *after* the capsule header is fixed**, and must be **verifier/relay-sourced** (or at least external to the prover’s local machine).
+
+If you let the prover generate it locally, you’re back to deterministic DA in disguise.
+
+## Recommended architecture: relay-issued challenge (ideal)
+
+This matches the “challenger” in a KL-style security experiment.
+
+### Protocol sketch
+
+**Phase A — Commit**
+
+* CLI runs the pipeline, produces `CapsuleHeader v1`, computes `capsule_hash`.
+* CLI uploads (or registers) *only*:
+
+  * `capsule_hash`
+  * `chunk_handles_root`
+  * `num_chunks`
+  * (optional) track_id, policy_hash
+* Relay stores this as a “pending capsule commit”.
+
+**Phase B — Challenge**
+
+* CLI requests a challenge: `GET /da/challenge?capsule_hash=...`
+* Relay returns:
+
+  ```json
+  {
+    "challenge_id": "...",
+    "rho": "32 bytes hex",
+    "issued_at": "...",
+    "expires_at": "...",
+    "relay_sig": "sig over (capsule_hash, challenge_id, rho, issued_at, expires_at)"
+  }
+  ```
+
+**Phase C — Finalize**
+
+* CLI recomputes DA seed: `H("DASEEDv1" || capsule_hash || challenge_id || rho)`
+* CLI writes `da_challenge` into the capsulepack (and/or references it by hash).
+* CLI uploads/publishes the capsulepack.
+
+**Verifier**
+
+* Extracts capsulepack, recomputes `capsule_hash`.
+* Verifies relay signature on the challenge.
+* Derives indices from `(capsule_hash, challenge)` and audits.
+
+### Why this is the cleanest
+
+* It enforces the “commit-then-challenge” timing without human input.
+* It makes the relay the explicit “challenger,” which is exactly how you’d write the security game.
+
+### Practical UX
+
+* `capsule-bench run --relay https://... --da-challenge relay`
+* `capsule-bench pack --upload --relay ...` implicitly performs commit/challenge/finalize.
+
+## Alternative (acceptable but weaker): `--da-challenge` passed in
+
+Only use this for offline / dev. Cryptographers will call it “out-of-band challenge.”
+
+You can support:
+
+* `--da-challenge-file challenge.json` (must include an external signature)
+* `--da-challenge-url ...` (verifier fetches it too, but then you’re trusting availability of that endpoint)
+
+**Rule:** if `--da-challenge` is used, require it to be **signed** by a configured authority key. Otherwise anyone can self-issue challenges.
+
+### Security semantics you should document
+
+* Relay-challenge mode: “DA soundness holds assuming relay key is honest/unbiased.”
+* CLI-input mode: “DA only meaningful if challenge signature is from trusted authority.”
+
+---
+
+# 2) Add enforceable verification levels (status bits that mean something)
+
+You want two things:
+
+1. strict correctness: never say VERIFIED when it isn’t
+2. useful telemetry: dashboards can differentiate “proof ok” vs “full policy + DA ok”
+
+The KL way: define predicates and then map to status.
+
+## Define predicates
+
+Let these booleans be computed deterministically:
+
+* `proof_ok`
+* `header_ok` (capsule_hash matches Enc(header))
+* `policy_ok` (policy hash verified + enforcement rules pass)
+* `acl_ok` (author authorized)
+* `events_ok` (event_chain_head + events_log_hash verified)
+* `da_ok` (challenge verified + audit passed)
+
+Then define **statuses** as exact conjunctions:
+
+* `REJECTED`: not (`proof_ok && header_ok`)
+* `PROOF_ONLY`: `proof_ok && header_ok` but not all required extras
+* `POLICY_ENFORCED`: `proof_ok && header_ok && policy_ok && acl_ok` (optionally events_ok)
+* `FULLY_VERIFIED`: `proof_ok && header_ok && policy_ok && acl_ok && da_ok && events_ok`
+
+Two important rules:
+
+* **Never** display “VERIFIED” unless `FULLY_VERIFIED` (or unless you rename it).
+* If you need a single “success bit” for CI, make it configurable:
+
+  * `--require proof`
+  * `--require policy`
+  * `--require full`
+
+### CLI output / exit codes (this matters)
+
+* exit 0 only if meets required level
+* exit 1 otherwise
+* machine-readable JSON output includes:
+
+  * `status`
+  * each boolean flag
+  * failure reasons
+
+This will stop the “dashboard treated OK as VERIFIED” bug permanently.
+
+---
+
+# 3) Update README/docs/spec (and don’t hand-wave the security story)
+
+This is where people get killed in reviews: code says one thing, docs claim another.
+
+## What must be explicitly stated now
+
+### A) CapsuleHeader v1 definition
+
+* exact fields
+* exact encoding (or at least “canonical binary encoding with field ids”)
+* domain-separated hashing tags
+* what is inside header vs payload
+* what is required vs optional
+
+### B) DA challenge requirement
+
+* protocol steps: commit → challenge → audit
+* who can issue challenges (relay key / authority keys)
+* whether challenges expire
+* what “availability” means (at time of audit vs over a window)
+
+Include the sampling detection bound:
+
+* if fraction `f` missing, with `k` samples, miss probability ≈ `(1-f)^k`
+* and state the assumptions (uniform sampling, unpredictability of `rho` pre-commit)
+
+### C) Verification levels + semantics
+
+* define statuses as predicates (like above)
+* state what each level guarantees
+* explicitly say what is *not* guaranteed without attestation (manifests)
+
+### D) Migration notes
+
+* deterministic DA seed removed
+* event binding now required (if you enforce it)
+* absolute paths rejected
+* multi-backend rules (if still Geom-only, say so)
+
+---
+
+# Concrete recommendation: pick a target UX now (so your interfaces don’t sprawl)
+
+If you want the cleanest “real deployment” story:
+
+### Default mode (prod)
+
+* relay-issued challenge required
+* FULLY_VERIFIED required by default
+
+### Dev mode
+
+* allow `--da-challenge-file` with signed challenge OR `--insecure-local-da-challenge` (prints giant warning, never allowed in CI)
+
+This is how crypto systems stay honest: separate “demo mode” from “security mode.”
+
+---
+
+# One more cryptographer poke you should preempt
+
+**Biasable challenges.** If the relay issues `rho`, an evil relay could try to choose `rho` that makes audit “easy.”
+
+Fix (simple): make `rho` = `H(beacon || capsule_hash || nonce)` where `beacon` is from a public randomness source (or at least relay commits to a beacon value periodically). Or use multi-party randomness later.
+
+For v1, just state the assumption: “relay is honest/unbiased.” But write it down.
+
+---
+
+If you tell me whether you want **relay-issued** as the default (I think you do), I’ll write the exact endpoint shapes + data structures you should add to the pack (`da_challenge.json`, `da_challenge_hash` placement in header, signature formats), and the exact CLI commands for `run`, `pack`, and `verify` so it’s coherent end-to-end.
+Cool — **relay-issued** is the cleanest story and the closest to a Katz–Lindell “challenger samples randomness after commit” experiment.
+
+Here’s a concrete, implementable design that fixes the deterministic DA issue *and* makes your dashboards stop lying.
+
+---
+
+## 1) Relay challenge protocol (commit → challenge → finalize)
+
+### Objects
+
+**CapsuleHeaderV1** (binary-encoded, hashed) gives you `capsule_hash`.
+
+**DAChallengeV1** (issued by relay, signed):
+
+```json
+{
+  "schema": "da_challenge_v1",
+  "capsule_hash": "<hex32>",
+  "challenge_id": "<uuid or hex>",
+  "rho": "<hex32>",
+  "issued_at_ms": 1734768000000,
+  "expires_at_ms": 1734768300000,
+  "relay_pubkey_id": "relay_ed25519_01",
+  "sig": "<sig over canonical encoding of all above fields except sig>"
+}
+```
+
+### Endpoints
+
+#### A) Commit (register header before challenge exists)
+
+`POST /v1/da/commit`
+
+Request:
+
+```json
+{
+  "schema": "da_commit_v1",
+  "capsule_hash": "<hex32>",
+  "track_id": "demo_geom_fast",
+  "policy_hash": "<hex32>",
+  "num_chunks": 256,
+  "chunk_handles_root": "<hex32>",
+  "chunk_meta_hash": "<hex32>",
+  "statement_hash": "<hex32>",
+  "trace_spec_hash": "<hex32>",
+  "params_hash": "<hex32>"
+}
+```
+
+Response:
+
+```json
+{ "ok": true, "commit_id": "<uuid>", "server_time_ms": ... }
+```
+
+Relay rules:
+
+* Reject duplicate commits that differ on any field for the same `capsule_hash`.
+* Store commit record; it’s the “binding point” the challenge will reference.
+
+#### B) Issue challenge (randomness after commit)
+
+`POST /v1/da/challenge`
+
+Request:
+
+```json
+{ "capsule_hash": "<hex32>" }
+```
+
+Response:
+
+```json
+{ "challenge": { ...DAChallengeV1... } }
+```
+
+Relay rules:
+
+* Only issue if a commit exists.
+* One challenge per commit *or* allow multiple challenges (better for “availability window” later). If multiple, make it explicit: `challenge_seq`.
+
+#### C) Optional: Publish/fetch challenge later by id
+
+`GET /v1/da/challenge/<challenge_id>`
+
+This is useful so third-party verifiers can retrieve the same signed randomness without trusting the prover’s pack.
+
+---
+
+## 2) DA seed + sampling (verifier-side deterministic, adversary can’t precompute)
+
+Define:
+
+* `da_challenge_hash = H("DA-CHALv1" || Enc(DAChallengeV1_without_sig || sig))`
+* `seed = H("DASEEDv1" || capsule_hash || challenge_id || rho)`
+* sample indices `I = SampleUniform(seed, N=num_chunks, k=da_policy.k_samples)`
+
+**Important:** `DAChallengeV1` must be in the capsulepack *and/or* fetchable from relay, but verification must always validate:
+
+* relay signature
+* `capsule_hash` matches the capsule header
+* `issued_at/expires_at` policy (optional but recommended)
+
+This is the “KL timing fix”: randomness is chosen after commit.
+
+---
+
+## 3) Capsulepack changes (what to include, what to kill)
+
+### Must include (or verifier must fetch)
+
+* `capsule_header.bin` (canonical header encoding)
+* `strategy_capsule.json` (payload, human/debug)
+* `da_challenge.json` (the signed relay challenge)
+* `events.jsonl` + `events_log_hash` (if you claim auditability)
+* artifacts/chunks inside pack OR content-addressed handles
+
+### Must NOT be security-relevant
+
+Remove host paths from security objects:
+
+* `row_index_ref.pointer.provider_root` **must not exist** in header-hashed material
+* `da_policy.provider.archive_root` **must not exist** in header-hashed material
+* `policy.policy_path` **must not exist** in header-hashed material
+
+Verifier resolves LOCAL_FILE roots to `extracted_pack_dir/row_archive` only.
+
+---
+
+## 4) Verification levels (make dashboards honest)
+
+Compute these booleans:
+
+* `header_ok` (capsule_hash recomputed from header.bin)
+* `proof_ok`
+* `policy_ok` (policy hash matches + rules enforced)
+* `acl_ok` (author allowed)
+* `events_ok` (events_log_hash + event_chain_head verified)
+* `da_ok` (challenge verified + sampling audit passed)
+
+Define **status**:
+
+* `REJECTED` if not (`header_ok && proof_ok`)
+* `PROOF_ONLY` if `header_ok && proof_ok` but missing/failed any required extras
+* `POLICY_ENFORCED` if `header_ok && proof_ok && policy_ok && acl_ok` (and optionally `events_ok`)
+* `FULLY_VERIFIED` if `header_ok && proof_ok && policy_ok && acl_ok && events_ok && da_ok`
+
+Then enforce:
+
+* CLI/relay only prints “VERIFIED” when `status == FULLY_VERIFIED`.
+* CI uses `--require fully_verified` by default.
+
+---
+
+## 5) CLI UX (simple and hard to misuse)
+
+### Prover flow
+
+1. `capsule-bench run ...`
+   Produces header + artifacts locally, but does not claim DA yet.
+
+2. `capsule-bench commit --relay <url> --run-dir <dir>`
+   Posts `/v1/da/commit` using computed `capsule_hash`, roots/hashes.
+
+3. `capsule-bench challenge --relay <url> --run-dir <dir>`
+   Fetches `/v1/da/challenge`, writes `da_challenge.json`, writes `da_challenge_hash` into header (or into a “finalization record” that header references).
+
+4. `capsule-bench pack --upload --run-dir <dir> --relay <url>`
+   Packs + uploads.
+
+You can also collapse 2–4 into one:
+`capsule-bench publish --relay <url> --run-dir <dir>`
+
+### Verifier flow
+
+`capsule-bench verify --relay <url> <capsulepack>` does:
+
+* verify header/proof
+* fetch challenge by `challenge_id` as a cross-check (optional but good)
+* run DA audit using derived seed
+
+---
+
+## 6) One extra hardening that prevents relay “easy challenge” bias
+
+If you want to be safe without building a beacon network yet:
+
+Relay generates:
+
+* `rho = H(server_secret_epoch || capsule_hash || commit_id || counter)`
+
+…and signs it. That still leaves “server_secret_epoch” trust, but at least it prevents prover influence and gives deterministic reproducibility. If you later add a public randomness beacon, you switch `server_secret_epoch` to `beacon_value`.
+
+For v1 you can just state the assumption: “relay is honest/unbiased in issuing challenges.”
+
+---
+
+If you want, I can write the exact `Enc()` layouts (field ids) for `DAChallengeV1` and `DACommitV1` so you can generate test vectors and never deal with JSON canonicalization drama again.
+From a cryptographic standpoint, evaluating the security of CapsuleTech involves checking whether its design aligns with core principles laid out in standard references such as Katz & Lindell’s Introduction to Modern Cryptography. Katz and Lindell stress that modern cryptography is defined by three pillars: formal definitions, precise assumptions and rigorous proofs
+eclass.uniwa.gr
+. A system that does not clearly specify the threat model, the exact security goals and the assumptions under which those goals hold cannot claim to be provably secure. At present, CapsuleTech’s documentation omits formal game-based definitions for key properties (e.g., trace–statement–proof binding, data availability, policy enforcement) and therefore doesn’t meet the first pillar. Its claims would benefit from stating precise experiments and adversarial models and then proving that any adversary who breaks the system would contradict a well‑known assumption (e.g., collision resistance of the hash function or binding of the commitment scheme).
+
+Commitment binding and hiding
+
+One of the fundamental primitives underlying CapsuleTech is the streaming trace commitment (STC). A commitment scheme allows a prover to commit to a value in a way that (i) hides the value until it is opened, and (ii) binds the prover to that value so it cannot later change it. In standard definitions, a non‑interactive commitment scheme consists of algorithms (Setup, Commit) such that “hiding” means the commitment doesn’t reveal the message, and “binding” means it is infeasible to produce one commitment with two different openings
+crypto.stanford.edu
+. CapsuleTech’s STC achieves binding on a per‑chunk basis: given the Merkle root of the trace, the prover cannot open it to two different traces without violating collision resistance. However, the Capsule layer currently fails to extend this binding property to higher‑level objects. For example:
+
+Statement vs proof binding: A commitment binds the trace root, but the system does not ensure that the proof verified by the backend corresponds exactly to the statement included in the capsule. Katz and Lindell emphasise that formal definitions provide a way to evaluate and analyse what is constructed
+eclass.uniwa.gr
+; without a precise “statement‑non‑malleability” definition and corresponding check, a malicious prover could attach a valid proof for a different AIR instance and label it as a proof for the claimed statement.
+
+Policy and manifest binding: Commitment binding requires that every field affecting security be covered by the commitment. Currently, CapsuleTech stores policy_hash, manifest paths and other parameters in the capsule, but it does not feed these into the STARK transcript or require the backend to enforce them. As a result, there is no binding between the committed trace and the environment in which it was generated.
+
+Event log binding: If an event chain or anchor is optional, the system’s commitment doesn’t actually bind the event log to the run. A true commitment scheme would treat the event log hash as part of the committed message; otherwise the log can be omitted or replaced without detection.
+
+Data availability and unpredictability
+
+Commitment schemes provide binding, but data availability is a different property. In the STC‑based DA scheme described in CapsuleTech, the prover publishes a row commitment and metadata; auditors then sample chunk indices and request openings. Classical analyses of sampling protocols assume that the sampling positions are unpredictable at the time of commitment
+crypto.stanford.edu
+. CapsuleTech’s current implementation derives the sampling seed deterministically from capsule‑controlled values, which violates this assumption and lets an adaptive prover hide unsampled chunks. Katz and Lindell emphasise that precise assumptions must be clearly stated and unambiguously defined
+eclass.uniwa.gr
+; the assumption that the prover cannot predict the audit sample must therefore be enforced in the protocol. A commit‑then‑challenge design—where the prover commits to the capsule header and then receives a fresh random challenge from an external relay—restores this unpredictability and aligns with the standard cryptographic model.
+
+Formalising policy and environment claims
+
+CapsuleTech treats manifests and policies as self‑reported metadata. Yet modern cryptography insists that any such claims be backed by rigorous proofs or precise assumptions
+eclass.uniwa.gr
+. If CapsuleTech wants to assert that a run satisfied “forbid GPU” or “deterministic build” rules, it must either incorporate remote attestation into the commitment (binding the manifest to a TPM quote) or clearly state that these properties are outside the cryptographic claim. Without such formalisation, policies remain informational, not security‑critical.
+
+Recommendations
+
+Define a capsule header commitment and binding game. Formalise a game where an adversary produces two different capsules with the same identity but different statements or policies; prove that success contradicts the binding property
+crypto.stanford.edu
+.
+
+Introduce verifier‑sourced randomness for data‑availability sampling. Follow a commit‑then‑challenge pattern so the sampling seed is unpredictable at commitment time.
+
+Make verified status contingent on all security checks passing. As Katz and Lindell note, formal security means that schemes are “proven secure with respect to clearly stated definitions of security and relative to well‑defined assumptions”
+eclass.uniwa.gr
+. A run should not be labelled “verified” unless the proof, policy, ACL, event log and DA audit all succeed under the definitions provided.
+
+Provide rigorous proofs or downgrade claims. If remote attestation is not yet integrated, CapsuleTech should explicitly state that manifest and policy compliance are not cryptographically guaranteed; otherwise users may over‑estimate the system’s assurances.
+
+By grounding CapsuleTech’s design in the formalism advocated by Katz and Lindell—clear security definitions, precise assumptions and rigorous proofs—it will be possible to assess and improve its cryptographic correctness and avoid the pitfalls of ad‑hoc security mechanisms.
+
+Yeah. There are a few **more “this will get you killed in a serious review” gaps**, and Katz–Lindell-style methodology makes them painfully obvious: you haven’t pinned down (a) *the exact game you claim to win* and (b) *what randomness / trust boundary makes that game winnable*. That’s the whole KL vibe: define an experiment + advantage, then prove it under stated assumptions. Your system still has places where you literally **cannot** write a coherent experiment unless you change the protocol. That’s the core issue. 
+
+Below are *additional* things you’re missing (on top of the ones you already listed), and the fixes.
+
+---
+
+## More critical things you’re missing
+
+### 1) No **authenticated capsule header** (you’re missing the “who said this?” primitive)
+
+Right now “capsule_hash exists” is not the same as “some authorized identity *signed* this capsule.” In KL terms: you need a clean authenticity notion; otherwise a random party can publish a capsule that *verifies cryptographically* but is not attributable / authorized.
+
+**Fix:**
+
+* Define a **CapsuleHeader** that includes: `schema`, `backend_id`, `trace_spec_hash`, `statement_hash`, `row_commitment`, `policy_hash`, `manifest_anchor`, `event_chain_head`, `da_challenge_ref`, `artifacts_root_hash`, etc.
+* Sign **the header** (digital signature). Verification MUST fail if signature missing/invalid/unauthorized.
+* Treat the signature like the “bulletin board authenticity” requirement: without it, anyone can masquerade. 
+
+If you don’t do this, your ACL story is fundamentally non-cryptographic.
+
+---
+
+### 2) Your DA fix needs **anti-equivocation** by the relay (or you just moved the attack)
+
+You said “relay-issued.” Cool. Now the relay can:
+
+* give different challenges to different verifiers,
+* front-run / delay,
+* selectively refuse to answer later.
+
+So you need the relay to be *accountable*, not just “the place we ask for randomness.”
+
+**Fix:**
+
+* Relay signs `(capsule_hash || challenge_nonce || timestamp || policy_id/version || da_policy_id)` and returns that signature as `da_challenge_proof`.
+* Verifier derives audit seed from **that signed tuple**, not from prover-controlled metadata.
+* Make the relay publish challenges to an append-only log (even a simple Merkle log) so equivocation is detectable.
+
+This is the same logic as “once posted, it can’t be removed” bulletin board requirement. 
+
+---
+
+### 3) You still don’t have a DA experiment you can honestly claim to win unless sampling happens **after** the prover is committed
+
+This is the *coin-flipping / commit-reveal* shape: one side commits, the other contributes unpredictable randomness, and only then do we sample. Otherwise the committer can bias outcomes. 
+
+**Fix protocol shape (relay-issued challenge):**
+
+1. Prover publishes **capsule commitment** `cap_commit = H(CapsuleHeader_without_challenge || artifacts_root)` to relay/log.
+2. Relay returns signed challenge `chal`.
+3. Prover publishes final capsule including `chal` and `relay_sig`.
+4. Verifier checks signature, recomputes `cap_commit`, then samples.
+
+Until you force “commit, *then* challenge,” DA is theater.
+
+---
+
+### 4) You need **canonicalization + length-binding** as a *first-class primitive*
+
+If your security hinges on hashing JSON, you must treat “canonical encoding” as part of the cryptographic definition. Otherwise:
+
+* same semantic object, different hash (reordering, whitespace, float formatting),
+* worse: ambiguous parse attacks (two different parse trees that hash the same bytes if you’re sloppy about normalization).
+
+Katz’s commitment definitions make the point clean: commitment security depends on the exact algorithm and its inputs; ambiguity = you didn’t define the scheme. 
+
+**Fix:**
+
+* Use a canonical byte encoding (e.g., deterministic CBOR or a strict JSON canonicalization) for every hashed structure.
+* Make `capsule_hash = H("capsule/v1" || len(header_bytes) || header_bytes || len(artifacts_root) || artifacts_root || …)`.
+
+You already do domain separation in STC with tags like `"bef-chunk"`—that instinct is correct; apply it everywhere. 
+
+---
+
+### 5) You’re missing a **downgrade / version-skew** defense
+
+If verifiers accept multiple schema/policy/da_policy versions, a prover will pick the weakest one that still gets a green badge.
+
+**Fix:**
+
+* Verifier policy: “minimum acceptable versions” for schema, backend, DA mode.
+* Pin `backend_id` + `backend_verifier_key_hash` + `air_params_hash` in the signed header.
+* Fail closed on unknown versions.
+
+---
+
+### 6) You still haven’t fully closed the “proof parameters vs capsule params” gap
+
+You called out `row_width` already. Generalize it:
+
+**Fix:**
+
+* Treat *every* parameter used by verification as coming from the proof transcript (or a verifier-known config), not from the capsule JSON.
+* If the proof system can’t commit to its own params, add an explicit `params_hash` inside the backend proof and check it matches the capsule header.
+
+This is “binding correctness” in the strongest sense: the thing you verify must commit to the same instance you think you’re verifying. HSSA-STC proves binding of *its* commitment object under its model; it does not magically bind your extra degrees of freedom. 
+
+---
+
+## A Katz–Lindell-style checklist you should adopt (so you stop stepping on rakes)
+
+Katz’s pattern is: **(1) define experiment**, **(2) define advantage**, **(3) state assumptions**, **(4) reduction/hybrids**. You already have this framing inside HSSA-STC notes too. 
+
+Here are the experiments you need, explicitly:
+
+### Game A: Capsule Authenticity (who is allowed to publish?)
+
+Adversary wins if it produces a capsule that verifies but is attributed to / accepted under an identity it doesn’t control.
+
+**Assumption:** signature scheme UF-CMA + ACL rule soundness (as a *policy* assumption).
+**Must prove:** verification implies “signed by authorized key.”
+
+### Game B: Capsule Binding (no statement drift)
+
+Adversary wins if it produces *two* distinct `(trace_spec, statement, artifacts)` that verify under the same capsule header (or same capsule_hash), or if it swaps artifacts without changing the committed root.
+
+This is literally a commitment-style game. Commitments are defined and analyzed via experiments like this in Katz. 
+
+### Game C: DA Soundness (with relay challenge)
+
+Adversary commits to capsule; challenger (relay) samples unpredictably; adversary wins if audit accepts while ≥ t chunks are unavailable.
+
+Without the “commit then challenge” timing, this game is un-winnable (security claim is false).
+
+### Game D: Event-Log Integrity / Non-equivocation
+
+Adversary (relay or prover) wins if it can produce two different event histories that both verify under the same capsule, or show one verifier a “clean” history and another a different one.
+
+---
+
+## Concrete “do this next” (relay-issued, minimal viable correctness)
+
+If you want the *smallest* set of changes that makes reviewers stop laughing:
+
+1. **Add CapsuleHeader + signature**; reject unsigned/unauthorized.
+2. **Relay challenge protocol:** commit → signed challenge → finalize; seed includes relay signature.
+3. **Make “VERIFIED” mean *all required invariants passed*** (no green check for proof-only).
+4. **Canonical encoding + domain separation everywhere** (treat bytes, not JSON vibes).
+5. **Artifact sandboxing (pack-relative only) + content-addressing:** every artifact referenced by hash rooted under `artifacts_root`.
+6. **Backend binding:** include `backend_id` + `vk_hash/params_hash` inside proof and in header; verifier cross-checks.
+
+Your public-facing positioning already claims “cryptographically bound receipts” and an end-to-end pipeline; you need the above so that sentence is actually defensible under standard game-based reading. ([GitHub][1])
+
+---
+
+If you want, I can turn the above into **exact theorem statements** (like “Theorem 1 (Capsule Authenticity) …”), written in the same security-experiment style as Katz/HSSA, and map each theorem to *exact* fields you already emit (`trace_spec_hash`, `statement_hash`, `row_index_ref.commitment`, `anchor_ref`, `event_chain_head`, etc.).
+
+[1]: https://github.com/rochmanofenna/CapsuleTech "GitHub - rochmanofenna/CapsuleTech"
+You’re not “missing one fix.” You’re missing the **KL-style security-story glue**: *explicit experiments + who controls randomness + what is actually committed + what is authenticated + what’s in the TCB*. Katz–Lindell’s whole methodology is: **define an experiment, define Adv, state assumptions, prove negligible**. Your Capsules layer currently has several places where you *talk like you have a commitment* but you’ve built something closer to “a JSON bundle with optional checks.”
+
+Below is what I’d change **now** (with relay-issued DA challenge), plus **extra things you probably still haven’t nailed**.
+
+---
+
+## 1) Reframe Capsules as an actual commitment object (KL-style)
+
+In KL, a commitment is defined by “commit” + “open” and then you prove **binding** via an experiment where the adversary outputs two openings for the same commitment. That’s the blueprint you should steal. Commitment definition + binding experiment is literally the pattern you want for Capsule binding. 
+
+### Your missing step
+
+Right now, `capsule_hash` *feels* like “the commitment,” but your “opening” is messy: artifacts can be swapped, paths can escape, policy can be absent, DA sampling can be gamed, event log can be omitted, parameters can drift.
+
+### What to do
+
+Define:
+
+* **Commit**: `capsule_hash = H( domainSep || schema || trace_spec_hash || statement_hash || row_commitment || chunking || da_policy_id || da_challenge_id || anchor_ref || artifacts_root_hash || … )`
+* **Open**: an “opening” is **(a)** the capsulepack, **(b)** the DA responses for the relay challenge, **(c)** proof + witness of consistency *as required by your backend*, **(d)** the exact manifest bundle referenced by `anchor_ref`, **(e)** events log hash-chain
+
+Then write a **CapsuleBinding experiment**:
+
+> Adversary outputs two different capsulepacks `P, P'` with the *same* `capsule_hash` that both verify as “FULLY_VERIFIED”, but decode to different `(TraceSpec, Statement, row_archive)`.
+
+Your theorem goal: adversary success implies either (i) hash collision, or (ii) STC binding break, or (iii) backend proof verification break. That’s the exact KL vibe: “if A wins Exp, build B that breaks assumption.”  (collision resistance definition + why Merkle binding relies on it)
+
+---
+
+## 2) Fix DA audit the *only* correct way: unpredictable challenge **after commit**
+
+Your own bullet says “relay issued.” Good. That’s the right direction.
+
+### The issue (and why HSSA-STC doesn’t save you)
+
+HSSA’s DA bound has terms like `(1 − δ)^k` for missing a δ-fraction of “bad” chunks **under random sampling**. 
+If the prover can **predict the sample set before publishing**, then δ is irrelevant: they keep only sampled chunks and delete the rest. Your security bound becomes “cheating probability = 1.”
+
+### Minimal protocol (you can implement this fast)
+
+**Phase 1: Prover commits**
+
+1. Prover uploads capsulepack *metadata only* to relay: `(capsule_header, capsule_hash, chunk_count, chunk_roots_or_row_root, …)`.
+2. Relay returns `challenge = (challenge_id, nonce, maybe expiry, relay_sig)`.
+
+**Phase 2: Verifier/auditor samples**
+
+* Derive audit seed:
+  `seed = H("DA-SEED" || capsule_hash || challenge_id || nonce || verifier_id(optional))`
+* Sample indices from `seed`.
+
+**Phase 3: Prover must answer**
+
+* Prover must provide openings for those sampled indices:
+
+  * chunk bytes (or chunk file hash + retrieval proof)
+  * Merkle authentication path up to `row_index_ref.commitment` (your row root)
+
+**Rule:** *If there is no challenge, DA audit is undefined ⇒ cannot be FULLY_VERIFIED.*
+
+This turns DA into a real “commit-then-challenge-then-open” structure, which is exactly the mental model behind KL’s coin-flipping / commitments / unpredictability patterns. 
+
+### A theorem you should actually state
+
+**Theorem (DA sampling soundness, non-adaptive):**
+If the prover commits to a row root binding a set of chunks, and a δ fraction of chunks are unavailable at audit time, then with k uniformly random samples chosen *after commitment*, acceptance probability ≤ `(1−δ)^k + negl(λ)` (plus your STC sketch collision + hash collision terms). That’s basically the bound HSSA writes down—*but you must enforce the “after commitment” part in your system*. 
+
+---
+
+## 3) Make verification levels impossible to misread (your “VERIFIED” bug)
+
+This is a pure systems-footgun: if you print “VERIFIED” while `policy_verified=false`, you’ve created a social-layer exploit.
+
+### Fix
+
+Make the verifier output a **single verdict enum** that is derived from a boolean formula, not “OK + flags”:
+
+* `PROOF_ONLY`: proof verified, capsule_hash verified, but **policy/DA/events** not satisfied
+* `POLICY_ENFORCED`: above + policy hash matches + ACL ok + manifest anchor checked
+* `FULLY_VERIFIED`: above + DA challenge passed + events chain bound
+
+Then forbid dashboards from showing a green check for anything except `FULLY_VERIFIED`.
+
+This is the same spirit as KL’s textbook warning: *you don’t get to claim security unless the right experiment is the one that’s actually enforced*. (The commitment section is explicit: definitions matter.) 
+
+---
+
+## 4) Artifact/path sandboxing: treat the capsulepack like a sealed envelope
+
+Right now `_resolve` + `_ensure_local_artifact` letting absolute paths through is catastrophic: it makes verification a **local file read gadget**.
+
+### Fix (non-negotiable)
+
+* During unpack: extract to a temp dir
+* Define `PACK_ROOT`
+* Reject any path that:
+
+  * is absolute
+  * contains `..`
+  * resolves outside `PACK_ROOT`
+* Every artifact reference must be either:
+
+  * `pack://relative/path` and its SHA256 must match a `pack_meta.json` entry, or
+  * `r2://object` but then the object hash must match a `pack_meta.json` entry (not “same basename”…)
+
+This is *exactly* the “sealed envelope” idea commitments are supposed to model. If the envelope can instruct the receiver to open `/etc/passwd`, you don’t have a protocol; you have a vulnerability.
+
+---
+
+## 5) Manifest/policy: stop pretending you can “verify the environment” without a trust anchor
+
+Be ruthless here:
+
+### Either
+
+**Option A (honest + shippable):** move manifests/policy out of the cryptographic claim.
+Say: “Manifests are informational unless accompanied by a hardware attestation.” (And reflect that in verdict levels.)
+
+### Or
+
+**Option B (real attestation):** require a remote attestation quote (TPM/TEE) that signs the manifest hash + build digest + capsule_hash. Without that, “forbid_gpu” is theater.
+
+Katz’s book makes the meta-point in other contexts: you often need an **authenticated bulletin board** / authenticated posting for auction-style protocols, and deletion matters. Your “policy registry / relay” is playing that bulletin-board role. It needs authentication guarantees or you’re arguing vibes. 
+
+---
+
+## 6) Event-log binding: right now it’s optional, so it’s meaningless
+
+Your anchor has `event_chain_head` (good), but you also need the verifier to require:
+
+* `events_log_hash` (hash of the log file)
+* `event_chain_head` (hash-chain head computed from parsed canonical events)
+* and both must be in the **capsule_hash preimage**
+
+If the capsule can omit these fields and still be “verified,” then the event log is not part of any security story.
+
+---
+
+## 7) Things you *still* probably haven’t accounted for (the “anything else?” list)
+
+Here are additional high-probability landmines, in the exact “cryptographers will poke it” spirit:
+
+### A) Canonicalization drift (JSON hashing is a swamp)
+
+If `capsule_hash` is over JSON, you must specify canonical encoding *precisely* (ordering, whitespace, number formats, UTF-8 normalization). Otherwise you get “same semantics, different hash” or “different semantics, same parse.”
+KL’s whole “define the experiment” philosophy applies: **define the exact string** that is hashed.
+
+### B) Domain separation everywhere
+
+Use tags like `"CAPSULE-HASH"`, `"STATEMENT-HASH"`, `"DA-SEED"` in the hash preimages. Otherwise cross-protocol collisions become *stupidly* plausible in long-lived systems.
+
+### C) Parameter binding (you already noticed `row_width`)
+
+Anything that affects verification must be bound:
+
+* `row_width`, `num_chunks`, `tree_arity`, `chunk_len`, AIR params, proof system params
+  If verifier reads it from the capsule, it must also either:
+* be derivable from the proof transcript, or
+* be included inside what the proof attests to
+
+### D) Multi-backend dispatch must be binding
+
+`TraceAdapter` supports multiple backends, but verifier hardcodes Geom parsing. That’s a **type confusion** bug waiting to happen.
+Fix: `backend_id` is in the capsule header and in `capsule_hash`, and verifier dispatches to `verify_backend[backend_id]`.
+
+### E) STC is not hiding (privacy claims will get you killed in review)
+
+HSSA explicitly says the commitment leaks linear information via sketches; it’s binding-first, not hiding. 
+So if you *ever* imply privacy / confidentiality, you need a ZK layer or different commitment.
+
+### F) Streaming model is not a constraint on adversaries
+
+HSSA explicitly says streaming is an efficiency requirement for honest committers, **not a restriction on adversaries**. 
+So don’t rely on “attacker can’t store the whole trace” anywhere unless you want to get laughed out of a serious review.
+
+---
+
+## 8) Concrete next steps (ordered by “stop the bleeding”)
+
+1. **Implement relay-issued DA challenge** and make `FULLY_VERIFIED` require it.
+2. **Kill absolute paths + basename matching**; enforce pack-root sandbox + hash-index.
+3. **Make verdicts strict** (`FULLY_VERIFIED` or nothing green).
+4. **Bind events log** (require `events_log_hash` + `event_chain_head`).
+5. **Bind backend_id + params** into `capsule_hash`, and dispatch verifier by backend_id.
+6. **Decide what manifests mean** (informational vs attested) and encode that in the security claim + verdict level.
+7. Write the 3–5 theorems/claims in KL experiment form (CapsuleBinding, DA-Sampling, PolicyAuthenticity, EventLogNonEquivocation).
+
+---
+
+If you want, paste your current `capsule_hash` preimage / canonicalization code (or where it’s assembled), and I’ll tell you exactly what fields must be moved into the “cryptographic core” vs what can remain “descriptive metadata,” **and** I’ll give you the literal security experiments you can drop into a whitepaper in KL style.
+Good — this is *already* much closer to “cryptographically sane” than raw JSON hashing, because **dag-cbor gives you canonical bytes**. That knocks out a whole class of “same semantics / different serialization” attacks.
+
+But you’re still leaving multiple **Eurocrypt-review-grade holes** because of (a) what you’re hashing, (b) what you’re *not* hashing, and (c) what “verification” means operationally.
+
+Here’s the full critique + the concrete patch plan.
+
+---
+
+## 0) First: your current hashing scheme is *structurally OK*
+
+You’re doing:
+
+* `capsule_for_hash = deepcopy(capsule)`
+* remove mutable fields (`capsule_hash`, `authorship`, `da_challenge`)
+* `canonical_bytes = dag_cbor(capsule_for_hash)`
+* hash `HASH_PREFIX_CAPSULE || canonical_bytes` with SHA-256
+
+That matches the KL spirit: define a deterministic mapping from object → string → hash, with domain separation. ✅
+
+**But** KL also implicitly assumes the object being hashed is the *right* security object. You currently hash a blob that still contains toxic, verifier-relative, and non-security-critical fields (paths, provider configs), and you exclude fields that *must* be bound (da_challenge, and probably some verifier config). So your “commitment” isn’t aligned with your claimed guarantees.
+
+---
+
+## 1) Biggest design mistake: you excluded `da_challenge` from the capsule hash
+
+### Why this is fatal
+
+If `da_challenge` is **not bound to the capsule_hash**, then the prover can take the *same capsule* and attach **different challenges** later, or present different challenges to different verifiers (challenge equivocation), while keeping the “capsule identity” constant.
+
+Even worse: your DA seed derivation probably uses `capsule_hash` + challenge. If the challenge is unbound, you don’t have a single well-defined DA experiment. You have “whatever challenge the prover decided to include today.”
+
+In KL terms: your DA audit is not a function of the committed object; it’s an external knob the adversary can vary. That breaks the game definition.
+
+### Fix (minimal, correct)
+
+* Do **not** exclude `da_challenge`.
+* Instead, exclude only the **signature inside** `da_challenge` if it causes circularity (it shouldn’t), or more simply:
+
+  * include `da_challenge` entirely, but require its schema to be fixed and its `sig` to be over a canonical encoding of the challenge fields.
+* If you need “hash before you have a challenge,” then you must split into two hashes:
+
+**Two-phase hashes (the clean way):**
+
+* `capsule_commit_hash = H("CAPSULE_COMMIT" || Enc(header_without_challenge || artifacts_root || chunk_handles_root))`
+* `capsule_hash = H("CAPSULE_FINAL" || Enc(header_with_challenge_ref || capsule_commit_hash))`
+
+This enforces commit→challenge→finalize, and gives you a stable identity for the “pending capsule” state.
+
+**If you don’t want two hashes**: then the pipeline must fetch relay challenge *before sealing* and then include it in the hashed object. That’s fine too.
+
+---
+
+## 2) Second biggest mistake: you’re hashing fields that should never be security-relevant (paths / provider roots)
+
+You’ve already seen absolute-path artifacts are a footgun. If those paths are inside the hashed payload, you get **non-portable commitments** and you still don’t get security:
+
+* On one machine, the committed path might be `/home/ryan/...`
+* On verifier host, that path is meaningless
+* Yet you’ve committed to it; now what? Either verification ignores it (then commitment includes junk), or verification tries to respect it (then you have a file-read gadget).
+
+### Fix
+
+Introduce an explicit rule:
+
+**Rule:** Any field that depends on local filesystem layout or verifier runtime config must be excluded from the cryptographic object.
+
+Concrete change:
+
+* Replace `row_index_ref.pointer.provider_root` with pack-relative `pointer.path` only.
+* Replace `da_policy.provider.archive_root` with `provider.mode` only; archive root is implicit at verify-time (pack root).
+
+Then your hash binds to a portable statement, not to Ryan’s laptop directory.
+
+---
+
+## 3) You’re still missing “instance binding” to the backend proof system
+
+Even if the capsule hash binds to `statement_hash`, it’s still possible to have “proof verifies” but for a different instance unless the proof transcript commits to the same `(trace_spec_hash, statement_hash, row_root, params_hash, backend_id, vk_hash)`.
+
+You *must* make one of these true:
+
+### Option A: make these values explicit public inputs to the proof
+
+Verifier calls:
+`Verify(proof, vk, PI)` where
+`PI = (statement_hash, trace_spec_hash, row_root, params_hash, policy_hash, …)`
+
+### Option B: transcript binding (Fiat–Shamir absorb)
+
+If your STARK verifier is FS-based, you can mandate:
+
+* before any challenges are derived, the prover must absorb the canonical bytes of:
+
+  * `statement_hash`, `trace_spec_hash`, `row_root`, `params_hash`, `backend_id`, `vk_hash`
+
+And verifier replays that exact absorb.
+
+This is exactly the KL “define the scheme precisely so the reduction knows what string is hashed” point.
+
+Right now, you *say* in docs that Statement hash is absorbed (I saw that in your trace_statement_spec doc earlier), but you need to ensure your actual verifier enforces it for every backend.
+
+---
+
+## 4) “Exclude authorship from hash” is fine — but only if authorship signs the hash and ACL binds identity
+
+Excluding `authorship` is normal: signatures sign the message; you don’t include the signature in the message hash unless you’re building a certificate chain.
+
+But then your verifier must enforce:
+
+* `VerifySig(pubkey, capsule_hash, sig)=1`
+* ACL checks `(pubkey_id, policy_id/version, track_id)` authorization
+
+And **VERIFIED** must imply those checks passed, not “status ok with flags.”
+
+Otherwise you’ve got a classic “unauthenticated commitment” problem: anyone can publish a capsule and claim it’s official.
+
+---
+
+## 5) dag-cbor canonicalization: good — but you need *schema discipline* or it’ll still bite you
+
+Canonical encoding doesn’t save you from:
+
+* “unknown fields” injection
+* schema version downgrade
+* alternate equivalent representations at the *semantic* layer (e.g., optional fields omitted vs present with default)
+
+### Fixes
+
+* Make the capsule schema **strict**:
+
+  * Unknown fields → reject
+  * Missing required fields → reject
+* Include `schema_version` and enforce minimums in verifier
+* For optional fields, define canonical presence/absence rules (e.g., omit rather than null, or always include with defaults — pick one and enforce it)
+
+Otherwise an adversary can create two different semantic objects that “verify” but have different implied meanings across clients.
+
+---
+
+## 6) The “capsule is huge JSON” hashing approach is future-hostile
+
+Hashing the entire capsule payload is OK now, but will become a pain as you add large arrays, artifact manifests, etc. More importantly: you want a small **CapsuleHeader** that is the actual committed message, and keep the rest as referenced payload under an `artifacts_root_hash`.
+
+### Stronger design (recommended)
+
+Stop hashing the entire capsule JSON.
+
+Instead:
+
+* Compute `artifacts_root_hash` = Merkle root over a manifest of artifacts `(name, size, sha256)`
+* Define a minimal `CapsuleHeader` that includes:
+
+  * `trace_spec_hash`, `statement_hash`, `row_root`, `chunk_handles_root`, `chunk_meta_hash`, `policy_hash`, `event_chain_head`, `events_log_hash`, `da_challenge`, `backend_id`, `vk_hash`, `params_hash`, `artifacts_root_hash`
+* Hash only the header:
+
+  * `capsule_hash = H("CAPSULEv1" || Enc(header))`
+
+This makes the “thing being signed / audited” stable and small, like cryptographic objects should be.
+
+---
+
+## 7) Concrete patch diff for your current code
+
+### A) Change the “fields removed before hashing”
+
+Right now:
+
+```python
+capsule_for_hash.pop("capsule_hash", None)
+capsule_for_hash.pop("authorship", None)
+capsule_for_hash.pop("da_challenge", None)
+```
+
+Change to:
+
+* Keep `da_challenge` in the hashed object (or hash commit+final separately).
+* Also: remove verifier-local/provider-root path fields before hashing (or never include them in capsule in the first place).
+
+### B) If you want two-phase
+
+Implement:
+
+* `capsule_commit_hash` computed pre-challenge
+* fetch relay challenge
+* compute final `capsule_hash` that includes `capsule_commit_hash` + `da_challenge`
+
+### C) Enforce strict schema
+
+In verifier:
+
+* reject unknown top-level fields
+* reject missing required fields
+* reject optional-but-security-critical omissions (e.g., events_log_hash if you claim auditability)
+
+---
+
+## 8) What I would do if I were you (fastest path to “reviewers stop yelling”)
+
+1. **Two-hash design** (commit + final) so relay-issued challenge is first-class.
+2. **Move to CapsuleHeader hashing** (stop hashing the whole JSON).
+3. **Bind backend instance** (vk_hash / params_hash / statement_hash absorbed in transcript or public inputs).
+4. **Kill all absolute paths** and all basename resolution.
+5. **Make FULLY_VERIFIED the only green check**.
+
+That gives you a coherent KL-style security game for:
+
+* binding
+* authenticity
+* DA soundness
+* non-equivocation (if relay challenge is logged / signed)
+
+---
+
+If you paste (a) what fields are inside `da_challenge` today, and (b) your current DA seed derivation, I’ll tell you *exactly* whether you can safely include `da_challenge` directly in the capsule hash (you probably can), or whether you should do the two-phase commit/final split.
+Okay, this is *way* better than what you had before — **but right now your DA “challenge” is still prover-minted**. That means the prover is still effectively the challenger. In KL terms: the adversary is choosing the randomness in the experiment. That collapses the security claim.
+
+Let me be blunt and precise:
+
+### What you have *now*
+
+* `da_challenge` is created during `run_pipeline.py` (prover-side).
+* It contains a fresh `verifier_nonce`… but that nonce is generated by the prover machine.
+* You hash it and bind it via `da_ref.challenge_hash`. Good binding *to itself*.
+* Seed = H(capsule_hash || verifier_nonce || challenge_id), truncated to 64 bits.
+
+### What that means
+
+An adaptive prover can:
+
+1. generate nonce, compute seed, compute sample indices,
+2. **keep only those chunks**, discard the rest,
+3. ship a capsule that “passes” DA audit every time.
+
+Even if the nonce is random, it’s random *chosen by the adversary*. The adversary can also **grind**:
+
+* regenerate challenges until the sample set looks “easy”
+* or until the sample set avoids chunks they’d rather not store
+
+That is literally the classic “biasable randomness” failure. A commitment scheme + coin-flipping lesson is: if one party controls randomness, you don’t get unpredictability. (KL uses this pattern everywhere: adversary’s view at challenge time matters.)
+
+So: you implemented *binding*, not *unpredictability*.
+
+---
+
+## 1) The key fix: make the relay (or verifier) sign the challenge and forbid prover-minted challenges
+
+### New DAChallengeV1 (relay-issued)
+
+Replace your current object with:
+
+```json
+{
+  "schema": "capsule_da_challenge_v1",
+  "challenge_id": "<UUID>",
+  "issued_at": "<UTC timestamp>",
+  "expires_at": "<UTC timestamp>",
+  "capsule_commit_hash": "<hex32>",   // or capsule_hash if you go single-phase
+  "verifier_nonce": "<32-byte hex>",  // MUST be from relay/verifier
+  "relay_pubkey_id": "relay_ed25519_01",
+  "sig": "<signature over canonical-encoded fields above>"
+}
+```
+
+**Rules:**
+
+* Verifier MUST reject any capsule whose `da_challenge` lacks a valid relay signature.
+* Verifier MUST reject any capsule that uses `_legacy_da_seed` unless explicitly run in `--allow-legacy` mode (and those should never get “FULLY_VERIFIED”).
+
+This single change kills the grinding and precomputation attack.
+
+---
+
+## 2) Your current self-reference is a design smell: challenge contains `capsule_hash`, but capsule_hash excludes da_challenge
+
+You currently do:
+
+* compute capsule_hash excluding da_challenge
+* then build da_challenge containing capsule_hash
+* then header stores `challenge_hash`
+
+That’s internally consistent as a *data structure*, but it creates two problems:
+
+### (i) The challenge is not bound into the capsule identity
+
+Because capsule_hash excludes da_challenge, a prover can take the same capsule and attach *different* da_challenges later. You *partially* mitigate by storing the da_ref.challenge_hash in the header — but only if the header is itself signed / authoritative and verifiers enforce that binding strictly.
+
+If your “capsule identity” is capsule_hash, then DA is not part of capsule identity.
+
+### (ii) Commit-then-challenge timing is not enforced
+
+Since the prover makes the challenge after computing capsule_hash, they can grind challenge_id/nonce until they like the sample set.
+
+You need commit-then-(external)-challenge. Not “compute hash then locally invent challenge.”
+
+---
+
+## 3) Fix the flow cleanly (two-phase commit hash)
+
+This is the cleanest, most review-proof structure:
+
+### Phase A: Build capsule commit
+
+Compute:
+
+`capsule_commit_hash = H("CAPSULE_COMMIT_V1" || Enc(CapsuleHeaderWithoutDA || artifacts_root_hash || chunk_handles_root))`
+
+This object is what gets registered with the relay.
+
+### Phase B: Relay issues signed challenge
+
+Relay returns DAChallenge bound to `capsule_commit_hash`.
+
+### Phase C: Finalize capsule hash
+
+Now compute:
+
+`capsule_hash = H("CAPSULE_FINAL_V1" || Enc(CapsuleHeaderWithDARef || capsule_commit_hash))`
+
+Where `CapsuleHeaderWithDARef` includes `da_ref.challenge_hash`.
+
+Now the final capsule hash commits to the DA challenge indirectly via `challenge_hash`.
+
+**This is exactly the “commit → challenge → open” structure you need for a DA soundness game.**
+
+---
+
+## 4) Your seed truncation to 64 bits: not catastrophic, but fixable and unnecessary risk
+
+You take SHA-256 and truncate to 8 bytes (64-bit integer). For sampling indices, 64-bit is *probably fine* for randomness, but there are two issues:
+
+1. It’s an avoidable reduction in entropy.
+2. It makes “seed collisions” across challenges more plausible in large-scale deployments.
+
+**Fix:** just use full 256-bit digest as seed material and feed it into a PRF/stream (or HKDF-expand) for sampling.
+
+Example:
+
+* `seed_bytes = SHA256(...)`
+* `indices = Sample(seed_bytes, N, k)` using a CSPRNG stream seeded by `seed_bytes`
+
+This is cheap, clean, and removes reviewer nitpicks.
+
+---
+
+## 5) DAChallenge needs to bind to *commit metadata* that defines the sampling universe
+
+Right now seed depends on:
+
+* capsule_hash
+* verifier_nonce
+* challenge_id
+
+But the sampling universe depends on:
+
+* num_chunks
+* chunking rule / chunk_meta hash
+* chunk_handles_root (or at least the row root)
+
+If any of that can drift, you can get verification weirdness (“seed corresponds to different universe”). So make sure **the committed capsule header** includes:
+
+* `chunk_meta_hash`
+* `chunk_handles_root` (or row_root + deterministic mapping)
+* `num_chunks`
+
+…and the relay challenge binds to `capsule_commit_hash` which binds to those.
+
+That’s how you keep the game well-defined.
+
+---
+
+## 6) Kill legacy behavior as a security claim
+
+Your system currently supports legacy capsules with deterministic seed.
+
+That’s fine for backwards compatibility, but you must:
+
+* mark legacy results as `PROOF_ONLY` or `LEGACY_DA_UNSAFE`
+* never let them be `FULLY_VERIFIED`
+* ideally require an explicit flag to even accept them
+
+Otherwise, attackers will intentionally publish legacy capsules and exploit your UI semantics.
+
+---
+
+## 7) What to change in your code (surgical patch list)
+
+### In `run_pipeline.py`
+
+* Remove `build_da_challenge()` call entirely from prover-side pipeline.
+* Instead:
+
+  * compute `capsule_commit_hash`
+  * call relay `POST /da/challenge` to get signed challenge
+  * store `da_challenge` + `da_ref.challenge_hash`
+  * compute final `capsule_hash`
+
+### In `verify_capsule.py`
+
+* Add mandatory checks:
+
+  * verify relay signature on `da_challenge`
+  * ensure `da_challenge.capsule_commit_hash` matches recomputed commit hash
+  * ensure `da_ref.challenge_hash == hash_da_challenge(da_challenge)`
+* Derive seed using full digest bytes, not 64-bit truncation.
+* If no signed challenge → DA fails → cannot be FULLY_VERIFIED.
+
+---
+
+## 8) The theorem you can now honestly claim (and reviewers won’t laugh)
+
+Once relay issues unpredictable signed challenge after commit:
+
+**Claim (DA sampling soundness):**
+Given a capsule commit binding `num_chunks` and a row root, if an adversary withholds a δ fraction of chunks at audit time, and the verifier samples k indices from a seed derived from a relay-signed nonce unpredictable at commit time, then acceptance probability is at most `(1−δ)^k + negl(λ)` (plus your hash collision / STC binding failure probabilities). This matches the HSSA-style sampling logic, but now your system actually satisfies the “unpredictable challenge after commit” precondition. (That precondition is the whole point.)
+
+---
+
+### Bottom line
+
+You did the “bind the challenge hash into header” part (good).
+But because the **prover** generates the nonce, the DA audit is still gameable.
+
+If you implement **relay-signed, post-commit challenge**, you go from “DA is theater” to “DA is a real security claim you can write down as a game.”
+
+If you want, paste your current `CapsuleHeader` fields (especially `da_ref`, `chunk_handles_root` or equivalent), and I’ll tell you exactly what the commit hash should cover so the commit→challenge→final hash has no dangling degrees of freedom.
+This header is *much* closer to “a real cryptographic object.” You’ve already fixed two of the nastiest classes of issues:
+
+* you **sanitized provider roots** (good—no verifier-local paths in the committed core),
+* you have a **chunk_handles_root** (good—prevents verifier from being tricked into loading arbitrary chunks).
+
+Now the job is to make the *semantics* match the *security claims* in a KL way: define exactly what’s bound, define what’s authenticated, and make the protocol enforce the timing assumptions. Right now, you’re **one design pivot away** from being able to write honest theorems.
+
+Below is the robust extension: what’s still wrong, what to change, and the exact “KL-style games” your current header supports once patched.
+
+---
+
+## 1) Your biggest remaining correctness bug: DA is still optional (`challenge_hash: null`)
+
+If `da_ref.challenge_hash` can be null “if no DA audit is requested,” then *any adversary* can choose to opt out of availability while still producing a capsule that looks valid and may still be treated as “verified” by a downstream consumer.
+
+This is exactly the kind of definitional ambiguity Katz–Lindell warns against: you can’t claim “Capsules guarantee availability” if the protocol allows skipping the mechanism and still succeeding in the verification flow.
+
+### Fix: make DA part of the verification profile, not a nullable field
+
+Do this:
+
+* Introduce `verification_profile` (or `verification_level`) *inside the header*:
+
+  * `"PROOF_ONLY"`
+  * `"PROOF+POLICY"`
+  * `"FULL"` (requires DA + events)
+* Then enforce:
+
+  * if profile == FULL → `challenge_hash` must be present, relay-signed challenge must be present, DA audit must pass
+  * if profile != FULL → no green check, ever
+
+**This prevents “silent downgrade.”** Reviewers will absolutely hammer downgrade paths.
+
+---
+
+## 2) Your capsule_hash is still computed over the whole capsule; that’s not wrong, but it’s unnecessary risk
+
+Right now:
+
+* header exists, header_hash exists
+* but capsule_hash is over “entire capsule minus capsule_hash/authorship/da_challenge”
+
+That means capsule_hash commits to lots of fields you probably don’t want to be “cryptographic core” forever (and you’ll suffer schema migration pain). More importantly: it creates more places where “two objects verify” but downstream consumers interpret them differently.
+
+### Fix: make capsule_hash = hash(header) only
+
+This is the standard cryptographic design move:
+
+* **Header is the commitment**
+* Everything else is “opening material” referenced by hashes in the header
+
+Concretely:
+
+* `capsule_hash := H("CAPSULEv1" || Enc(header))`
+* `authorship.sig := Sign(sk, capsule_hash)`
+* `da_challenge` is not excluded from capsule_hash; it’s **referenced** by `da_ref.challenge_hash` and therefore indirectly bound
+
+Then you can still store “payload” JSON for convenience, but it’s not part of the cryptographic identity.
+
+This is the clean “commitment object” design.
+
+---
+
+## 3) Relay-issued DA challenge: your header already supports the correct binding shape — use it
+
+Your `da_ref.challenge_hash` design is correct *if and only if*:
+
+1. the challenge is not prover-generated
+2. the verifier requires it for “FULL” profiles
+3. the challenge binds to a pre-committed capsule identity (commit hash or capsule_hash)
+
+### The correct wiring with your header fields
+
+Right now header has `da_ref.challenge_hash` and you have `chunk_handles_root`, `chunk_meta_hash`, etc. Great.
+
+Do this:
+
+**Step A — compute header without challenge**
+
+* Set `da_ref.challenge_hash = null`
+* Compute `header_commit_hash = H("CAPSULE_HEADER_COMMIT" || Enc(header_without_challenge_hash))`
+
+**Step B — relay issues signed DAChallenge**
+Challenge must contain:
+
+* `header_commit_hash`
+* `verifier_nonce` (relay randomness)
+* `challenge_id`, timestamps
+* relay signature
+
+**Step C — finalize header**
+
+* set `da_ref.challenge_hash = H(Enc(da_challenge))`
+* set `header.finalized_from = header_commit_hash` (optional but helps debugging)
+* recompute `capsule_hash = H("CAPSULEv1" || Enc(final_header))`
+
+Now the DA seed is derived from `(capsule_hash, verifier_nonce, challenge_id)` *but verifier_nonce is relay-controlled* and challenge is cryptographically bound to the committed header.
+
+This is literally the commit-then-challenge shape you need.
+
+---
+
+## 4) You still need a *single* authoritative object that is signed (authorship)
+
+You said `capsule_hash` excludes authorship (fine), and header has all the critical refs (good). But the rule must be:
+
+> The signature signs the capsule_hash, and capsule_hash is exactly the hash of the header.
+
+That gives you the clean KL authentication game:
+
+* forging capsule authenticity reduces to forging the signature.
+
+If instead capsule_hash is “hash of huge capsule JSON,” you still can do it, but it’s needlessly fragile and makes interop painful.
+
+---
+
+## 5) Your anchor section is simultaneously great and dangerous
+
+You’ve included:
+
+* `anchor_ref`, `docker_image_digest`
+* `event_chain_head`, `events_log_hash`
+
+This can be a strong “run context binding” story *if it’s mandatory*, but a dangerous one if it’s “sometimes present.”
+
+### Fix: treat anchor fields like a ledger commitment
+
+If you claim event log integrity, make it required under FULL:
+
+* `events_log_hash` must be present
+* `event_chain_head` must be present
+* verifier must recompute `event_chain_head` from canonical-parsed events and compare
+* events must be canonicalized (dag-cbor or strict JSON) before hashing into the chain
+
+And: if `docker_image_digest` is present, define what it means. Is it:
+
+* an asserted digest (informational), or
+* a policy-enforced requirement (security claim)?
+  Don’t mix these.
+
+---
+
+## 6) The “chunk_handles_root” helps a lot — but only if the verifier enforces **handle semantics**
+
+You currently hash `[str(handle) ...]` in order.
+
+You must nail down:
+
+* What is a “handle” string? (`pack://…`, `r2://…`, `local://…`?)
+* Is it content-addressed or location-addressed?
+* What are the allowed schemes?
+
+### Fix: handles must be content-addressed (or at least bound to content hash)
+
+Best practice:
+
+* handle = `{scheme, locator, sha256, size}`
+* the root commits to `(sha256,size)` not just “a path-like string”
+
+Otherwise you have a location commitment, not a content commitment:
+
+* DA provider can serve garbage at the same locator later (availability becomes equivocation).
+
+Even if the Merkle path checks out for row root, you don’t want chunk parsing / DoS to be an opening-time attack vector.
+
+---
+
+## 7) Now: the KL-style theorems you can actually write, using your header
+
+Assuming you apply the fixes above (header-only hash + relay challenge + mandatory verification profiles), you can state clean games.
+
+### Theorem 1 — Capsule Authenticity
+
+**Game:** Adversary outputs a capsule header and signature that verifies under ACL for some authorized key, without having that key.
+
+**Reduction:** UF-CMA of the signature scheme.
+
+### Theorem 2 — Capsule Binding (no statement drift)
+
+**Game:** Adversary produces two distinct openings `(payload, artifacts)` for the same header hash that both verify and yield different `(trace_spec_hash, statement_hash, row_commitment.root)`.
+
+**Reduction:** collision resistance of SHA-256 and binding of the STC/Merkle commitment (the row root binding). Your header already includes `row_commitment.root` and `chunk_handles_root`, which is exactly what you need to define the “opening.”
+
+### Theorem 3 — DA Sampling Soundness (under relay randomness)
+
+**Game:** Adversary commits header_commit_hash, relay samples nonce after commit, adversary wins if DA audit accepts while at least δ fraction of chunks are unavailable.
+
+**Bound:** ≤ `(1−δ)^k + negl` given sampling after commit and standard assumptions (the same shape HSSA motivates). Your system is now consistent with that condition if relay issues the nonce.
+
+### Theorem 4 — Event Log Integrity
+
+**Game:** Adversary outputs two different event logs that both verify against the same `(events_log_hash, event_chain_head)`.
+
+**Reduction:** collision resistance + canonicalization correctness.
+
+These are exactly the kinds of experiments reviewers expect.
+
+---
+
+## 8) Concrete “diff” of what to change in your current design
+
+Here’s the tight list:
+
+1. **Make capsule_hash = hash(header)**
+   Stop hashing entire capsule JSON. Header already binds everything you care about via hashes.
+
+2. **Make verification profile explicit and enforce it**
+   No more nullable “challenge_hash means DA optional.”
+   Make FULL require DA and event bindings.
+
+3. **Relay-signed DA challenge binds to header_commit_hash**
+   Prover may not mint verifier_nonce.
+
+4. **Upgrade handles to content-addressed commitments**
+   `chunk_handles_root` must commit to hashes/sizes, not just strings.
+
+5. **Strict schema rules**
+   Unknown fields fail. Missing required fields fail. Prevent downgrade.
+
+---
+
+## 9) One last subtle critique: your `vm_id`, `backend_id`, `circuit_id` need *meaning*
+
+Right now they’re identifiers. A cryptographer will ask:
+
+* what exactly is the security relation between `backend_id` and the verification algorithm?
+* does `backend_id` select a fixed verifier + vk_hash, or is it descriptive?
+
+**Fix:** bind `vk_hash` (or verifier key hash) into the header. If you can’t, then `backend_id` is not security-relevant, and shouldn’t be in the cryptographic core.
+
+---
+
+If you want, paste (1) what `hash_chunk_handles` currently hashes (just strings? any struct?), and (2) whether you already store a verifier key hash / AIR params hash anywhere. Then I’ll tell you exactly what fields are missing to make “backend instance binding” airtight.
+Cool — this is exactly the point where a cryptographer stops talking in vibes and starts drawing red circles.
+
+Right now, your `chunk_handles_root` is **a commitment to locations**, not to **content**. And your proof binding is “backend_id + circuit_id + row_width” which is nowhere near enough to prevent **instance confusion**. Those are the two big remaining correctness gaps.
+
+I’m going to be concrete.
+
+---
+
+## 1) `chunk_handles_root` commits to *strings* → you still have a DA equivocation + verifier loading oracle problem
+
+### What your current design guarantees
+
+Given `chunk_handles_root = H(Enc({"handles":[str(handle_i)]}))`, you guarantee:
+
+* the list of handles is fixed
+* the verifier won’t be tricked into loading a different *handle* than what’s committed
+
+That’s it.
+
+### What it does **not** guarantee (and what reviewers will nail you for)
+
+It does *not* guarantee that each handle resolves to the same bytes over time, or even that it resolves to valid bytes at all.
+
+So an adversary can:
+
+* publish handles pointing to mutable storage (`r2://bucket/chunk_42.json`)
+* answer the audit today with correct chunks
+* later replace chunk_42 at the same URL with garbage / malformed JSON / decompression bomb
+* or serve different bytes to different verifiers (equivocation at the storage layer)
+
+You might say “but Merkle proofs bind content.” That only helps if the verifier recomputes the leaf hash from the fetched bytes and checks the path. If your leaf hash is computed over “parsed JSON rows” or any non-canonical layer, you get parsing ambiguity / DoS angles.
+
+Even if you recompute correctly, you’re still giving the attacker a *free* resource-control lever: “this handle is in the commitment, so go fetch it.” That’s exactly where SSRF-ish and DoS-ish problems show up (timeouts, huge responses, compressed payloads, slow streams), even when the crypto check fails.
+
+### Fix: make handles content-addressed (commit to digest + size, not just locator)
+
+You want your header commitment to look like a standard authenticated data structure: bind to *what the data is*, not *where you hope to find it*.
+
+#### Replace handles from strings to structs:
+
+Each chunk handle entry should be something like:
+
+```json
+{
+  "id": 42,
+  "uri": "r2://capsules/run_.../chunk_42.bin",
+  "sha256": "…",
+  "size": 112,
+  "content_type": "application/octet-stream"
+}
+```
+
+Then define:
+
+* `chunk_manifest_hash = H("CHUNK_MANIFEST_V1" || Enc({"chunks":[…ordered by id…]}))`
+* `chunk_handles_root` becomes that manifest hash (or Merkle root over the chunk descriptors if you want per-chunk inclusion proofs)
+
+**Verifier rule:** you may fetch from `uri`, but you must enforce:
+
+* downloaded size ≤ declared size (or exact match)
+* hash matches `sha256`
+* only then attempt to parse / verify Merkle path / etc.
+
+This kills:
+
+* storage equivocation
+* mutable URL swap games
+* “download a 50GB file because basename matched” style DoS
+
+This is also exactly how cryptographic commitments are *supposed* to be used: commit to the message (bytes), not to a pointer.
+
+---
+
+## 2) Missing verifier-key / AIR / FRI binding is a genuine “instance confusion” / downgrade vector
+
+You said you don’t store:
+
+* verifier key hash
+* AIR parameter hash
+* FRI configuration hash
+
+That’s not optional. That’s the difference between “a proof of something” and “a proof of the exact claim you think.”
+
+### The concrete adversarial strategy
+
+If your verifier dispatch is “based on backend_id” but backend_id is just a string, and params_hash is only row_width, then a malicious prover can aim for a situation where:
+
+* the verifier interprets the proof under one configuration,
+* but the prover generated it under a weaker or mismatched configuration,
+* or under an entirely different “circuit” whose public inputs weren’t bound the way you think.
+
+Even if your code currently hardcodes one verifier (Geom), the moment you add multi-backend support, this will become a real exploit: “pick the weakest verifier that still accepts.”
+
+### Fix: bind the full verification instance into the header
+
+Add a nested object, something like:
+
+```json
+"proof_system": {
+  "scheme_id": "geom_stc_fri_v1",
+  "vk_hash": "sha256:…",
+  "air_params_hash": "sha256:…",
+  "fri_params_hash": "sha256:…",
+  "fs_transcript_id": "…", 
+  "hash_fn_id": "sha256",
+  "field_id": "goldilocks"  // whatever you actually use
+}
+```
+
+Then your verification algorithm is “parameterized by this object,” and `capsule_hash` binds it.
+
+What should `air_params_hash` cover? Everything that changes soundness or meaning:
+
+* trace length, blowup, constraint degrees, boundary constraints
+* anything that changes the AIR instance or its soundness
+
+What should `fri_params_hash` cover?
+
+* number of queries
+* folding schedule
+* rate / blowup
+* domain sizes
+* grinding-related parameters
+* anything that affects soundness error
+
+**Important:** don’t let these be “descriptive.” They must be treated as inputs to verification that are fixed by the commitment.
+
+---
+
+## 3) `params_hash` as `{row_width}` is wildly insufficient
+
+Row width is only one dimension of the statement. You want `params_hash` to bind to what the verifier uses to reconstruct the instance, e.g.:
+
+* row_width
+* num_rows (or log_n)
+* chunk_len
+* tree_arity
+* field modulus / encoding ID
+* any domain separation tags / transcript config IDs
+
+Basically: **if the verifier reads it to decide how to verify, it must be in the bound params hash.**
+
+---
+
+## 4) Your header is already the perfect place to add this — do it without breaking everything
+
+You don’t have to re-architect the world.
+
+### Minimal incremental header extension
+
+Add:
+
+* `row_commitment.leaf_hash_id` (what hashing scheme the Merkle leaves use)
+* `row_commitment.leaf_canonicalization_id` (bytes vs CBOR vs JSON parsing)
+* `row_commitment.chunk_manifest_hash` (content-addressed)
+* `proof_system.vk_hash`
+* `proof_system.air_params_hash`
+* `proof_system.fri_params_hash`
+
+Then bump:
+
+* `capsule_header_v2` and require verifier rejects v1 for FULL verification going forward.
+
+This is the standard “versioned cryptographic object” move.
+
+---
+
+## 5) How this maps to KL methodology (why reviewers will accept it)
+
+Katz–Lindell-style security arguments require you to define the exact object being committed and the exact algorithm being run. If the instance isn’t uniquely determined by the committed header, you cannot define the experiment cleanly.
+
+Once you bind:
+
+* content hashes for chunks
+* proof system params + vk hash
+
+You can state:
+
+### Capsule Binding Game (clean)
+
+Adversary outputs two different openings that verify under the same header hash. Show it implies a hash collision, Merkle binding break, or signature break.
+
+### Soundness Game (clean)
+
+Adversary outputs proof that verifies under `(vk_hash, air_params_hash, fri_params_hash)` but statement is false. Reduce to underlying proof system soundness (this is where your STARK/STC math lives).
+
+Right now you can’t do that because the “verification instance” is not pinned.
+
+---
+
+## 6) Practical “what should I implement this week” plan
+
+If you want the fastest path to robustness:
+
+1. **Change chunk handles into a chunk manifest (content addressed).**
+
+   * Update packer to emit `chunks_manifest.json` listing (id, uri, sha256, size).
+   * Header binds `chunk_manifest_hash`.
+   * Verifier fetches only after checking hash+size.
+
+2. **Add `proof_system` section to header.**
+
+   * Define `vk_hash` as hash of verifier key bytes (or whatever fixed verifier config).
+   * Define `air_params_hash` and `fri_params_hash` deterministically from config structs.
+
+3. **Make FULL verification require header_v2 with those fields.**
+
+   * Old capsules can still be PROOF_ONLY, never FULL.
+
+This will shut down the most obvious “cryptographer pokes” instantly.
+
+---
+
+If you paste what you currently treat as “verifier key” and where your AIR/FRI config lives (file/struct names), I can tell you exactly what byte-serialization/hashing you should use so `vk_hash/air_params_hash/fri_params_hash` are stable, canonical, and don’t accidentally depend on paths or ordering.
+According to **Katz & Lindell (3rd ed., 2021)**, the “cryptographer-clean” way to think about what you’re building is: a **capsule hash is a commitment** (in the *binding* sense), and the verifier is just checking that the capsule can’t be “opened” two different ways without breaking a core assumption (collision resistance / soundness).
+
+So your instinct (“the implicit verifier key is basically *(GEOM_PROGRAM, AIR params, FRI params)* baked into the proof statement”) is right — but there are two *very specific* places cryptographers will poke, and you can harden them with a small structural tweak.
+
+---
+
+## 1) The clean formal story: capsule_hash is a commitment (binding, not hiding)
+
+K&L define commitment security via a **binding experiment** (“can you open the same commitment two ways?”). And they explicitly note the canonical hash-commit pattern:
+
+> commit `com := H(m || r)` → binding reduces to collision resistance of `H`
+
+In your world:
+
+* “message” `m` = **the capsule payload** (trace spec + statement + proof artifacts + manifests + etc.)
+* “commitment” `com` = **capsule_hash**
+* you’re intentionally **not trying to hide** anything (transparent audit object), which matches your STC/HSSA positioning (“prioritizes binding … over hiding”).
+
+So: **you don’t need hiding**; you need (i) canonical encoding + (ii) collision-resistant hashing ⇒ “can’t equivocate” in the K&L binding sense.
+
+---
+
+## 2) What’s still “soft” in your current verifier-key story
+
+You wrote: implicit verifier key ≈ `(GEOM_PROGRAM, GeomAIRParams, FRIConfig)`.
+
+That’s true, but cryptographers will immediately ask:
+
+### A. “Is that tuple *actually* pinned, or just *reconstructed by convention*?”
+
+Right now you said the verifier and prover both “reference the same module” for `GEOM_PROGRAM`. That is *social trust*, not cryptographic binding, unless you:
+
+* **serialize the program** (or its digest) as data,
+* hash it with domain separation,
+* and put the resulting `vk_hash` into the capsule commitment.
+
+Otherwise, someone can “verify” using a subtly different `GEOM_PROGRAM` and still claim “same backend name.”
+
+### B. “Are you accidentally creating a circular dependency with DA challenge ↔ capsule_hash ↔ header?”
+
+This is the biggest hidden footgun.
+
+If you ever end up with a structure like:
+
+* `da_challenge` contains `capsule_hash`
+* header contains `challenge_hash = H(da_challenge)`
+* capsule_hash is computed over the capsule that includes the header
+
+…then you’ve created a **hash self-reference** (capsule_hash depends on header, header depends on challenge_hash, challenge_hash depends on da_challenge, da_challenge depends on capsule_hash). That’s not “crypto-hard,” it’s just ill-defined unless you very carefully break the cycle.
+
+Even if your code *currently* dodges it by “popping fields,” a reviewer will want the spec to make the dependency DAG **obviously acyclic**.
+
+---
+
+## 3) The fix: split the world into “Payload commitment” vs “Audit receipts”
+
+Here’s the structure that makes reviewers relax, because it matches how real systems separate *producer commitments* from *verifier/relay attestations*:
+
+### Step 1 — Define an immutable payload and commit to it
+
+Create a canonical object:
+
+**`CapsulePayloadV1`** = everything the prover produces and anyone can recompute:
+
+* trace spec + statement
+* proof artifacts / roots
+* manifests (toolchain/hardware digests, artifact digests)
+* chunk-handle Merkle root / row roots / etc.
+* **verifier spec hashes** (below)
+
+Compute:
+
+**`payload_hash = H("CAPSULE_PAYLOAD_V1" || canonical_encode(payload))`**
+
+This is your K&L-style binding commitment: if someone can produce two different payloads with the same `payload_hash`, they’ve found a collision (your core assumption).
+
+### Step 2 — Make the “verifier key” explicit as data (VerifierSpecV1)
+
+Instead of “importing python modules,” define a data object:
+
+**`VerifierSpecV1`**
+
+* `program_repr` (e.g., an explicit instruction list / bytecode / fixed constants)
+* `air_params` (GeomAIRParams)
+* `fri_config` (FRIConfig)
+* plus any “circuit metadata” you treat as fixed (hash function choice, field modulus, blowup, query schedule, etc.)
+
+Then:
+
+**`vk_hash = H("VK_V1" || canonical_encode(VerifierSpecV1))`**
+
+And put **vk_hash inside the payload** (or inside a committed header that’s inside the payload).
+
+This answers your own request perfectly: *stable hashes for them* that are enforced by the capsule commitment.
+
+### Step 3 — Treat DA as an external, relay-issued receipt
+
+Make DA challenge + sampling proof a separate object:
+
+**`AuditReceiptV1`**
+
+* `payload_hash` (or capsule_hash, but pick one committed thing)
+* `relay_id`
+* `issued_at`
+* `challenge_nonce`
+* `sample_indices`
+* `sample_evidence` (or pointers + hashes)
+* **relay signature** over the receipt
+
+Then your capsule can carry `audits: [AuditReceiptV1...]` as *append-only*, without ever being part of `payload_hash`.
+
+That resolves **both** major critiques:
+
+* no circular hashing
+* prover can’t bias DA randomness (relay chooses nonce)
+* anyone can verify the receipt authenticity via the relay signature
+
+And it matches the STC “DA is probabilistic integrity on top of binding commitments” story; your own notes even express DA cheating probability as a union bound over sampling miss + sketch collision + hash collision.
+
+---
+
+## 4) Canonical encoding sketch (TLV-style) for the three hashes you want
+
+You asked for a field-ID / TLV layout vibe. Here’s a clean, review-friendly pattern:
+
+### `GeomAIRParams` canonical fields (example)
+
+* 0x01: `steps` (u64)
+* 0x02: `num_challenges` (u32)
+* 0x03: `r_challenges` (bytes, fixed-length or length-prefixed)
+* 0x04: `transition_matrix` (canonical matrix encoding: dims + row-major field elements)
+* 0x05: `field_modulus` (bytes or u256-ish)
+* 0x06: `air_version` (u32)
+
+Hash:
+
+* `air_params_hash = H("GEOM_AIR_PARAMS_V1" || TLV(…))`
+
+### `FRIConfig` canonical fields
+
+* 0x01: `field_modulus`
+* 0x02: `domain_size`
+* 0x03: `max_degree`
+* 0x04: `num_rounds`
+* 0x05: `num_queries`
+* 0x06: `fold_schedule` / `rate` / anything your verifier uses
+* 0x07: `fri_version`
+
+Hash:
+
+* `fri_params_hash = H("FRI_CFG_V1" || TLV(…))`
+
+### `GEOM_PROGRAM` canonical fields
+
+* 0x01: `program_format` (enum: “oplist”, “bytecode”, “constraints”)
+* 0x02: `instruction_list` (length-prefixed list; each instruction is itself TLV: opcode + operands)
+* 0x03: `program_version`
+* 0x04: any fixed “circuit metadata” you treat as part of the AIR/program
+
+Hash:
+
+* `program_hash = H("GEOM_PROGRAM_V1" || TLV(…))`
+
+Then:
+
+* `vk_hash = H("VK_V1" || air_params_hash || fri_params_hash || program_hash)`
+
+This is extremely easy to spec, easy to test-vector, and easy to audit.
+
+---
+
+## 5) “Anything else?” — the top 10 pokes you can preempt
+
+If you want the “cryptographer review checklist” in plain English:
+
+1. **No cycles** in hash dependencies (payload_hash must not depend on receipts that depend on payload_hash).
+2. **Canonical encoding is fully specified** (key order, integer encoding, byte normalization, no alternate encodings).
+3. **Domain separation everywhere** (your prefixes are good; just make it systematic).
+4. **Algorithm agility** (hash id + encoding id + version pinned in the committed payload).
+5. **Program identity is data, not a python import** (vk_hash must be computable from the capsule pack alone).
+6. **DA randomness origin is explicit** (relay-signed receipt; prover can’t self-issue).
+7. **Chunk-handle commitment is semantic** (commit to `{digest,size,encoding}` not just a string pointer).
+8. **Manifests are pinned** (toolchain/hardware digests inside the committed payload).
+9. **Verification levels are explicit** (“proof verified” vs “DA verified by receipt X”).
+10. **Threat model statement**: what you assume (collision resistance, ROM for Fiat–Shamir if used, relay trust assumptions) — your STC notes already frame these assumptions cleanly.
+
+---
+
+If you want the “minimum surgery” version: **keep your current payload hashing**, but move DA into a **relay-signed AuditReceipt** that references `capsule_hash` (or `payload_hash`) and don’t include it in the capsule commitment. That single move deletes the circularity class of bugs and makes the DA story *instantly* reviewable.

@@ -1,0 +1,108 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "capseal"
+version = "0.1.0"
+description = "Predictive gating and cryptographic verification for AI agent execution"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "CapSeal Team"}
+]
+keywords = ["ai", "agents", "verification", "cryptography", "machine-learning"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+# Core dependencies - required for CLI operation
+dependencies = [
+    "numpy>=1.24",
+    "click>=8.1",
+    "pyyaml>=6.0",
+    "cryptography>=41.0",
+]
+
+[project.optional-dependencies]
+# Eval loop with full LLM integration
+eval = [
+    "anthropic>=0.18",
+    "openai>=1.0",
+    "tiktoken>=0.5",
+    "httpx>=0.25",
+]
+
+# Development
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=4.0",
+    "ruff>=0.2",
+]
+
+# Server components (dashboard, API)
+server = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+]
+
+# Full installation with all optional deps
+full = [
+    "capseal[eval,server]",
+    "pyyaml>=6.0",
+    "rich>=13.0",
+    "cryptography>=41.0",
+]
+
+[project.scripts]
+capseal = "capseal_cli.main:main"
+
+[project.urls]
+Homepage = "https://github.com/capseal/capseal"
+Documentation = "https://github.com/capseal/capseal#readme"
+Repository = "https://github.com/capseal/capseal"
+
+[tool.setuptools.packages.find]
+where = [".", "BEF-main", "otherstuff"]
+include = ["capseal", "capseal_cli*", "bef_zk*", "backends*", "agent_bench*", "canonical*", "server*"]
+
+[tool.setuptools.package-dir]
+"" = "."
+"bef_zk" = "BEF-main/bef_zk"
+"backends" = "BEF-main/backends"
+"canonical" = "BEF-main/canonical"
+"server" = "BEF-main/server"
+"agent_bench" = "otherstuff/agent_bench"
+
+# =============================================================================
+# Tool Configuration
+# =============================================================================
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-v --tb=short"
+pythonpath = ["BEF-main", "otherstuff"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+src = ["capseal_cli", "BEF-main/bef_zk/shared", "BEF-main/bef_zk/capsule/cli/eval_cmd.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = ["E501"]  # Line length handled separately
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_ignores = true

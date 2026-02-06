@@ -1,0 +1,119 @@
+# =============================================================================
+# Python
+# =============================================================================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Virtual Environments
+.venv/
+venv/
+env/
+.env
+*.venv
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+
+# =============================================================================
+# Build Artifacts (Rust, C++)
+# =============================================================================
+**/target/
+**/build/
+CMakeCache.txt
+CMakeFiles/
+*.o
+*.a
+*.so
+*.dll
+
+
+# =============================================================================
+# Output & Generated Artifacts
+# =============================================================================
+# Ignore the main output directory for all pipelines and benchmarks
+out/
+
+# Local debug / scratch runs committed in older snapshots
+debug_da*/
+out_demo/
+tmp_check_proof/
+tmp_debug_da/
+capsule_bundle/
+artifacts_out/
+node_modules/
+.env
+
+# Ignore specific generated file types in the root directory
+# (This is more precise than a blanket **/*.json)
+*.csv
+*.log
+*.parquet
+
+
+# =============================================================================
+# Archives & Temporary Files
+# =============================================================================
+*.zip
+*.tmp
+*.bak
+/tmp/
+
+# Ignore specific temporary directories from user's workspace
+df0f26dc4706d96f7495674b69413aea/
+e56232ed0690a30f3b0df2806940713e/
+
+
+# =============================================================================
+# Documentation & Specific Files
+# =============================================================================
+# Ignore specific large or generated documents
+colab.pdf
+
+
+# =============================================================================
+# Dependencies
+# =============================================================================
+# Per project convention, Cargo.lock is not committed
+Cargo.lock
+# Ignore downloaded C++ dependencies
+third_party/eigen-*/
+
+
+# =============================================================================
+# IDE / Editor / OS Files
+# =============================================================================
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Generated artifacts / demo runs
+out_demo/
+debug_da*/
+tmp_check_proof/
+tmp_debug_da/
+capsule_bundle/
+
+# Vendored deps (should not be tracked)
+enn-cpp/third_party/eigen-*/
+
+# UI build artifacts
+ui/dist/
+ui/node_modules/
+
+.gemini/
+gha-creds-*.json
+
+# Local helper scripts (not tracked)
+scripts/deploy_stack.sh
+scripts/run_capsule_flow.sh
+BICEPsrc/BICEPrust/bicep/crates/bicep-core/runs/

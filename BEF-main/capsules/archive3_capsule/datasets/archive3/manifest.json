@@ -1,0 +1,33 @@
+{
+  "schema": "dataset_manifest_v1",
+  "dataset_id": "archive3",
+  "tree_arity": 16,
+  "num_chunks": 4,
+  "root": "eddef047e5a0d7cb36a17734aaccd266f37f2bfded29a037430ae4c4ef0bae4a",
+  "entries": [
+    {
+      "uri": "test.ft.txt",
+      "size": 177376193,
+      "sha256": "904cbcfc6b4b9569e66472804f2e2d5acc4e73dcf60fef8a740bffce2b6869af",
+      "id": 0
+    },
+    {
+      "uri": "test.ft.txt.bz2",
+      "size": 52653659,
+      "sha256": "df94edbe055f0af408c368cdfd436d293e28b550f0b5f49c48b51e2d3fe33a06",
+      "id": 1
+    },
+    {
+      "uri": "train.ft.txt",
+      "size": 1597164432,
+      "sha256": "4a720bc5f32d219613f09c4a411a52732181f706c6d6479d7092232e6b42b019",
+      "id": 2
+    },
+    {
+      "uri": "train.ft.txt.bz2",
+      "size": 464275989,
+      "sha256": "63f5ae483ee1e9788323e9e7d9361d5efeb9244db1d2377d6a69c60718aebe2a",
+      "id": 3
+    }
+  ]
+}

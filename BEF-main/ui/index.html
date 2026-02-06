@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CapsuleTech Runs</title>
+    <script>
+      // Engine API base URL - REQUIRED, no hardcoded fallback
+      // Configure via one of:
+      //   1. Set window.API_BASE before this script loads (deployment injection)
+      //   2. Set VITE_API_BASE environment variable at build time
+      //   3. Pass baseUrl to createEngine() in code
+      // If not configured, EngineConfigError will be thrown with instructions.
+      // Example: window.API_BASE = 'http://localhost:5001'
+    </script>
+  </head>
+  <body>
+    <div id="root">
+      <div style="padding:16px;font-family:system-ui,sans-serif;color:#7a869a;">
+        Loading CapsuleTech UI...
+      </div>
+      <noscript>
+        CapsuleTech requires JavaScript enabled to view live runs and events.
+      </noscript>
+    </div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

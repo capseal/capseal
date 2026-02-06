@@ -1,0 +1,13 @@
+{
+  "spec_level": 0,
+  "tool_noise_level": 0,
+  "verify_flip_rate": 0.0,
+  "max_reads": 0,
+  "max_greps": 0,
+  "max_lsp_calls": 0,
+  "max_bash_calls": 0,
+  "max_bytes_read": 0,
+  "max_diff_lines": 200,
+  "max_files_touched": 8,
+  "sandbox_mode": true
+}

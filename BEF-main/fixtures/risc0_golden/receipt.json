@@ -1,0 +1,37 @@
+{
+  "schema": "risc0_receipt_v1",
+  "image_id": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2",
+  "journal": "48656c6c6f2c20576f726c6421",
+  "output": {
+    "journal": {
+      "bytes": [72, 101, 108, 108, 111, 44, 32, 87, 111, 114, 108, 100, 33]
+    },
+    "assumptions": []
+  },
+  "inner": {
+    "Composite": {
+      "segments": [
+        {
+          "seal": [
+            1234567890, 2345678901, 3456789012, 4567890123,
+            5678901234, 6789012345, 7890123456, 8901234567
+          ],
+          "index": 0,
+          "hashfn": "sha256"
+        }
+      ],
+      "folds": []
+    }
+  },
+  "metadata": {
+    "verifier_parameters": {
+      "version": "1.0.0",
+      "circuit": "rv32im"
+    },
+    "prove_info": {
+      "segments": 1,
+      "total_cycles": 65536,
+      "user_cycles": 1024
+    }
+  }
+}

@@ -1,0 +1,120 @@
+
+Here’s how to tighten it—and how to add your “terminal ⇄ AI” split without turning the product back into a messy dashboard.
+
+## 1) Fix “Continue Project” so it never dead-ends
+
+Right now “Continue” drops you into `/p/:id/runs` (or equivalent) and the Runs list is empty, so the UI says “select a run” with nothing to select. That’s a UX contract violation: every screen needs a primary action.
+
+Make “Continue Project” route to a *Project Overview* (even if minimal), not directly to Runs.
+
+Project Overview should always have 3 actions, regardless of whether runs exist:
+
+1. **New Run** (primary)
+2. **Open Last Run** (only enabled if exists)
+3. **Quick Trace** (secondary, runs the isolated flow inside this project context)
+
+And it should show lightweight “state tiles”:
+
+* Last run: none / timestamp
+* Verify status: unknown / last verified ok / last failed
+* Engine: Local / Cloud (and “not running” state)
+
+If you don’t want to add a whole new page, you can fake it by changing the empty state of Runs:
+
+When runs list is empty, replace the “Select a run” empty state with:
+
+* Primary button: **Create first run**
+* Secondary: **Quick Trace**
+* Tertiary: **Import capsule (.cap)** (optional but *very* on-brand)
+
+That alone makes “Continue” feel purposeful.
+
+## 2) Add “pre-select options” without adding complexity
+
+You’re describing a “mode selection” step that should happen *before* you enter a project shell. Do it as a small overlay panel that appears when you click Continue:
+
+**Continue Project → Modal / Sheet**
+
+* Choose project (list)
+* Then choose “next action” (radio buttons or 3 cards):
+
+  * **Open Overview**
+  * **Start New Run**
+  * **Open Last Run** (disabled if none)
+
+Default selection:
+
+* If project has a last run → default “Open Last Run”
+* Else → default “Start New Run”
+
+This makes the app feel “smart” without adding AI yet.
+
+## 3) Your “terminal space” idea: do it as a Dock, not a permanent panel
+
+If you permanently reserve screen space, you’ll hate it later (it’ll make every page feel like an IDE clone). The Steve Jobs-coded move is: **everything is hidden until invoked, but instantly available**.
+
+So: add a **bottom dock** that slides up.
+
+Keybinds (simple, memorable):
+
+* **Ctrl/⌘ + J** → toggle Terminal Dock
+* **Ctrl/⌘ + K** → Command Palette (later)
+* **Ctrl/⌘ + L** → toggle “AI Dock” (or combine terminal+AI into one dock with tabs)
+
+The dock itself should be one component used everywhere:
+`DockPanel`
+
+* Tabs: `Terminal` | `AI` | `Events` (Events is insanely on-brand for Capseal)
+* Height: 35–45% of viewport when open
+* Remembers last tab
+* Can be popped out later, but don’t start there
+
+This gives you the “alternate between CLI work and AI” rhythm without contaminating the rest of the UI.
+
+## 4) What goes in “AI” inside the dock?
+
+Do **not** make it a general chatbot. Make it a *bounded copilot tied to the current screen context*.
+
+Minimum viable AI dock:
+
+* Title: “Assistant”
+* Context line: `Project: X · Circuit: Y · Run: Z`
+* 3 preset actions (buttons):
+
+  1. **Explain this screen**
+  2. **Generate command for what I’m doing**
+  3. **Diagnose why this run failed**
+* Then a text box.
+
+That’s it. The AI becomes a tool, not a new product.
+
+## 5) The cleanest “command line ↔ UI” integration
+
+You want the UI to feel like a shell around capseal, not a separate world. So unify them:
+
+* Every major UI action should show the exact CLI command it corresponds to (copy button).
+* Terminal dock should default to running in the selected project’s working directory.
+* When the user runs a command in terminal, it can emit events into the Events tab (even if initially just “captured stdout”).
+
+This makes everything feel *tight* because it’s one mental model.
+
+## 6) Your specific screenshots: why it feels loose
+
+Two main causes:
+
+1. **Empty states are passive** (“Select a run”) instead of action-oriented (“Create first run”).
+2. **You have too many “shells” that don’t enforce a next step.** The product needs “rails,” not a rail.
+
+The Launchpad screen you showed is actually closer to what you want. It’s just missing the follow-through contracts once you leave it.
+
+## 7) Concrete implementation order (so it doesn’t sprawl)
+
+1. Change Runs empty state to action-driven (Create first run / Quick Trace / Import cap).
+2. Add Continue modal with “next action” selection.
+3. Add DockPanel with Ctrl/⌘+J toggle.
+4. Terminal tab first (even if it’s just a styled output box calling your backend).
+5. AI tab later, but with the constrained presets above.
+
+Once those exist, the whole app will start feeling like an instrument panel instead of a dark-themed dashboard.
+
+If you keep the dock hidden until invoked, and make every empty state have a primary action, you’ll get that “closed, inevitable, Jobs-like” feel without needing to redesign everything again.

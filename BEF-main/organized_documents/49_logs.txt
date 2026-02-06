@@ -1,0 +1,17 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.7, pytest-9.0.2, pluggy-1.6.0
+rootdir: /home/ryan/BEF-main
+configfile: pytest.ini
+testpaths: tests
+plugins: anyio-4.12.0
+collected 44 items
+
+tests/test_capsule_bench.py ....                                         [  9%]
+tests/test_capsule_verify.py ..............................              [ 77%]
+tests/test_cli_roundtrip.py s                                            [ 79%]
+tests/test_da_provider.py ...                                            [ 86%]
+tests/test_event_store.py .                                              [ 88%]
+tests/test_geom_serialization.py ....                                    [ 97%]
+tests/test_policy_registry.py .                                          [100%]
+
+======================== 43 passed, 1 skipped in 0.65s =========================

@@ -1,0 +1,9 @@
+{
+  "schema": "bef_os_fingerprint_v1",
+  "generated_at": "2025-12-26T00:20:48.428684+00:00",
+  "platform": "Linux-6.17.8-arch1-1-x86_64-with-glibc2.42",
+  "release": "6.17.8-arch1-1",
+  "version": "#1 SMP PREEMPT_DYNAMIC Fri, 14 Nov 2025 06:54:20 +0000",
+  "machine": "x86_64",
+  "python": "3.13.7 (main, Aug 15 2025, 12:34:02) [GCC 15.2.1 20250813]"
+}

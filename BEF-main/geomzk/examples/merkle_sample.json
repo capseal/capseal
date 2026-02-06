@@ -1,0 +1,148 @@
+{
+  "statement": {
+    "steps": 8
+  },
+  "row_commitment": {
+    "backend": "geom_plain_fri",
+    "row_size": 2,
+    "row_width": 2,
+    "n_rows": 8,
+    "params": {
+      "root": "8c73cb8243a3a84ad6d2094d0821d50e32e67d63be31fcbc6c9898d2521ce6a9",
+      "num_rows": 8
+    },
+    "root": "8c73cb8243a3a84ad6d2094d0821d50e32e67d63be31fcbc6c9898d2521ce6a9"
+  },
+  "row_openings": [
+    {
+      "backend": "geom_plain_fri",
+      "row_index": 0,
+      "row_values": [
+        1,
+        1
+      ],
+      "proof": {
+        "path": [
+          "276318fe25a2b90846080143335bf89ab19d43dd34cf550e705969efaf53fae3",
+          "e088c6c07638f8a52391241567a901ffc972b6c3a0a49f260459bf5576ee6b71",
+          "e5b78c428d220176b0a740135aada68eff498dfde766703e80d6d1ac83a4601a"
+        ]
+      }
+    },
+    {
+      "backend": "geom_plain_fri",
+      "row_index": 1,
+      "row_values": [
+        3,
+        2
+      ],
+      "proof": {
+        "path": [
+          "384d3edd05574dc124fa1f5457e2d52d2eb4e2910d21b4608fe9a56f2ee830a6",
+          "e088c6c07638f8a52391241567a901ffc972b6c3a0a49f260459bf5576ee6b71",
+          "e5b78c428d220176b0a740135aada68eff498dfde766703e80d6d1ac83a4601a"
+        ]
+      }
+    },
+    {
+      "backend": "geom_plain_fri",
+      "row_index": 2,
+      "row_values": [
+        8,
+        5
+      ],
+      "proof": {
+        "path": [
+          "2f0df11adcbf3ff358fa0833ea4ab7c7c7af5ff18165cf1530acd76d13abc2ea",
+          "b40dd0d4050d5cee39673277525b3a3670954c1f0bf2d87cec3be46989915067",
+          "e5b78c428d220176b0a740135aada68eff498dfde766703e80d6d1ac83a4601a"
+        ]
+      }
+    },
+    {
+      "backend": "geom_plain_fri",
+      "row_index": 3,
+      "row_values": [
+        21,
+        13
+      ],
+      "proof": {
+        "path": [
+          "2590c11812c743d6dbcd9838ece48b4282fcbe1c28f7234dc9915fb637b80787",
+          "b40dd0d4050d5cee39673277525b3a3670954c1f0bf2d87cec3be46989915067",
+          "e5b78c428d220176b0a740135aada68eff498dfde766703e80d6d1ac83a4601a"
+        ]
+      }
+    },
+    {
+      "backend": "geom_plain_fri",
+      "row_index": 4,
+      "row_values": [
+        55,
+        34
+      ],
+      "proof": {
+        "path": [
+          "a028106a913b561109e31662aa97ef17a8d2579d99060dc3baf073109ba391d3",
+          "d869bc1caafea73be0d1ab5fc7d5dda390af24ee4edb262d9b07abe4a4d86f05",
+          "95d752da35ad8965180afab24824968e0b829bf3160e5936a9e334eb0048a8fd"
+        ]
+      }
+    },
+    {
+      "backend": "geom_plain_fri",
+      "row_index": 5,
+      "row_values": [
+        144,
+        89
+      ],
+      "proof": {
+        "path": [
+          "674620607c3e65646d650935a59f94255f2cdd888599d96026a9422652a71b75",
+          "d869bc1caafea73be0d1ab5fc7d5dda390af24ee4edb262d9b07abe4a4d86f05",
+          "95d752da35ad8965180afab24824968e0b829bf3160e5936a9e334eb0048a8fd"
+        ]
+      }
+    },
+    {
+      "backend": "geom_plain_fri",
+      "row_index": 6,
+      "row_values": [
+        377,
+        233
+      ],
+      "proof": {
+        "path": [
+          "3f294671825d3ec092d7d18ea70e509fd82d9256b97cada6a5c8b2bca79b3a79",
+          "fa2d3442855445f3226d4ed8fa3df3acd13a6c8f7b8762a95f48a5b3262d3b73",
+          "95d752da35ad8965180afab24824968e0b829bf3160e5936a9e334eb0048a8fd"
+        ]
+      }
+    },
+    {
+      "backend": "geom_plain_fri",
+      "row_index": 7,
+      "row_values": [
+        987,
+        610
+      ],
+      "proof": {
+        "path": [
+          "0a11584bfefee9dfef2fea7e9d2fc5ff2df756e7d3f7f8b1533f084f0327f592",
+          "fa2d3442855445f3226d4ed8fa3df3acd13a6c8f7b8762a95f48a5b3262d3b73",
+          "95d752da35ad8965180afab24824968e0b829bf3160e5936a9e334eb0048a8fd"
+        ]
+      }
+    }
+  ],
+  "fri_params": {
+    "domain_size": 8,
+    "max_degree": 7,
+    "num_rounds": 1,
+    "num_queries": 8
+  },
+  "fri_proof": {
+    "layers": [],
+    "batches": []
+  }
+}

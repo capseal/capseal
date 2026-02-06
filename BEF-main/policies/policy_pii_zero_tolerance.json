@@ -1,0 +1,31 @@
+{
+  "policy_id": "pii_zero_tolerance",
+  "policy_version": "v1",
+  "description": "Abort if any PII detected in processed rows.",
+  "enforcement": {"mode": "RUN_ENFORCED", "fail_closed": true},
+  "signing": {
+    "required": true,
+    "scheme": "ed25519",
+    "min_signatures": 1,
+    "authorized_signers": [
+      {"name": "Compliance Owner", "role": "DATA_OWNER", "pubkey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}
+    ],
+    "signature_scope": "POLICY_HASH"
+  },
+  "rules": {
+    "pii_guardrail": {
+      "enabled": true,
+      "detector": {
+        "mode": "DETERMINISTIC_REGEX",
+        "detector_version": "v1",
+        "patterns": ["EMAIL", "PHONE", "SSN"]
+      },
+      "thresholds": {
+        "max_pii_hits_total": 0,
+        "max_pii_hits_per_row": 0
+      },
+      "required_telemetry": ["rows_total", "pii_hits", "pii_hits_per_row_max"],
+      "enforcement_action": "ABORT_RUN"
+    }
+  }
+}
