@@ -10,7 +10,30 @@ cd your-project
 capseal autopilot .
 ```
 
-That's it. CapSeal scans your code, learns what's risky, fixes what's safe, and gives you a verified receipt.
+That's it. CapSeal scans your code, attempts fixes, gates risky changes, and produces a tamper-evident receipt. The risk model improves with each run — the more you use it, the sharper the gating gets.
+
+**Requirements:** Python 3.10+, an LLM API key (Anthropic, OpenAI, or Google), and [Semgrep](https://semgrep.dev) for scanning. CapSeal uses the LLM to generate patches — no API key means no patch generation (scanning and gating still work).
+
+## Example Run
+
+```
+$ capseal autopilot .
+
+[1/4] Initializing workspace...           ✓
+[2/4] Learning risk model (3 rounds)...
+      Round 1: ✓ 2 success  ✗ 1 fail
+      Round 2: ✓ 3 success  ✗ 0 fail
+      Round 3: ✓ 2 success  ✗ 1 fail
+[3/4] Scanning and gating...
+      Found 8 issues (semgrep security-audit)
+      Approved: 5  Flagged: 2  Gated: 1
+      Gated: "non-literal-import refactor" (86% predicted failure)
+[4/4] Applying 5 approved patches...      ✓
+
+Receipt: .capseal/runs/20260207-autopilot.cap
+Actions: 5 applied, 1 blocked, 2 flagged for review
+Chain:   intact (5/5 hashes valid)
+```
 
 ## Protect Your AI Agents (2 minutes)
 
@@ -28,17 +51,30 @@ Supported agents:
 - Cursor
 - Windsurf
 - Cline
-- Any MCP-compatible client
+- Any MCP-compatible client (MCP is the Model Context Protocol — it lets AI agents call CapSeal's gate/record/seal tools during a coding session)
 
 ## How It Works
 
-1. **Learn** — CapSeal runs your codebase through multiple rounds of AI-generated patches, tracking which succeed and which fail. It builds a statistical model (Beta posteriors) specific to YOUR code.
+1. **Learn** — CapSeal generates candidate patches for each finding, applies them, then runs validation (semgrep re-scan, syntax checks, and optionally your test suite via `capseal learn --test-cmd "pytest"`). Patches that pass validation are successes; patches that break things are failures. Over multiple rounds, the model builds a statistical profile of which change patterns succeed or fail on your specific codebase.
 
 2. **Gate** — Before any AI agent makes a change, CapSeal checks the learned model. High predicted failure? Blocked. Uncertain? Flagged for review. Safe? Approved.
 
 3. **Seal** — Every action (gate decisions, edits, verifications) is hash-chained into a `.cap` receipt file. Tamper with any action and the chain breaks.
 
 4. **Verify** — Anyone can verify a `.cap` file: `capseal verify .capseal/runs/latest.cap`
+
+## What CapSeal Guarantees / What It Doesn't
+
+**Guarantees:**
+- Every AI action is recorded in a tamper-evident hash chain
+- If anyone modifies a receipt after the fact, verification fails
+- The risk model is trained on YOUR codebase, not generic rules
+- Gated changes are blocked before execution, not flagged after
+
+**Does not guarantee:**
+- That approved changes are bug-free (gating reduces risk, doesn't eliminate it)
+- That the risk model is perfect on the first run (it improves with more data)
+- Signer identity (receipts prove what happened, not who did it — signing is on the roadmap)
 
 ## Four Ways to Use CapSeal
 
@@ -68,7 +104,7 @@ capseal verify .capseal/runs/latest.cap   # Verify anytime
 
 Every other security tool uses pattern matching: "block rm -rf", "flag eval()".
 
-CapSeal learns. It knows that non-literal-import patches fail 86% of the time on YOUR codebase. It knows that simple style fixes succeed 95% of the time. It doesn't guess — it measures.
+CapSeal tracks change patterns — import refactors, dependency updates, security fixes, formatting changes, test edits — and measures their success rate against your validation pipeline. After 3 rounds on a FastAPI project, it learned that import-reorganization patches fail 86% of the time (circular dependency issues), while security-header additions succeed 93% of the time.
 
 ## The Cryptographic Receipt
 
@@ -81,7 +117,7 @@ chain: intact (6/6 hashes valid)
 constraints_valid: true
 ```
 
-Each action chains to the previous one. Tamper with one and verification fails.
+Each `.cap` file contains a manifest (session metadata, timestamps, action count), a hash chain (each action's SHA-256 chains to the previous), and a constraint proof. `capseal verify` recomputes every hash in the chain — if any action was modified, added, or removed after sealing, verification fails. Receipts are tamper-evident but not identity-signed (signing support is planned).
 
 ## CLI Reference
 
@@ -97,9 +133,3 @@ Each action chains to the previous one. Tamper with one and verification fails.
 | `capseal verify <file.cap>` | Verify sealed receipt |
 | `capseal doctor` | Check everything is wired up correctly |
 | `capseal mcp-serve` | Start MCP server for agent integration |
-
-## Requirements
-
-- Python 3.10+
-- Semgrep (`pip install semgrep`)
-- One of: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GOOGLE_API_KEY`
