@@ -21,7 +21,7 @@ class TestAgentAction:
 
     def test_create_valid_action(self):
         """Create a valid action with all fields."""
-        from bef_zk.capsule.agent_protocol import AgentAction
+        from capseal.agent_protocol import AgentAction
 
         action = AgentAction(
             action_id="act_001",
@@ -47,7 +47,7 @@ class TestAgentAction:
 
     def test_invalid_action_type_raises(self):
         """Invalid action_type should raise ValueError."""
-        from bef_zk.capsule.agent_protocol import AgentAction
+        from capseal.agent_protocol import AgentAction
 
         with pytest.raises(ValueError, match="Invalid action_type"):
             AgentAction(
@@ -68,7 +68,7 @@ class TestAgentAction:
 
     def test_invalid_gate_decision_raises(self):
         """Invalid gate_decision should raise ValueError."""
-        from bef_zk.capsule.agent_protocol import AgentAction
+        from capseal.agent_protocol import AgentAction
 
         with pytest.raises(ValueError, match="Invalid gate_decision"):
             AgentAction(
@@ -89,7 +89,7 @@ class TestAgentAction:
 
     def test_receipt_hash_deterministic(self):
         """Receipt hash should be deterministic."""
-        from bef_zk.capsule.agent_protocol import AgentAction
+        from capseal.agent_protocol import AgentAction
 
         action = AgentAction(
             action_id="act_001",
@@ -115,7 +115,7 @@ class TestAgentAction:
 
     def test_create_action_helper(self):
         """Test create_action convenience function."""
-        from bef_zk.capsule.agent_protocol import create_action
+        from capseal.agent_protocol import create_action
 
         action = create_action(
             action_id="act_001",
@@ -135,7 +135,7 @@ class TestAgentAction:
 
     def test_action_chain(self):
         """Test parent action chaining."""
-        from bef_zk.capsule.agent_protocol import create_action
+        from capseal.agent_protocol import create_action
 
         action1 = create_action(
             action_id="act_001",
@@ -163,8 +163,8 @@ class TestAgentAIR:
 
     def test_encode_decode_row(self):
         """Encode and decode should preserve data."""
-        from bef_zk.capsule.agent_protocol import create_action
-        from bef_zk.capsule.agent_air import encode_agent_action_row, decode_agent_action_row
+        from capseal.agent_protocol import create_action
+        from capseal.agent_air import encode_agent_action_row, decode_agent_action_row
 
         action = create_action(
             action_id="act_001",
@@ -187,8 +187,8 @@ class TestAgentAIR:
 
     def test_row_field_bounds(self):
         """All row elements should be within Goldilocks field bounds."""
-        from bef_zk.capsule.agent_protocol import create_action
-        from bef_zk.capsule.agent_air import encode_agent_action_row, GOLDILOCKS_P, verify_row_field_bounds
+        from capseal.agent_protocol import create_action
+        from capseal.agent_air import encode_agent_action_row, GOLDILOCKS_P, verify_row_field_bounds
 
         action = create_action(
             action_id="act_001",
@@ -205,8 +205,8 @@ class TestAgentAIR:
 
     def test_build_row_matrix(self):
         """Test building row matrix from multiple actions."""
-        from bef_zk.capsule.agent_protocol import create_action
-        from bef_zk.capsule.agent_air import build_agent_row_matrix
+        from capseal.agent_protocol import create_action
+        from capseal.agent_air import build_agent_row_matrix
 
         actions = []
         parent = None
@@ -235,8 +235,8 @@ class TestAgentAdapter:
 
     def test_simulate_trace(self):
         """Test trace simulation from actions."""
-        from bef_zk.capsule.agent_protocol import create_action
-        from bef_zk.capsule.agent_adapter import AgentAdapter
+        from capseal.agent_protocol import create_action
+        from capseal.agent_adapter import AgentAdapter
 
         adapter = AgentAdapter()
 
@@ -262,8 +262,8 @@ class TestAgentAdapter:
 
     def test_prove_actions_5_actions(self, tmp_path):
         """Create 5 AgentActions, prove with AgentAdapter, verify capsule."""
-        from bef_zk.capsule.agent_protocol import create_action
-        from bef_zk.capsule.agent_adapter import AgentAdapter, verify_agent_capsule
+        from capseal.agent_protocol import create_action
+        from capseal.agent_adapter import AgentAdapter, verify_agent_capsule
 
         adapter = AgentAdapter()
         output_dir = tmp_path / "agent_run"
@@ -299,8 +299,8 @@ class TestAgentAdapter:
 
     def test_tampering_detection(self, tmp_path):
         """Test that tampering with capsule is detected."""
-        from bef_zk.capsule.agent_protocol import create_action
-        from bef_zk.capsule.agent_adapter import AgentAdapter, verify_agent_capsule
+        from capseal.agent_protocol import create_action
+        from capseal.agent_adapter import AgentAdapter, verify_agent_capsule
 
         adapter = AgentAdapter()
         output_dir = tmp_path / "agent_run"
@@ -334,8 +334,8 @@ class TestAgentAdapter:
 
     def test_chain_constraint_violation(self, tmp_path):
         """Test that chain constraint violations are detected."""
-        from bef_zk.capsule.agent_protocol import AgentAction, create_action
-        from bef_zk.capsule.agent_adapter import AgentAdapter
+        from capseal.agent_protocol import AgentAction, create_action
+        from capseal.agent_adapter import AgentAdapter
 
         adapter = AgentAdapter()
         output_dir = tmp_path / "agent_run"
@@ -390,9 +390,9 @@ class TestAgentConstraints:
 
     def test_verify_valid_trace(self):
         """Verify a valid trace passes all constraints."""
-        from bef_zk.capsule.agent_protocol import create_action
-        from bef_zk.capsule.agent_air import build_agent_row_matrix
-        from bef_zk.capsule.agent_constraints import verify_agent_trace
+        from capseal.agent_protocol import create_action
+        from capseal.agent_air import build_agent_row_matrix
+        from capseal.agent_constraints import verify_agent_trace
 
         actions = []
         parent = None
@@ -418,7 +418,7 @@ class TestAgentConstraints:
 
     def test_first_row_boundary_constraint(self):
         """First row must have prev_receipt_hash == 0."""
-        from bef_zk.capsule.agent_constraints import AgentConstraints
+        from capseal.agent_constraints import AgentConstraints
 
         # Valid first row (prev_receipt is 0)
         row_valid = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 123, 456, 1]
@@ -431,7 +431,7 @@ class TestAgentConstraints:
 
     def test_transition_chain_constraint(self):
         """Row[i].receipt == Row[i+1].prev_receipt."""
-        from bef_zk.capsule.agent_constraints import AgentConstraints
+        from capseal.agent_constraints import AgentConstraints
 
         # Valid chain
         row_curr = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 111, 222, 1]  # receipt = (111, 222)
@@ -447,7 +447,7 @@ class TestAgentConstraints:
 
     def test_ordering_constraint(self):
         """Row[i+1].index == Row[i].index + 1."""
-        from bef_zk.capsule.agent_constraints import AgentConstraints
+        from capseal.agent_constraints import AgentConstraints
 
         # Valid ordering
         row_0 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]

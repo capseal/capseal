@@ -285,9 +285,50 @@ def verify_capsule_command(capsule_file: str) -> None:
             click.echo(click.style("VERIFICATION FAILED", fg="red", bold=True))
             sys.exit(1)
 
+    elif schema == "agent_capsule_v1":
+        from bef_zk.capsule.agent_adapter import verify_agent_capsule
+        valid, details = verify_agent_capsule(capsule_path)
+
+        for check in details.get("checks", []):
+            click.echo(f"  [PASS] {check}")
+
+        if valid:
+            click.echo()
+            click.echo(f"  final_receipt: {details.get('final_receipt', 'n/a')[:32]}...")
+            click.echo(f"  num_actions: {details.get('num_actions', 0)}")
+            click.echo()
+            click.echo(click.style("CAPSULE VERIFIED", fg="green", bold=True))
+        else:
+            click.echo(click.style(f"  [FAIL] {details.get('error', 'unknown error')}", fg="red"))
+            click.echo()
+            click.echo(click.style("VERIFICATION FAILED", fg="red", bold=True))
+            sys.exit(1)
+
+    elif schema == "run_receipt_v1":
+        # Use the verify_run_receipt function from shared.receipts
+        from bef_zk.shared.receipts import verify_run_receipt
+
+        run_dir = capsule_path.parent
+        result = verify_run_receipt(run_dir)
+
+        if result["verified"]:
+            click.echo(f"  [PASS] Chain hash verified")
+            click.echo(f"  [PASS] {result['rounds_verified']} rounds verified")
+            click.echo()
+            click.echo(f"  chain_hash: {capsule.get('chain_hash', 'n/a')[:32]}...")
+            click.echo(f"  total_rounds: {capsule.get('total_rounds', 0)}")
+            click.echo()
+            click.echo(click.style("RECEIPT VERIFIED", fg="green", bold=True))
+        else:
+            for mismatch in result.get("mismatches", []):
+                click.echo(click.style(f"  [FAIL] {mismatch}", fg="red"))
+            click.echo()
+            click.echo(click.style("VERIFICATION FAILED", fg="red", bold=True))
+            sys.exit(1)
+
     else:
         click.echo(click.style(f"  [FAIL] Unknown capsule schema: {schema}", fg="red"))
-        click.echo(f"  Supported schemas: workflow_capsule_v1, eval_capsule_v1")
+        click.echo(f"  Supported schemas: workflow_capsule_v1, eval_capsule_v1, agent_capsule_v1, run_receipt_v1")
         click.echo()
         click.echo(click.style("VERIFICATION FAILED", fg="red", bold=True))
         sys.exit(1)

@@ -19,7 +19,7 @@ class TestAgentRuntime:
 
     def test_create_runtime(self, tmp_path):
         """Create a runtime and check initial state."""
-        from bef_zk.capsule.agent_runtime import AgentRuntime
+        from capseal.agent_runtime import AgentRuntime
 
         output_dir = tmp_path / "test_run"
         runtime = AgentRuntime(output_dir=output_dir)
@@ -31,8 +31,8 @@ class TestAgentRuntime:
 
     def test_record_action(self, tmp_path):
         """Record an action and verify it's tracked."""
-        from bef_zk.capsule.agent_runtime import AgentRuntime
-        from bef_zk.capsule.agent_protocol import create_action
+        from capseal.agent_runtime import AgentRuntime
+        from capseal.agent_protocol import create_action
 
         output_dir = tmp_path / "test_run"
         runtime = AgentRuntime(output_dir=output_dir)
@@ -54,7 +54,7 @@ class TestAgentRuntime:
 
     def test_record_simple(self, tmp_path):
         """Test record_simple convenience method."""
-        from bef_zk.capsule.agent_runtime import AgentRuntime
+        from capseal.agent_runtime import AgentRuntime
 
         output_dir = tmp_path / "test_run"
         runtime = AgentRuntime(output_dir=output_dir)
@@ -73,7 +73,7 @@ class TestAgentRuntime:
 
     def test_auto_chaining(self, tmp_path):
         """Test automatic action chaining."""
-        from bef_zk.capsule.agent_runtime import AgentRuntime
+        from capseal.agent_runtime import AgentRuntime
 
         output_dir = tmp_path / "test_run"
         runtime = AgentRuntime(output_dir=output_dir, auto_chain=True)
@@ -102,7 +102,7 @@ class TestAgentRuntime:
 
     def test_finalize_with_proof(self, tmp_path):
         """Finalize runtime and generate proof."""
-        from bef_zk.capsule.agent_runtime import AgentRuntime
+        from capseal.agent_runtime import AgentRuntime
 
         output_dir = tmp_path / "test_run"
         runtime = AgentRuntime(output_dir=output_dir)
@@ -126,7 +126,7 @@ class TestAgentRuntime:
 
     def test_finalize_without_proof(self, tmp_path):
         """Finalize runtime without generating proof."""
-        from bef_zk.capsule.agent_runtime import AgentRuntime
+        from capseal.agent_runtime import AgentRuntime
 
         output_dir = tmp_path / "test_run"
         runtime = AgentRuntime(output_dir=output_dir)
@@ -146,7 +146,7 @@ class TestAgentRuntime:
 
     def test_context_manager(self, tmp_path):
         """Test context manager interface."""
-        from bef_zk.capsule.agent_runtime import AgentRuntime
+        from capseal.agent_runtime import AgentRuntime
 
         output_dir = tmp_path / "test_run"
 
@@ -163,7 +163,7 @@ class TestAgentRuntime:
 
     def test_verify_after_finalize(self, tmp_path):
         """Verify the generated capsule."""
-        from bef_zk.capsule.agent_runtime import AgentRuntime
+        from capseal.agent_runtime import AgentRuntime
 
         output_dir = tmp_path / "test_run"
         runtime = AgentRuntime(output_dir=output_dir)
@@ -186,7 +186,7 @@ class TestAgentRuntime:
 
     def test_get_action_chain(self, tmp_path):
         """Get the full action chain."""
-        from bef_zk.capsule.agent_runtime import AgentRuntime
+        from capseal.agent_runtime import AgentRuntime
 
         output_dir = tmp_path / "test_run"
         runtime = AgentRuntime(output_dir=output_dir)
@@ -209,7 +209,7 @@ class TestAgentRuntime:
 
     def test_cannot_record_after_finalize(self, tmp_path):
         """Cannot record actions after finalize."""
-        from bef_zk.capsule.agent_runtime import AgentRuntime
+        from capseal.agent_runtime import AgentRuntime
 
         output_dir = tmp_path / "test_run"
         runtime = AgentRuntime(output_dir=output_dir)
@@ -233,7 +233,7 @@ class TestAgentRuntime:
 
     def test_empty_finalize(self, tmp_path):
         """Finalize with no actions."""
-        from bef_zk.capsule.agent_runtime import AgentRuntime
+        from capseal.agent_runtime import AgentRuntime
 
         output_dir = tmp_path / "test_run"
         runtime = AgentRuntime(output_dir=output_dir)
@@ -248,7 +248,7 @@ class TestInspectAgentRun:
 
     def test_inspect_completed_run(self, tmp_path):
         """Inspect a completed agent run."""
-        from bef_zk.capsule.agent_runtime import AgentRuntime, inspect_agent_run
+        from capseal.agent_runtime import AgentRuntime, inspect_agent_run
 
         output_dir = tmp_path / "test_run"
 
@@ -273,7 +273,7 @@ class TestInspectAgentRun:
 
     def test_inspect_nonexistent_run(self, tmp_path):
         """Inspect a nonexistent directory."""
-        from bef_zk.capsule.agent_runtime import inspect_agent_run
+        from capseal.agent_runtime import inspect_agent_run
 
         result = inspect_agent_run(tmp_path / "nonexistent")
 

@@ -53,6 +53,8 @@ GATE_DECISIONS = frozenset({
     "pass",
     "skip",
     "human_review",
+    "human_approved",  # Human reviewed and approved
+    "skipped",  # Skipped after max retries
 })
 
 # Valid policy verdicts

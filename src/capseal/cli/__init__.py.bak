@@ -1,0 +1,97 @@
+"""Capsule CLI - product-grade interface for generating and verifying receipts.
+
+Commands:
+    run     - Generate a cryptographic proof (simplified pipeline wrapper)
+    verify  - Verify a capsule with stable exit codes for CI
+    replay  - Semantic replay verification
+    audit   - Export and inspect audit trails
+    emit    - Generate a portable verification artifact (.cap file)
+    inspect - Display capsule metadata
+"""
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import click
+
+from .emit import emit_command
+from .verify import verify_command
+from .inspect_cmd import inspect_command
+from .run import run_command
+from .replay import replay_command
+from .open_cmd import open_command
+from .replay_row import replay_row_command
+from .audit import audit_command, audit_fetch_command
+from .sandbox_cmd import sandbox_group
+from .shell import shell_command, run_shell
+from .fetch import fetch_command
+from .doctor import doctor
+from .docs_generator import docs_group
+from .pipeline import pipeline_group
+from .greptile import greptile_group
+from .diff import diff_command, logs_command
+from .context import context_group
+from .merge import merge_command, conflict_bundle_command, merge_apply_command
+from .merge_orchestrate import merge_orchestrate_command
+
+
+@click.group()
+@click.version_option(version="0.2.0", prog_name="capsule")
+def cli() -> None:
+    """Capsule CLI - cryptographic receipt generation and verification.
+
+    Generate portable verification artifacts from traces and verify them
+    with stable exit codes suitable for CI integration.
+
+    \b
+    Quick Start:
+        capsule run -p policy.json --policy-id demo -d ./data
+        capsule verify out/capsule_run/strategy_capsule.json
+        capsule audit out/capsule_run/strategy_capsule.json
+    """
+
+
+cli.add_command(run_command, name="run")
+cli.add_command(verify_command, name="verify")
+cli.add_command(replay_command, name="replay")
+cli.add_command(audit_command, name="audit")
+cli.add_command(audit_fetch_command, name="audit-fetch")
+cli.add_command(emit_command, name="emit")
+cli.add_command(inspect_command, name="inspect")
+cli.add_command(open_command, name="open")
+cli.add_command(replay_row_command, name="row")
+cli.add_command(sandbox_group, name="sandbox")
+cli.add_command(shell_command, name="shell")
+cli.add_command(fetch_command, name="fetch")
+cli.add_command(doctor, name="doctor")
+cli.add_command(docs_group, name="docs")
+cli.add_command(pipeline_group, name="pipeline")
+cli.add_command(greptile_group, name="greptile")
+cli.add_command(diff_command, name="diff")
+cli.add_command(logs_command, name="logs")
+cli.add_command(context_group, name="context")
+cli.add_command(merge_command, name="merge")
+cli.add_command(conflict_bundle_command, name="conflict-bundle")
+cli.add_command(merge_apply_command, name="merge-apply")
+cli.add_command(merge_orchestrate_command, name="merge-orchestrate")
+
+
+def main() -> None:
+    """CLI entry point.
+
+    If no command is given, launches the interactive shell.
+    """
+    import sys
+
+    # If no args (or just --help/--version), check if we should launch shell
+    if len(sys.argv) == 1:
+        # No arguments - launch interactive shell
+        run_shell()
+    else:
+        # Has arguments - run normal CLI
+        cli(prog_name="capsule")
+
+
+if __name__ == "__main__":
+    main()

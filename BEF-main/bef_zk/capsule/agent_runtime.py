@@ -133,6 +133,19 @@ class AgentRuntime:
             return None
         return self._actions[-1].compute_receipt_hash()
 
+    @property
+    def actions(self) -> list[AgentAction]:
+        """Get all recorded actions."""
+        return self._actions.copy()
+
+    @property
+    def last_capsule(self) -> dict | None:
+        """Get the last generated capsule, or None if not finalized."""
+        capsule_path = self.output_dir / "agent_capsule.json"
+        if capsule_path.exists():
+            return json.loads(capsule_path.read_text())
+        return None
+
     def record(self, action: AgentAction) -> str:
         """Record an action. Returns the action's receipt_hash.
 
@@ -191,6 +204,8 @@ class AgentRuntime:
         *,
         success: bool = True,
         duration_ms: int = 0,
+        gate_score: float | None = None,
+        gate_decision: str | None = None,
         metadata: dict | None = None,
     ) -> str:
         """Convenience method to record an action with automatic hashing.
@@ -202,6 +217,8 @@ class AgentRuntime:
             outputs: The action's outputs (will be JSON-serialized and hashed)
             success: Whether the action succeeded
             duration_ms: Execution time in milliseconds
+            gate_score: Committor q(x) score if gate was evaluated
+            gate_decision: Gate decision ("pass", "skip", "human_review", "human_approved")
             metadata: Additional agent-specific metadata
 
         Returns:
@@ -220,6 +237,8 @@ class AgentRuntime:
             parent=parent,
             success=success,
             duration_ms=duration_ms,
+            gate_score=gate_score,
+            gate_decision=gate_decision,
             metadata=metadata,
         )
 

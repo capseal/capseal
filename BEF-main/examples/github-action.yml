@@ -1,0 +1,56 @@
+# Example: Add CapSeal to your GitHub Actions workflow
+# Copy this file to .github/workflows/capseal.yml
+
+name: CapSeal Gate
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  capseal-review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install CapSeal
+        run: pip install capseal
+
+      # Option 1: Use the CapSeal Action (recommended)
+      - uses: capseal/capseal-action@v1
+        with:
+          gate: true
+          budget: '5'
+          comment: true
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+      # Option 2: Run CapSeal directly
+      # - name: Run CapSeal Review
+      #   run: |
+      #     capseal review . --gate --json > report.json
+      #     capseal verify-capsule .capseal/runs/latest
+      #     capseal report .capseal/runs/latest
+      #   env:
+      #     ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+      # - name: Post Report
+      #   uses: actions/github-script@v7
+      #   with:
+      #     script: |
+      #       const fs = require('fs');
+      #       const report = fs.readFileSync('.capseal/runs/latest/report.md', 'utf8');
+      #       github.rest.issues.createComment({
+      #         owner: context.repo.owner,
+      #         repo: context.repo.repo,
+      #         issue_number: context.issue.number,
+      #         body: '## CapSeal Review\n\n' + report
+      #       });

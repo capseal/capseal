@@ -1,0 +1,147 @@
+name: 'CapSeal Gate'
+description: 'Filter AI-generated patches that are predicted to fail, with cryptographic proof'
+author: 'CapSeal'
+branding:
+  icon: 'shield'
+  color: 'blue'
+
+inputs:
+  path:
+    description: 'Path to scan (default: changed files in PR)'
+    required: false
+    default: '.'
+  gate:
+    description: 'Enable risk-based patch filtering'
+    required: false
+    default: 'true'
+  budget:
+    description: 'Max LLM spend in dollars for learning (default: 5)'
+    required: false
+    default: '5'
+  comment:
+    description: 'Post report as PR comment'
+    required: false
+    default: 'true'
+  fail-on-skip:
+    description: 'Fail if any patches are skipped'
+    required: false
+    default: 'false'
+  prove:
+    description: 'Generate cryptographic proof'
+    required: false
+    default: 'true'
+
+outputs:
+  patches-passed:
+    description: 'Number of patches that passed the gate'
+  patches-skipped:
+    description: 'Number of patches skipped due to high risk'
+  patches-flagged:
+    description: 'Number of patches flagged for human review'
+  cost:
+    description: 'Total LLM cost in dollars'
+  capsule-hash:
+    description: 'Hash of the verification capsule'
+  report-path:
+    description: 'Path to the generated report'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install CapSeal
+      shell: bash
+      run: |
+        pip install capseal
+
+    - name: Run CapSeal Review
+      id: review
+      shell: bash
+      env:
+        CAPSEAL_GATE: ${{ inputs.gate }}
+        CAPSEAL_BUDGET: ${{ inputs.budget }}
+        CAPSEAL_PROVE: ${{ inputs.prove }}
+      run: |
+        # Determine path to scan
+        if [ "${{ github.event_name }}" = "pull_request" ]; then
+          # Get changed files in PR
+          CHANGED_FILES=$(gh pr view ${{ github.event.pull_request.number }} --json files -q '.files[].path' | tr '\n' ' ')
+          SCAN_PATH="${CHANGED_FILES:-${{ inputs.path }}}"
+        else
+          SCAN_PATH="${{ inputs.path }}"
+        fi
+
+        # Build command
+        CMD="capseal review $SCAN_PATH --json"
+        if [ "$CAPSEAL_GATE" = "true" ]; then
+          CMD="$CMD --gate"
+        fi
+
+        # Run review
+        echo "Running: $CMD"
+        $CMD > capseal_output.json 2>&1 || true
+
+        # Extract results
+        PASSED=$(jq -r '.gate.filtered_items // 0' capseal_output.json 2>/dev/null || echo "0")
+        SKIPPED=$(jq -r '.gate.skipped // 0' capseal_output.json 2>/dev/null || echo "0")
+        FLAGGED=$(jq -r '.gate.human_review // 0' capseal_output.json 2>/dev/null || echo "0")
+
+        echo "patches-passed=$PASSED" >> $GITHUB_OUTPUT
+        echo "patches-skipped=$SKIPPED" >> $GITHUB_OUTPUT
+        echo "patches-flagged=$FLAGGED" >> $GITHUB_OUTPUT
+
+    - name: Verify Capsule
+      if: inputs.prove == 'true'
+      shell: bash
+      run: |
+        CAPSULE=$(find .capseal/runs -name '*_capsule.json' -type f | sort | tail -1)
+        if [ -n "$CAPSULE" ]; then
+          capseal verify-capsule "$CAPSULE" || true
+          HASH=$(jq -r '.capsule_hash // "none"' "$CAPSULE" 2>/dev/null || echo "none")
+          echo "capsule-hash=$HASH" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Generate Report
+      shell: bash
+      run: |
+        RUN_DIR=$(find .capseal/runs -type d | sort | tail -1)
+        if [ -n "$RUN_DIR" ]; then
+          capseal report "$RUN_DIR" --format markdown
+          echo "report-path=$RUN_DIR/report.md" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Post PR Comment
+      if: github.event_name == 'pull_request' && inputs.comment == 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        REPORT_PATH=$(find .capseal/runs -name 'report.md' -type f | sort | tail -1)
+        if [ -n "$REPORT_PATH" ]; then
+          # Add summary header
+          PASSED=${{ steps.review.outputs.patches-passed }}
+          SKIPPED=${{ steps.review.outputs.patches-skipped }}
+
+          HEADER="## CapSeal Review"
+          if [ "$SKIPPED" -gt 0 ]; then
+            HEADER="$HEADER (:warning: $SKIPPED patches skipped)"
+          else
+            HEADER="$HEADER (:white_check_mark: All patches passed)"
+          fi
+
+          # Post comment
+          echo "$HEADER" > /tmp/comment.md
+          echo "" >> /tmp/comment.md
+          cat "$REPORT_PATH" >> /tmp/comment.md
+
+          gh pr comment ${{ github.event.pull_request.number }} --body-file /tmp/comment.md
+        fi
+
+    - name: Check Skip Policy
+      if: inputs.fail-on-skip == 'true'
+      shell: bash
+      run: |
+        SKIPPED=${{ steps.review.outputs.patches-skipped }}
+        if [ "$SKIPPED" -gt 0 ]; then
+          echo "::error::$SKIPPED patches were skipped due to high risk"
+          exit 1
+        fi

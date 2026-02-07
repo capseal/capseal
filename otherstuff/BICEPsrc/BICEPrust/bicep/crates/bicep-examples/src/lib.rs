@@ -1,1 +1,0 @@
-// Examples crate for BICEP

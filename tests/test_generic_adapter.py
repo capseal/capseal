@@ -18,8 +18,8 @@ class TestWrapFunction:
 
     def test_basic_wrap(self, tmp_path):
         """Wrap a simple function and verify action is recorded."""
-        from bef_zk.capsule.agent_runtime import AgentRuntime
-        from bef_zk.capsule.adapters import wrap_function
+        from capseal.agent_runtime import AgentRuntime
+        from capseal.adapters import wrap_function
 
         output_dir = tmp_path / "test_run"
         runtime = AgentRuntime(output_dir=output_dir)
@@ -40,8 +40,8 @@ class TestWrapFunction:
 
     def test_wrap_with_exception(self, tmp_path):
         """Wrapped function that raises exception still records action."""
-        from bef_zk.capsule.agent_runtime import AgentRuntime
-        from bef_zk.capsule.adapters import wrap_function
+        from capseal.agent_runtime import AgentRuntime
+        from capseal.adapters import wrap_function
 
         output_dir = tmp_path / "test_run"
         runtime = AgentRuntime(output_dir=output_dir)
@@ -61,8 +61,8 @@ class TestWrapFunction:
 
     def test_wrap_multiple_calls(self, tmp_path):
         """Multiple calls to wrapped function record multiple actions."""
-        from bef_zk.capsule.agent_runtime import AgentRuntime
-        from bef_zk.capsule.adapters import wrap_function
+        from capseal.agent_runtime import AgentRuntime
+        from capseal.adapters import wrap_function
 
         output_dir = tmp_path / "test_run"
         runtime = AgentRuntime(output_dir=output_dir)
@@ -79,8 +79,8 @@ class TestWrapFunction:
 
     def test_wrap_and_prove(self, tmp_path):
         """Wrap functions, call them, and generate proof."""
-        from bef_zk.capsule.agent_runtime import AgentRuntime
-        from bef_zk.capsule.adapters import wrap_function
+        from capseal.agent_runtime import AgentRuntime
+        from capseal.adapters import wrap_function
 
         output_dir = tmp_path / "test_run"
         runtime = AgentRuntime(output_dir=output_dir)
@@ -119,8 +119,8 @@ class TestWrapFunction:
 
     def test_wrap_with_custom_instruction(self, tmp_path):
         """Wrap with custom instruction text."""
-        from bef_zk.capsule.agent_runtime import AgentRuntime
-        from bef_zk.capsule.adapters import wrap_function
+        from capseal.agent_runtime import AgentRuntime
+        from capseal.adapters import wrap_function
 
         output_dir = tmp_path / "test_run"
         runtime = AgentRuntime(output_dir=output_dir)
@@ -139,8 +139,8 @@ class TestWrapFunction:
 
     def test_wrap_chaining(self, tmp_path):
         """Verify that wrapped function calls are properly chained."""
-        from bef_zk.capsule.agent_runtime import AgentRuntime
-        from bef_zk.capsule.adapters import wrap_function
+        from capseal.agent_runtime import AgentRuntime
+        from capseal.adapters import wrap_function
 
         output_dir = tmp_path / "test_run"
         runtime = AgentRuntime(output_dir=output_dir)
@@ -178,8 +178,8 @@ class TestWrapClassMethod:
 
     def test_wrap_method(self, tmp_path):
         """Wrap a class method."""
-        from bef_zk.capsule.agent_runtime import AgentRuntime
-        from bef_zk.capsule.adapters.generic_adapter import wrap_class_method
+        from capseal.agent_runtime import AgentRuntime
+        from capseal.adapters.generic_adapter import wrap_class_method
 
         output_dir = tmp_path / "test_run"
         runtime = AgentRuntime(output_dir=output_dir)
@@ -202,8 +202,8 @@ class TestWrapClassMethod:
 
     def test_wrap_multiple_methods(self, tmp_path):
         """Wrap multiple methods of a class."""
-        from bef_zk.capsule.agent_runtime import AgentRuntime
-        from bef_zk.capsule.adapters.generic_adapter import wrap_class_method
+        from capseal.agent_runtime import AgentRuntime
+        from capseal.adapters.generic_adapter import wrap_class_method
 
         output_dir = tmp_path / "test_run"
         runtime = AgentRuntime(output_dir=output_dir)
@@ -233,9 +233,9 @@ class TestComplexWorkflow:
 
     def test_mixed_calls(self, tmp_path):
         """Mix wrapped functions, direct record, and class methods."""
-        from bef_zk.capsule.agent_runtime import AgentRuntime
-        from bef_zk.capsule.adapters import wrap_function
-        from bef_zk.capsule.adapters.generic_adapter import wrap_class_method
+        from capseal.agent_runtime import AgentRuntime
+        from capseal.adapters import wrap_function
+        from capseal.adapters.generic_adapter import wrap_class_method
 
         output_dir = tmp_path / "test_run"
         runtime = AgentRuntime(output_dir=output_dir)

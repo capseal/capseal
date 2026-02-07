@@ -82,9 +82,6 @@ Changelog = "https://github.com/capseal/capseal/blob/main/CHANGELOG.md"
 
 [project.scripts]
 capseal = "bef_zk.capsule.cli:main"
-capsule = "bef_zk.capsule.cli:main"
-# Legacy alias
-capsule-bench = "capsule_bench.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["bef_zk*", "backends*", "capsule_bench*", "server*"]

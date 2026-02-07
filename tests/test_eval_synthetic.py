@@ -17,7 +17,7 @@ class TestEvalSyntheticEndToEnd:
     def capseal_cmd(self):
         """Return the capseal command path."""
         # Use the installed capseal or fall back to direct Python invocation
-        return [sys.executable, "-m", "capseal_cli.main"]
+        return [sys.executable, "-m", "capseal.cli"]
 
     def test_eval_help(self, capseal_cmd):
         """Eval command shows help."""
@@ -31,7 +31,7 @@ class TestEvalSyntheticEndToEnd:
 
     def test_eval_synthetic_creates_artifacts(self, tmp_project):
         """Synthetic eval creates expected artifacts."""
-        from bef_zk.capsule.cli.eval_cmd import eval_command
+        from capseal.cli.eval_cmd import eval_command
         from click.testing import CliRunner
 
         runner = CliRunner()
@@ -70,7 +70,7 @@ class TestEvalSyntheticEndToEnd:
 
     def test_eval_posteriors_are_updated(self, tmp_project):
         """Posteriors are updated after each round."""
-        from bef_zk.capsule.cli.eval_cmd import eval_command
+        from capseal.cli.eval_cmd import eval_command
         from click.testing import CliRunner
 
         runner = CliRunner()
@@ -96,8 +96,8 @@ class TestEvalSyntheticEndToEnd:
 
     def test_eval_receipts_verify(self, tmp_project):
         """Generated receipts pass verification."""
-        from bef_zk.capsule.cli.eval_cmd import eval_command
-        from bef_zk.shared.receipts import verify_run_receipt
+        from capseal.cli.eval_cmd import eval_command
+        from capseal.shared.receipts import verify_run_receipt
         from click.testing import CliRunner
 
         runner = CliRunner()
@@ -121,7 +121,7 @@ class TestEvalSyntheticEndToEnd:
 
     def test_eval_deterministic_with_seed(self, tmp_project):
         """Same seed produces consistent structure and similar results."""
-        from bef_zk.capsule.cli.eval_cmd import eval_command
+        from capseal.cli.eval_cmd import eval_command
         from click.testing import CliRunner
         import shutil
 

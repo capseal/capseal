@@ -10,7 +10,7 @@ class TestFeatureExtraction:
 
     def test_extract_simple_diff(self, sample_diff):
         """Extract features from a simple diff."""
-        from bef_zk.shared.features import extract_patch_features
+        from capseal.shared.features import extract_patch_features
 
         features = extract_patch_features(sample_diff, [{"severity": "high"}])
 
@@ -20,7 +20,7 @@ class TestFeatureExtraction:
 
     def test_discretize_features(self):
         """Discretize raw features to grid levels."""
-        from bef_zk.shared.features import discretize_features
+        from capseal.shared.features import discretize_features
 
         raw = {
             "lines_changed": 5,  # <= 10 → 0
@@ -35,7 +35,7 @@ class TestFeatureExtraction:
 
     def test_features_to_grid_idx_roundtrip(self):
         """Grid index encoding is reversible."""
-        from bef_zk.shared.features import features_to_grid_idx, grid_idx_to_features
+        from capseal.shared.features import features_to_grid_idx, grid_idx_to_features
 
         for levels in [[0, 0, 0, 0, 0], [1, 2, 3, 0, 1], [3, 3, 3, 3, 3]]:
             idx = features_to_grid_idx(levels)
@@ -48,7 +48,7 @@ class TestAcquisitionScoring:
 
     def test_acquisition_score_shape(self):
         """Acquisition scores have correct shape."""
-        from bef_zk.shared.scoring import compute_acquisition_score
+        from capseal.shared.scoring import compute_acquisition_score
 
         n_points = 100
         alpha = np.ones(n_points, dtype=np.int64)
@@ -61,7 +61,7 @@ class TestAcquisitionScoring:
 
     def test_select_targets_top_k(self):
         """Select targets picks top-K highest scores."""
-        from bef_zk.shared.scoring import select_targets
+        from capseal.shared.scoring import select_targets
 
         scores = np.array([0.1, 0.5, 0.3, 0.9, 0.2])
         selected = select_targets(scores, K=2)
@@ -72,7 +72,7 @@ class TestAcquisitionScoring:
 
     def test_select_targets_deterministic(self):
         """Select targets is deterministic for tie-breaking."""
-        from bef_zk.shared.scoring import select_targets
+        from capseal.shared.scoring import select_targets
 
         scores = np.array([0.5, 0.5, 0.5, 0.5])
         selected1 = select_targets(scores, K=2)
@@ -86,7 +86,7 @@ class TestGateDecisions:
 
     def test_score_patch_with_posteriors(self, posteriors_file, sample_diff):
         """Score a patch against learned posteriors."""
-        from bef_zk.shared.features import score_patch
+        from capseal.shared.features import score_patch
 
         result = score_patch(
             sample_diff,
@@ -101,7 +101,7 @@ class TestGateDecisions:
 
     def test_high_q_leads_to_skip(self, posteriors_file):
         """High failure probability leads to skip decision."""
-        from bef_zk.shared.features import score_patch
+        from capseal.shared.features import score_patch
 
         # Create a diff that maps to grid_idx 0 (which has high q in fixture)
         minimal_diff = "+++ a.py\n+ x = 1"
@@ -118,7 +118,7 @@ class TestTubeMetrics:
 
     def test_tube_metrics_basic(self):
         """Compute basic tube metrics."""
-        from bef_zk.shared.scoring import compute_tube_metrics
+        from capseal.shared.scoring import compute_tube_metrics
 
         n_points = 100
         alpha = np.ones(n_points, dtype=np.int64)
@@ -133,7 +133,7 @@ class TestTubeMetrics:
 
     def test_tube_coverage_increases_with_samples(self):
         """More samples with successes → higher tube coverage."""
-        from bef_zk.shared.scoring import compute_tube_metrics
+        from capseal.shared.scoring import compute_tube_metrics
 
         n_points = 100
 

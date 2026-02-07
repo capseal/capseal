@@ -2893,7 +2893,77 @@ Be strategic about parallelization. Each subagent works independently."""
                             if skipped_items:
                                 print(f"{DIM}      Skipped (high q): {', '.join(i.file_path for i in skipped_items[:3])}{'...' if len(skipped_items) > 3 else ''}{RESET}")
                     else:
-                        if not json_output:
+                        # Bootstrap mode: no posteriors found, run quick calibration
+                        bootstrap_disabled = "--no-bootstrap" in parts
+                        if not bootstrap_disabled and not json_output:
+                            print(f"{YELLOW}      No learned model found. Running quick calibration (~$0.50)...{RESET}")
+                            print(f"{DIM}      (Use --no-bootstrap to skip){RESET}")
+
+                            # Run quick bootstrap (1 round, 16 targets)
+                            try:
+                                import subprocess
+                                bootstrap_result = subprocess.run(
+                                    ["capseal", "learn", str(target_path), "--rounds", "1", "--targets-per-round", "8", "--budget", "0.50", "--quiet"],
+                                    capture_output=True,
+                                    timeout=120,
+                                    cwd=str(target_path),
+                                )
+
+                                # Check if posteriors now exist
+                                posteriors = target_path / '.capseal' / 'models' / 'beta_posteriors.npz'
+                                if posteriors.exists():
+                                    print(f"{GREEN}      Calibration complete. Re-running gate...{RESET}")
+                                    # Re-run gate scoring with new posteriors
+                                    original_count = len(plan.items)
+                                    filtered_items = []
+                                    skipped_items = []
+                                    review_items = []
+                                    gate_decisions = []
+
+                                    for item in plan.items:
+                                        diff_preview = f"+++ {item.file_path}\n{item.description}"
+                                        findings = [{"severity": "medium"}] if item.category == "security" else []
+                                        score_result = score_plan_item(
+                                            {"diff_preview": diff_preview, "file_path": item.file_path, "findings": findings},
+                                            posteriors,
+                                        )
+                                        gate_decisions.append({
+                                            "item_id": item.item_id,
+                                            "file_path": item.file_path,
+                                            "grid_idx": score_result["grid_idx"],
+                                            "q": score_result["q"],
+                                            "uncertainty": score_result["uncertainty"],
+                                            "decision": score_result["decision"],
+                                            "reason": score_result["reason"],
+                                        })
+                                        if score_result["decision"] == "skip":
+                                            skipped_items.append(item)
+                                        elif score_result["decision"] == "human_review":
+                                            review_items.append(item)
+                                            filtered_items.append(item)
+                                        else:
+                                            filtered_items.append(item)
+
+                                    plan.items = filtered_items
+                                    gate_result = {
+                                        "posteriors_path": str(posteriors),
+                                        "original_items": original_count,
+                                        "filtered_items": len(filtered_items),
+                                        "skipped": len(skipped_items),
+                                        "human_review": len(review_items),
+                                        "decisions": gate_decisions,
+                                        "bootstrapped": True,
+                                    }
+                                    gate_dir = run_path / "gate"
+                                    gate_dir.mkdir(exist_ok=True)
+                                    (gate_dir / "gate_result.json").write_text(json.dumps(gate_result, indent=2))
+                                    print(f"      {original_count} items: {GREEN}✓ {len(filtered_items) - len(review_items)} pass{RESET}, "
+                                          f"{YELLOW}? {len(review_items)} review{RESET}, {RED}⊘ {len(skipped_items)} skip{RESET}")
+                                else:
+                                    print(f"{DIM}      Bootstrap failed, proceeding without gate{RESET}")
+                            except Exception as e:
+                                print(f"{DIM}      Bootstrap failed: {e}, proceeding without gate{RESET}")
+                        elif not json_output:
                             print(f"{DIM}      No posteriors found, skipping gate{RESET}")
 
                 except ImportError as e:

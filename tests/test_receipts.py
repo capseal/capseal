@@ -13,7 +13,7 @@ class TestRoundReceipts:
 
     def test_build_round_receipt(self, tmp_project):
         """Build a receipt for a round directory."""
-        from bef_zk.shared.receipts import build_round_receipt
+        from capseal.shared.receipts import build_round_receipt
 
         # Create a mock round directory
         round_dir = tmp_project / ".capseal" / "runs" / "R0001_test"
@@ -47,7 +47,7 @@ class TestRoundReceipts:
 
     def test_verify_round_receipt_passes(self, tmp_project):
         """Verify a valid round receipt."""
-        from bef_zk.shared.receipts import build_round_receipt, verify_round_receipt
+        from capseal.shared.receipts import build_round_receipt, verify_round_receipt
 
         round_dir = tmp_project / ".capseal" / "runs" / "R0001_test"
         round_dir.mkdir(parents=True)
@@ -68,7 +68,7 @@ class TestRoundReceipts:
 
     def test_verify_detects_tampering(self, tmp_project):
         """Verify detects when artifacts are modified."""
-        from bef_zk.shared.receipts import build_round_receipt, verify_round_receipt
+        from capseal.shared.receipts import build_round_receipt, verify_round_receipt
 
         round_dir = tmp_project / ".capseal" / "runs" / "R0001_test"
         round_dir.mkdir(parents=True)
@@ -99,7 +99,7 @@ class TestRunReceipts:
 
     def test_build_run_receipt_chains_rounds(self, tmp_project):
         """Run receipt chains multiple round receipts."""
-        from bef_zk.shared.receipts import build_round_receipt, build_run_receipt
+        from capseal.shared.receipts import build_round_receipt, build_run_receipt
 
         run_dir = tmp_project / ".capseal" / "runs" / "test_run"
         run_dir.mkdir(parents=True)
@@ -132,7 +132,7 @@ class TestRunReceipts:
 
     def test_chain_hash_is_deterministic(self, tmp_project):
         """Chain hash is deterministic given same inputs."""
-        from bef_zk.shared.receipts import build_round_receipt, build_run_receipt
+        from capseal.shared.receipts import build_round_receipt, build_run_receipt
 
         run_dir = tmp_project / ".capseal" / "runs" / "test_run"
         run_dir.mkdir(parents=True)
@@ -158,7 +158,7 @@ class TestHashFunctions:
 
     def test_hash_str_deterministic(self):
         """hash_str is deterministic."""
-        from bef_zk.shared.receipts import hash_str
+        from capseal.shared.receipts import hash_str
 
         h1 = hash_str("hello world")
         h2 = hash_str("hello world")
@@ -168,7 +168,7 @@ class TestHashFunctions:
 
     def test_canonical_json_sorted(self):
         """canonical_json produces sorted, compact output."""
-        from bef_zk.shared.receipts import canonical_json
+        from capseal.shared.receipts import canonical_json
 
         obj = {"z": 1, "a": 2, "m": 3}
         result = canonical_json(obj)

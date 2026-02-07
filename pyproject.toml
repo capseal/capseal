@@ -64,7 +64,7 @@ full = [
 ]
 
 [project.scripts]
-capseal = "capseal_cli.main:main"
+capseal = "capseal.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/capseal/capseal"
@@ -72,16 +72,15 @@ Documentation = "https://github.com/capseal/capseal#readme"
 Repository = "https://github.com/capseal/capseal"
 
 [tool.setuptools.packages.find]
-where = [".", "BEF-main", "otherstuff"]
-include = ["capseal", "capseal_cli*", "bef_zk*", "backends*", "agent_bench*", "canonical*", "server*"]
+where = ["src", "BEF-main"]
+include = ["capseal*", "bef_zk*", "backends*", "canonical*", "server*"]
 
 [tool.setuptools.package-dir]
-"" = "."
+"" = "src"
 "bef_zk" = "BEF-main/bef_zk"
 "backends" = "BEF-main/backends"
 "canonical" = "BEF-main/canonical"
 "server" = "BEF-main/server"
-"agent_bench" = "otherstuff/agent_bench"
 
 # =============================================================================
 # Tool Configuration
@@ -91,12 +90,12 @@ include = ["capseal", "capseal_cli*", "bef_zk*", "backends*", "agent_bench*", "c
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 addopts = "-v --tb=short"
-pythonpath = ["BEF-main", "otherstuff"]
+pythonpath = ["src", "BEF-main"]
 
 [tool.ruff]
 target-version = "py310"
 line-length = 100
-src = ["capseal_cli", "BEF-main/bef_zk/shared", "BEF-main/bef_zk/capsule/cli/eval_cmd.py"]
+src = ["src/capseal"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]

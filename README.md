@@ -1,50 +1,65 @@
 # CapSeal
 
-**Proof-carrying execution for AI agents.**
+Predictive gating and cryptographic verification for AI code changes. CapSeal learns which patches fail on your codebase, gates risky changes before they run, and produces verifiable receipts proving what happened.
 
-CapSeal makes AI agent execution provable. It learns which actions will fail before you run them, gates risky actions, and generates cryptographic proofs of everything that happens. Verify any run in under a second.
-
-## Try It
+## Install
 
 ```bash
+git clone <repo>
+cd capseal
 pip install -e .
-capseal demo
 ```
 
-The demo creates a sample project, learns which patches fail, gates a risky patch, generates proofs, and shows tamper detection — all in under 30 seconds.
-
-### Real Workflow
+## Quick start
 
 ```bash
-# 1. Learn where patches fail
-capseal eval src/ --rounds 10 --synthetic
-
-# 2. Gate patches using what you learned
-capseal review src/ --gate
-
-# 3. Verify the proofs
-capseal verify-capsule .capseal/runs/latest/eval_capsule.json
+capseal init                    # set up workspace
+capseal scan .                  # find issues with semgrep
+capseal learn . --rounds 5      # learn which patches succeed/fail ($0.50-2.00)
+capseal fix . --dry-run         # preview what would be fixed
+capseal fix .                   # generate verified patches
+capseal verify .capseal/runs/latest.cap   # verify the sealed run
 ```
 
-## Integrate With Your Agent
+## How it works
 
-```python
-from capseal import AgentRuntime
-from pathlib import Path
+**Scan** — Find issues in your codebase using Semgrep's rule library.
 
-with AgentRuntime(output_dir=Path(".capseal/runs/my-agent")) as runtime:
-    runtime.record_simple(
-        action_type="tool_call",
-        instruction="Query database",
-        inputs={"query": "SELECT * FROM users"},
-        outputs={"rows": 42},
-        success=True,
-    )
-# Proof generated automatically on exit
+**Learn** — CapSeal runs AI-generated patches against your codebase in rounds, tracking which succeed and fail across a 5-dimensional feature grid. Each round updates Beta posteriors that model failure probability across 1024 grid regions.
+
+**Fix** — Generate patches for issues, gated by the learned model. High-risk patches (>60% predicted failure) are skipped. Low-risk patches are generated, verified, and sealed into a cryptographic receipt.
+
+**Verify** — Every run is sealed into a `.cap` file with a hash-chained receipt. These receipts can be independently verified, giving you a tamper-evident audit trail.
+
+## CLI Reference
+
+| Command | Description |
+|---------|-------------|
+| `capseal init` | Initialize workspace |
+| `capseal scan .` | Find issues with Semgrep |
+| `capseal learn . --rounds N` | Learn risk model (default 5 rounds, $5 budget) |
+| `capseal fix .` | Generate verified patches, gated by learned model |
+| `capseal fix . --dry-run` | Preview patches without generating |
+| `capseal fix . --apply` | Generate and apply patches |
+| `capseal review . --gate` | Gate-only mode (no patch generation) |
+| `capseal verify <file.cap>` | Verify sealed run |
+| `capseal report <run>` | Generate summary report |
+| `capseal watch .` | CI integration (JSON output) |
+| `capseal demo` | 30-second interactive demo |
+| `capseal advanced` | Power user commands (shell, trace, merge, refactor) |
+
+## Configuration
+
+```
+Learned models:    .capseal/models/beta_posteriors.npz
+Run artifacts:     .capseal/runs/<timestamp>-<type>/
+Sealed runs:       .capseal/runs/<timestamp>-<type>.cap
+Gate threshold:    --threshold 0.6 (failure probability cutoff)
+Budget:            --budget 5.0 (max dollars to spend learning)
 ```
 
-For framework adapters (LangChain, OpenAI), detailed API docs, and architecture details, see [docs/](docs/).
+## Requirements
 
-## License
-
-MIT
+- Python 3.10+
+- Semgrep (`pip install semgrep`)
+- OpenAI API key (for learning and fix commands)

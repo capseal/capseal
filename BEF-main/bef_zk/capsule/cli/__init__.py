@@ -56,6 +56,10 @@ from .refactor_cmd import (
 )
 from .eval_cmd import eval_command
 from .watch_cmd import watch_command
+from .agent_cmd import agent_group
+from .learn_cmd import learn_command
+from .report_cmd import report_command
+from .scan_cmd import scan_command
 from .trace_cmd import (
     trace_command,
     verify_trace_command,
@@ -134,7 +138,8 @@ cli.add_command(attest_command, name="attest")
 cli.add_command(attest_diff_command, name="attest-diff")
 cli.add_command(verify_review_command, name="verify-review")
 cli.add_command(agent_review_command, name="agent-review")
-cli.add_command(review_orchestrator_command, name="review")
+cli.add_command(review_orchestrator_command, name="review-shards")  # Old complex review
+cli.add_command(scan_command, name="review")  # Simple: capseal review . --gate
 cli.add_command(dag_command, name="dag")
 cli.add_command(verify_rollup_command, name="verify-rollup")
 cli.add_command(demo_review_command, name="demo-review")
@@ -164,6 +169,14 @@ cli.add_command(eval_command, name="eval")
 
 # CI integration
 cli.add_command(watch_command, name="watch")
+
+# Agent loop commands
+cli.add_command(agent_group, name="agent")
+
+# Product commands (user-facing)
+cli.add_command(learn_command, name="learn")
+cli.add_command(report_command, name="report")
+cli.add_command(scan_command, name="scan")
 
 
 def main() -> None:
