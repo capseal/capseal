@@ -61,6 +61,9 @@ def _load_capseal_env(target_path: Path) -> None:
 @click.option("--model", default="gpt-4o-mini", help="LLM model")
 @click.option("--max-workers", default=4, type=int, help="Max parallel agents")
 @click.option("--json", "output_json", is_flag=True, help="Output JSON for CI")
+@click.option("--profile", type=click.Choice(["security", "quality", "bugs", "all", "custom"]),
+              default=None, help="Scan profile (default: from config or 'auto')")
+@click.option("--rules", type=click.Path(exists=True), default=None, help="Custom semgrep rules path")
 def fix_command(
     path: str,
     dry_run: bool,
@@ -70,6 +73,8 @@ def fix_command(
     model: str,
     max_workers: int,
     output_json: bool,
+    profile: str | None = None,
+    rules: str | None = None,
 ) -> None:
     """Generate verified patches, gated by learned risk model.
 
@@ -114,6 +119,15 @@ def fix_command(
     runs_dir = capseal_dir / "runs"
     runs_dir.mkdir(parents=True, exist_ok=True)
 
+    # Load config for default profile
+    config_json = None
+    config_file = capseal_dir / "config.json"
+    if config_file.exists():
+        try:
+            config_json = json.loads(config_file.read_text())
+        except (json.JSONDecodeError, OSError):
+            pass
+
     # Create run directory
     timestamp = datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
     run_dir = runs_dir / f"{timestamp}-fix"
@@ -142,10 +156,10 @@ def fix_command(
         click.echo("[1/5] Scanning with Semgrep...")
 
     try:
+        from .scan_profiles import build_semgrep_args
+        semgrep_cmd = build_semgrep_args(target_path, profile=profile, custom_rules=rules, config_json=config_json)
         result = subprocess.run(
-            ["semgrep", "--config", "auto", "--json",
-             "--exclude", "node_modules", "--exclude", ".venv", "--exclude", "vendor",
-             str(target_path)],
+            semgrep_cmd,
             capture_output=True,
             text=True,
             timeout=300,

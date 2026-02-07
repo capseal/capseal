@@ -1,15 +1,16 @@
 """CapSeal CLI - Verified AI Code Changes.
 
 Core Commands:
-    init    - Initialize workspace
-    scan    - Find issues with Semgrep
-    learn   - Build risk model from patch outcomes
-    fix     - Generate verified patches, gated by risk model
-    review  - Gate findings based on learned model
-    verify  - Verify receipts and proofs
-    report  - Generate human-readable summary
-    watch   - CI integration (JSON output)
-    demo    - 30-second interactive demo
+    autopilot - Full pipeline, zero config (init → learn → fix → verify)
+    init      - Initialize workspace
+    scan      - Find issues with Semgrep
+    learn     - Build risk model from patch outcomes
+    fix       - Generate verified patches, gated by risk model
+    review    - Gate findings based on learned model
+    verify    - Verify receipts and proofs
+    report    - Generate human-readable summary
+    watch     - CI integration (JSON output)
+    demo      - 30-second interactive demo
 
 Advanced commands available via: capseal advanced <command>
 """
@@ -26,6 +27,8 @@ from .verify import verify_command
 from .report_cmd import report_command
 from .watch_cmd import watch_command
 from .demo_cmd import demo_command
+from .autopilot_cmd import autopilot_command
+from .doctor_cmd import doctor_command as doctor_top_command
 from .workflow_cmd import verify_capsule_command
 
 # Advanced command imports
@@ -39,7 +42,7 @@ from .audit import audit_command, audit_fetch_command
 from .sandbox_cmd import sandbox_group
 from .shell import shell_command, run_shell
 from .fetch import fetch_command
-from .doctor import doctor
+from .doctor import doctor as doctor_advanced
 from .docs_generator import docs_group
 from .pipeline import pipeline_group
 from .greptile import greptile_group
@@ -88,7 +91,11 @@ def cli() -> None:
     """CapSeal — Verified AI Code Changes
 
     \b
-    Quick start:
+    Zero-config:
+      capseal autopilot .        Full pipeline, zero decisions
+
+    \b
+    Step-by-step:
       capseal scan .             Find issues
       capseal learn .            Build risk model
       capseal fix . --dry-run    Preview gated patches
@@ -112,6 +119,8 @@ cli.add_command(verify_command, name="verify")
 cli.add_command(report_command, name="report")
 cli.add_command(watch_command, name="watch")
 cli.add_command(demo_command, name="demo")
+cli.add_command(autopilot_command, name="autopilot")
+cli.add_command(doctor_top_command, name="doctor")
 
 
 @cli.command("mcp-serve")
@@ -257,7 +266,7 @@ advanced.add_command(docs_group, name="docs")
 advanced.add_command(pipeline_group, name="pipeline")
 
 # Diagnostics & Inspection
-advanced.add_command(doctor, name="doctor")
+advanced.add_command(doctor_advanced, name="doctor")
 advanced.add_command(inspect_command, name="inspect")
 advanced.add_command(audit_command, name="audit")
 advanced.add_command(audit_fetch_command, name="audit-fetch")

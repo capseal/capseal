@@ -27,26 +27,46 @@ from capseal.shared.features import (
 @click.option("--gate", is_flag=True, help="Gate findings based on learned model")
 @click.option("--json", "output_json", is_flag=True, help="Output JSON instead of human-readable")
 @click.option("--threshold", type=float, default=0.6, help="Failure probability threshold for gating (default: 0.6)")
-def scan_command(path: str, gate: bool, output_json: bool, threshold: float) -> None:
+@click.option("--profile", type=click.Choice(["security", "quality", "bugs", "all", "custom"]),
+              default=None, help="Scan profile (default: from config or 'auto')")
+@click.option("--rules", type=click.Path(exists=True), default=None, help="Custom semgrep rules path (use with --profile custom)")
+def scan_command(path: str, gate: bool, output_json: bool, threshold: float, profile: str | None, rules: str | None) -> None:
     """Scan codebase for issues using Semgrep.
 
+    \b
     Examples:
-        capseal scan .              # Find all issues
-        capseal scan . --json       # CI-friendly JSON output
+        capseal scan .                         # Find all issues
+        capseal scan . --profile security      # Security-focused scan
+        capseal scan . --profile quality        # Code quality scan
+        capseal scan . --profile all            # Everything
+        capseal scan . --json                  # CI-friendly JSON output
     """
+    from .scan_profiles import build_semgrep_args, PROFILE_DISPLAY
+
     target_path = Path(path).resolve()
     capseal_dir = target_path / ".capseal"
     model_path = capseal_dir / "models" / "beta_posteriors.npz"
 
+    # Load config for default profile
+    config_json = None
+    config_path = capseal_dir / "config.json"
+    if config_path.exists():
+        try:
+            config_json = json.loads(config_path.read_text())
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    effective_profile = profile or (config_json or {}).get("scan_profile")
+
     # Step 1: Scan with Semgrep
     if not output_json:
-        click.echo("Scanning with Semgrep...")
+        profile_label = PROFILE_DISPLAY.get(effective_profile, effective_profile or "auto")
+        click.echo(f"Scanning with Semgrep ({profile_label})...")
 
     try:
+        semgrep_cmd = build_semgrep_args(target_path, profile=profile, custom_rules=rules, config_json=config_json)
         result = subprocess.run(
-            ["semgrep", "--config", "auto", "--json",
-             "--exclude", "node_modules", "--exclude", ".venv", "--exclude", "vendor",
-             str(target_path)],
+            semgrep_cmd,
             capture_output=True,
             text=True,
             timeout=300,

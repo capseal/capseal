@@ -176,12 +176,13 @@ def run_init_tui(target_dir: str = "."):
         choices=[
             questionary.Choice("Anthropic (Claude)", value="anthropic"),
             questionary.Choice("OpenAI", value="openai"),
+            questionary.Choice("Google (Gemini)", value="google"),
             questionary.Choice("Custom endpoint", value="custom"),
         ],
         style=CAPSEAL_STYLE,
     ).ask()
 
-    # ── API Key ──────────────────────────────────────────────────────────
+    # ── API Key / Subscription ─────────────────────────────────────────
     if provider == "custom":
         endpoint = questionary.text(
             "Custom API endpoint URL",
@@ -193,53 +194,96 @@ def run_init_tui(target_dir: str = "."):
     env_key_map = {
         "anthropic": "ANTHROPIC_API_KEY",
         "openai": "OPENAI_API_KEY",
+        "google": "GOOGLE_API_KEY",
         "custom": "CAPSEAL_API_KEY",
     }
     env_var = env_key_map[provider]
-    existing_key = os.environ.get(env_var, "")
 
-    if existing_key:
-        use_existing = questionary.confirm(
-            f"Found {env_var} in environment ({mask_key(existing_key)}). Use it?",
-            default=True,
+    # Ask authentication method (skip for custom endpoints)
+    auth_method = "api_key"
+    api_key = ""
+
+    if provider != "custom":
+        console.print("│")
+        auth_method = questionary.select(
+            "Authentication method",
+            choices=[
+                questionary.Choice("API Key", value="api_key"),
+                questionary.Choice("Subscription (uses your existing Claude Max / ChatGPT Plus / etc.)", value="subscription"),
+            ],
             style=CAPSEAL_STYLE,
         ).ask()
-        if use_existing:
-            api_key = existing_key
+
+    if auth_method == "subscription":
+        cli_instructions = {
+            "anthropic": "Anthropic: claude auth login",
+            "openai": "OpenAI:    Log in at platform.openai.com",
+            "google": "Google:    gcloud auth login",
+        }
+        print_box("Subscription mode", [
+            "CapSeal will use your existing subscription via CLI proxy.",
+            "Make sure you're logged in to your provider's CLI:",
+            "",
+            cli_instructions.get(provider, f"{provider}: check your provider docs"),
+        ])
+    else:
+        existing_key = os.environ.get(env_var, "")
+
+        if existing_key:
+            use_existing = questionary.confirm(
+                f"Found {env_var} in environment ({mask_key(existing_key)}). Use it?",
+                default=True,
+                style=CAPSEAL_STYLE,
+            ).ask()
+            if use_existing:
+                api_key = existing_key
+            else:
+                api_key = questionary.password(
+                    f"Enter {env_var}",
+                    style=CAPSEAL_STYLE,
+                ).ask()
         else:
             api_key = questionary.password(
                 f"Enter {env_var}",
                 style=CAPSEAL_STYLE,
             ).ask()
-    else:
-        api_key = questionary.password(
-            f"Enter {env_var}",
-            style=CAPSEAL_STYLE,
-        ).ask()
 
-    if not api_key:
-        print_warn("No API key provided. You can add one later in .capseal/config.json")
-        print_warn("Without an API key, only capseal scan and capseal review --gate will work.")
-        api_key = ""
+        if not api_key:
+            print_warn("No API key provided. You can add one later in .capseal/config.json")
+            print_warn("Without an API key, only capseal scan and capseal review --gate will work.")
+            api_key = ""
 
-    if api_key:
-        print_box(f"{env_var}", [
-            f"Key: {mask_key(api_key)}",
-            f"Saved to .capseal/config.json",
-        ])
+        if api_key:
+            print_box(f"{env_var}", [
+                f"Key: {mask_key(api_key)}",
+                f"Saved to .capseal/config.json",
+            ])
 
     # ── Model selection ──────────────────────────────────────────────────
     if provider == "anthropic":
         model_choices = [
             questionary.Choice("claude-sonnet-4-20250514 (recommended)", value="claude-sonnet-4-20250514"),
-            questionary.Choice("claude-opus-4-20250514", value="claude-opus-4-20250514"),
-            questionary.Choice("claude-haiku-4-5-20251001", value="claude-haiku-4-5-20251001"),
+            questionary.Choice("claude-opus-4-6", value="claude-opus-4-6"),
+            questionary.Choice("claude-opus-4-5", value="claude-opus-4-5"),
+            questionary.Choice("claude-haiku-4-5", value="claude-haiku-4-5"),
+            questionary.Choice("Other (enter manually)", value="_custom"),
         ]
     elif provider == "openai":
         model_choices = [
-            questionary.Choice("gpt-4o (recommended)", value="gpt-4o"),
-            questionary.Choice("gpt-4o-mini", value="gpt-4o-mini"),
+            questionary.Choice("chatgpt-5.2 (recommended)", value="chatgpt-5.2"),
+            questionary.Choice("gpt-4o", value="gpt-4o"),
+            questionary.Choice("gpt-4.1", value="gpt-4.1"),
             questionary.Choice("o3", value="o3"),
+            questionary.Choice("o4-mini", value="o4-mini"),
+            questionary.Choice("Other (enter manually)", value="_custom"),
+        ]
+    elif provider == "google":
+        model_choices = [
+            questionary.Choice("gemini-3-pro (recommended)", value="gemini-3-pro"),
+            questionary.Choice("gemini-3-flash", value="gemini-3-flash"),
+            questionary.Choice("gemini-2.5-pro", value="gemini-2.5-pro"),
+            questionary.Choice("gemini-2.5-flash", value="gemini-2.5-flash"),
+            questionary.Choice("Other (enter manually)", value="_custom"),
         ]
     else:
         model_choices = None
@@ -251,6 +295,11 @@ def run_init_tui(target_dir: str = "."):
             choices=model_choices,
             style=CAPSEAL_STYLE,
         ).ask()
+        if model == "_custom":
+            model = questionary.text(
+                "Enter model name",
+                style=CAPSEAL_STYLE,
+            ).ask()
     else:
         console.print("│")
         model = questionary.text(
@@ -457,9 +506,17 @@ Gate decisions from CapSeal are not suggestions. They are requirements.
                 except Exception as e:
                     print_warn(f"Failed to install skill: {e}")
 
-        elif agent == "cursor":
-            print_box("Cursor integration", [
-                "Add to Cursor MCP settings (~/.cursor/mcp.json):",
+        elif agent in ("cursor", "windsurf", "cline"):
+            agent_display = {"cursor": "Cursor", "windsurf": "Windsurf", "cline": "Cline"}
+            config_paths = {
+                "cursor": Path.home() / ".cursor" / "mcp.json",
+                "windsurf": Path.home() / ".windsurf" / "mcp.json",
+                "cline": Path.home() / ".cline" / "mcp.json",
+            }
+            mcp_config_path = config_paths[agent]
+
+            print_box(f"{agent_display[agent]} integration", [
+                f"MCP config: {mcp_config_path}",
                 '  {',
                 '    "mcpServers": {',
                 '      "capseal": {',
@@ -469,37 +526,47 @@ Gate decisions from CapSeal are not suggestions. They are requirements.
                 '    }',
                 '  }',
             ])
-            integrations["cursor"] = {"type": "mcp", "configured": False}
+            integrations[agent] = {"type": "mcp", "configured": False}
 
-        elif agent == "windsurf":
-            print_box("Windsurf integration", [
-                "Add to Windsurf MCP settings:",
-                '  {',
-                '    "capseal": {',
-                '      "command": "capseal",',
-                f'      "args": ["mcp-serve", "-w", "{workspace_path}"]',
-                '    }',
-                '  }',
-            ])
-            integrations["windsurf"] = {"type": "mcp", "configured": False}
+            auto_config = questionary.confirm(
+                f"Auto-configure {agent_display[agent]} now?",
+                default=True,
+                style=CAPSEAL_STYLE,
+            ).ask()
 
-        elif agent == "cline":
-            print_box("Cline integration", [
-                "Add to Cline MCP settings (~/.cline/mcp.json):",
-                '  {',
-                '    "mcpServers": {',
-                '      "capseal": {',
-                '        "command": "capseal",',
-                f'        "args": ["mcp-serve", "-w", "{workspace_path}"]',
-                '      }',
-                '    }',
-                '  }',
-            ])
-            integrations["cline"] = {"type": "mcp", "configured": False}
+            if auto_config:
+                try:
+                    capseal_entry = {
+                        "command": "capseal",
+                        "args": ["mcp-serve", "-w", workspace_path],
+                    }
+
+                    if mcp_config_path.exists():
+                        existing = json.loads(mcp_config_path.read_text())
+                    else:
+                        existing = {}
+
+                    # Ensure mcpServers key exists
+                    if "mcpServers" not in existing:
+                        existing["mcpServers"] = {}
+
+                    if "capseal" in existing["mcpServers"]:
+                        print_success(f"{agent_display[agent]} already configured (capseal found in {mcp_config_path.name})")
+                    else:
+                        existing["mcpServers"]["capseal"] = capseal_entry
+                        mcp_config_path.parent.mkdir(parents=True, exist_ok=True)
+                        mcp_config_path.write_text(json.dumps(existing, indent=2) + "\n")
+                        print_success(f"{agent_display[agent]} configured ({mcp_config_path})")
+
+                    integrations[agent]["configured"] = True
+                except Exception as e:
+                    print_warn(f"Failed to configure {agent_display[agent]}: {e}")
+                    print_warn(f"You can manually edit {mcp_config_path}")
 
         elif agent == "custom-mcp":
             print_box("Custom MCP client", [
-                "CapSeal exposes 3 MCP tools:",
+                "CapSeal exposes 4 MCP tools:",
+                "  • capseal_status - Check session state (call at session start)",
                 "  • capseal_gate   - Gate before execution (approve/deny/flag)",
                 "  • capseal_record - Record after execution",
                 "  • capseal_seal   - Seal session into .cap receipt",
@@ -515,6 +582,20 @@ Gate decisions from CapSeal are not suggestions. They are requirements.
                 '  }',
             ])
             integrations["custom-mcp"] = {"type": "mcp", "configured": False}
+
+    # ── Scan focus ────────────────────────────────────────────────────────
+    console.print("│")
+    scan_profile = questionary.select(
+        "What should CapSeal focus on?",
+        choices=[
+            questionary.Choice("Security issues (injections, secrets, OWASP)", value="security"),
+            questionary.Choice("Code quality (style, complexity, refactoring)", value="quality"),
+            questionary.Choice("Bug detection (type errors, null checks, dead code)", value="bugs"),
+            questionary.Choice("Everything (recommended)", value="all"),
+        ],
+        default="all",
+        style=CAPSEAL_STYLE,
+    ).ask()
 
     # ── Advanced options ─────────────────────────────────────────────────
     gate_threshold = 0.6
@@ -567,9 +648,11 @@ Gate decisions from CapSeal are not suggestions. They are requirements.
         "version": "0.2.0",
         "provider": provider,
         "model": model,
-        "api_key_env": env_var,
+        "auth_method": auth_method,
+        "api_key_env": env_var if auth_method == "api_key" else None,
         "plan": plan,
         "license_key": license_key if license_key else None,
+        "scan_profile": scan_profile,
         "agents": agents,
         "integrations": integrations,
         "gate": {
@@ -585,7 +668,7 @@ Gate decisions from CapSeal are not suggestions. They are requirements.
     if endpoint:
         config["endpoint"] = endpoint
 
-    if api_key:
+    if auth_method == "api_key" and api_key:
         # Store key in a separate .env file, not in config.json
         env_path = capseal_dir / ".env"
         with open(env_path, "w") as f:
@@ -614,6 +697,7 @@ Gate decisions from CapSeal are not suggestions. They are requirements.
     provider_display = {
         "anthropic": "Anthropic (Claude)",
         "openai": "OpenAI",
+        "google": "Google (Gemini)",
         "custom": "Custom",
     }
 
@@ -624,14 +708,23 @@ Gate decisions from CapSeal are not suggestions. They are requirements.
         "enterprise": "Enterprise",
     }
 
+    profile_display = {
+        "security": "Security issues",
+        "quality": "Code quality",
+        "bugs": "Bug detection",
+        "all": "Everything",
+    }
+    auth_display = "Subscription (CLI proxy)" if auth_method == "subscription" else f"API Key ({env_var})"
     print_box("Workspace initialized", [
         f"Target:     {target}",
         f"Provider:   {provider_display.get(provider, provider)}",
         f"Model:      {model}",
+        f"Auth:       {auth_display}",
+        f"Focus:      {profile_display.get(scan_profile, scan_profile)}",
         f"Plan:       {plan_display.get(plan, plan)} {'[green](all features unlocked during beta)[/green]' if plan != 'free' else ''}",
         f"",
         f"Config:     .capseal/config.json",
-        f"Credentials:.capseal/.env",
+        f"Credentials:.capseal/.env" if auth_method == "api_key" else f"Credentials:subscription (no key stored)",
         f"Models:     .capseal/models/",
         f"Runs:       .capseal/runs/",
         f"Policy:     .capseal/policies/default.json",
@@ -648,18 +741,40 @@ Gate decisions from CapSeal are not suggestions. They are requirements.
         print_warn("Semgrep not found. Install with: pip install semgrep")
         print_warn("capseal scan and capseal learn require Semgrep.")
 
-    # ── Quick start ──────────────────────────────────────────────────────
-    console.print("│")
-    console.print("◇  [bold]Quick start[/bold]")
-    console.print("│")
-    console.print("│  [cyan]capseal learn . --rounds 5[/cyan]     Build risk model for this codebase")
-    console.print("│  [cyan]capseal fix . --dry-run[/cyan]        Preview what would be fixed")
-    console.print("│  [cyan]capseal fix .[/cyan]                  Generate verified patches")
-    console.print("│  [cyan]capseal verify[/cyan]                 Verify the sealed receipt")
+    # ── What happens next ─────────────────────────────────────────────────
+    selected_agents = [a for a in agents if a != "cli-only"]
+    if selected_agents:
+        agent_names = {
+            "claude-code": "Claude Code", "openclaw": "OpenClaw",
+            "cursor": "Cursor", "windsurf": "Windsurf", "cline": "Cline",
+        }
+        agent_list = " / ".join(agent_names.get(a, a) for a in selected_agents)
+        print_box("What happens next", [
+            "Your agents are now protected by CapSeal.",
+            "",
+            f"Next time you open {agent_list} in this",
+            "directory, every code change will be:",
+            "  1. Gated by the learned risk model",
+            "  2. Recorded with a cryptographic hash",
+            "  3. Sealed into a verifiable .cap receipt",
+            "",
+            "Quick commands:",
+            "  [cyan]capseal autopilot .[/cyan]    Full pipeline, one command",
+            "  [cyan]capseal doctor[/cyan]         Check everything is wired up",
+            "  [cyan]capseal verify[/cyan]         Verify any receipt",
+        ])
+    else:
+        print_box("Quick start", [
+            "[cyan]capseal autopilot .[/cyan]    Full pipeline, one command",
+            "[cyan]capseal learn . --rounds 5[/cyan]  Build risk model",
+            "[cyan]capseal fix . --dry-run[/cyan]     Preview fixes",
+            "[cyan]capseal doctor[/cyan]             Check setup",
+        ])
+
     console.print("│")
 
     # ── Auto-learn offer ─────────────────────────────────────────────────
-    if api_key:
+    if api_key or auth_method == "subscription":
         run_learn = questionary.confirm(
             f"Run capseal learn now? (~${learn_budget:.2f} budget, {learn_rounds} rounds)",
             default=False,

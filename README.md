@@ -1,94 +1,105 @@
-# CapSeal
+# CapSeal — Every AI Agent Action, Verified
 
-Predictive gating and cryptographic verification for AI code changes. CapSeal learns which patches fail on your codebase, gates risky changes before they run, and produces verifiable receipts proving what happened.
+CapSeal is a trust layer for AI coding agents. It learns which code changes fail on your specific codebase, gates risky actions before execution, and seals every action into a cryptographic receipt.
 
-## Install
-
-```bash
-git clone <repo>
-cd capseal
-pip install -e .
-```
-
-## Quick start
+## Quick Start (30 seconds)
 
 ```bash
-capseal init                    # set up workspace
-capseal scan .                  # find issues with semgrep
-capseal learn . --rounds 5      # learn which patches succeed/fail ($0.50-2.00)
-capseal fix . --dry-run         # preview what would be fixed
-capseal fix .                   # generate verified patches
-capseal verify .capseal/runs/latest.cap   # verify the sealed run
+pip install capseal
+cd your-project
+capseal autopilot .
 ```
 
-## How it works
+That's it. CapSeal scans your code, learns what's risky, fixes what's safe, and gives you a verified receipt.
 
-**Scan** — Find issues in your codebase using Semgrep's rule library.
+## Protect Your AI Agents (2 minutes)
 
-**Learn** — CapSeal runs AI-generated patches against your codebase in rounds, tracking which succeed and fail across a 5-dimensional feature grid. Each round updates Beta posteriors that model failure probability across 1024 grid regions.
+```bash
+pip install capseal
+cd your-project
+capseal init
+```
 
-**Fix** — Generate patches for issues, gated by the learned model. High-risk patches (>60% predicted failure) are skipped. Low-risk patches are generated, verified, and sealed into a cryptographic receipt.
+Select your agents → CapSeal auto-configures → every future session is gated and sealed.
 
-**Verify** — Every run is sealed into a `.cap` file with a hash-chained receipt. These receipts can be independently verified, giving you a tamper-evident audit trail.
+Supported agents:
+- Claude Code
+- OpenClaw
+- Cursor
+- Windsurf
+- Cline
+- Any MCP-compatible client
+
+## How It Works
+
+1. **Learn** — CapSeal runs your codebase through multiple rounds of AI-generated patches, tracking which succeed and which fail. It builds a statistical model (Beta posteriors) specific to YOUR code.
+
+2. **Gate** — Before any AI agent makes a change, CapSeal checks the learned model. High predicted failure? Blocked. Uncertain? Flagged for review. Safe? Approved.
+
+3. **Seal** — Every action (gate decisions, edits, verifications) is hash-chained into a `.cap` receipt file. Tamper with any action and the chain breaks.
+
+4. **Verify** — Anyone can verify a `.cap` file: `capseal verify .capseal/runs/latest.cap`
+
+## Four Ways to Use CapSeal
+
+| Mode | Command | Who it's for |
+|------|---------|-------------|
+| Autopilot | `capseal autopilot .` | Developers who want one-command security |
+| Step by step | `init → learn → fix → verify` | Developers who want full control |
+| Agent wrapper | `capseal init` (select agents) | Anyone using AI coding agents |
+| CI/CD | `capseal autopilot . --ci` | Automated pipelines |
+
+## Agent Wrapper Flow
+
+```
+capseal init                          # Pick your agents
+   ↓
+Open Claude Code / Cursor / etc.      # Start any coding session
+   ↓
+Agent calls capseal_status            # Checks session state
+Agent calls capseal_gate              # Before every change
+Agent calls capseal_record            # After every change
+Agent calls capseal_seal              # End of session
+   ↓
+capseal verify .capseal/runs/latest.cap   # Verify anytime
+```
+
+## Why Not Just Static Rules?
+
+Every other security tool uses pattern matching: "block rm -rf", "flag eval()".
+
+CapSeal learns. It knows that non-literal-import patches fail 86% of the time on YOUR codebase. It knows that simple style fixes succeed 95% of the time. It doesn't guess — it measures.
+
+## The Cryptographic Receipt
+
+Every CapSeal session produces a `.cap` file:
+
+```
+capsule_hash: a287f7e44a75...
+actions: 6
+chain: intact (6/6 hashes valid)
+constraints_valid: true
+```
+
+Each action chains to the previous one. Tamper with one and verification fails.
 
 ## CLI Reference
 
 | Command | Description |
 |---------|-------------|
-| `capseal init` | Initialize workspace |
+| `capseal autopilot .` | Full pipeline, zero config |
+| `capseal init` | Interactive setup (pick agents, provider, model) |
 | `capseal scan .` | Find issues with Semgrep |
-| `capseal learn . --rounds N` | Learn risk model (default 5 rounds, $5 budget) |
+| `capseal learn .` | Build risk model from patch outcomes |
 | `capseal fix .` | Generate verified patches, gated by learned model |
-| `capseal fix . --dry-run` | Preview patches without generating |
+| `capseal fix . --dry-run` | Preview without generating |
 | `capseal fix . --apply` | Generate and apply patches |
-| `capseal review . --gate` | Gate-only mode (no patch generation) |
-| `capseal verify <file.cap>` | Verify sealed run |
-| `capseal report <run>` | Generate summary report |
-| `capseal watch .` | CI integration (JSON output) |
-| `capseal demo` | 30-second interactive demo |
-| `capseal mcp-serve` | MCP server for agent integration |
-| `capseal advanced` | Power user commands (shell, trace, merge, refactor) |
-
-## Agent Integration (MCP)
-
-CapSeal exposes itself as an MCP server, allowing any agent framework to use it as a trust layer:
-
-```bash
-capseal mcp-serve   # Start MCP server (stdio transport)
-```
-
-**MCP Tools:**
-| Tool | When to call | What it does |
-|------|-------------|--------------|
-| `capseal_gate` | Before every tool call | Returns approve/deny/flag based on learned risk |
-| `capseal_record` | After every tool call | Records what happened for audit trail |
-| `capseal_seal` | End of session | Seals everything into a .cap receipt |
-
-**mcporter config:**
-```json
-{
-  "capseal": {
-    "command": "capseal",
-    "args": ["mcp-serve"],
-    "transport": "stdio"
-  }
-}
-```
-
-Works with OpenClaw, Claude Code, Cursor, LangChain — anything that speaks MCP.
-
-## Configuration
-
-```
-Learned models:    .capseal/models/beta_posteriors.npz
-Run artifacts:     .capseal/runs/<timestamp>-<type>/
-Sealed runs:       .capseal/runs/<timestamp>-<type>.cap
-Gate threshold:    --threshold 0.6 (failure probability cutoff)
-Budget:            --budget 5.0 (max dollars to spend learning)
-```
+| `capseal verify <file.cap>` | Verify sealed receipt |
+| `capseal doctor` | Check everything is wired up correctly |
+| `capseal mcp-serve` | Start MCP server for agent integration |
 
 ## Requirements
 
 - Python 3.10+
 - Semgrep (`pip install semgrep`)
-- OpenAI API key (for learning and fix commands)
+- One of: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GOOGLE_API_KEY`

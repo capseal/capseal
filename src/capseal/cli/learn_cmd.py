@@ -53,6 +53,9 @@ def _load_capseal_env(target_path: Path) -> None:
 @click.option("--prove", is_flag=True, help="Generate cryptographic proof")
 @click.option("--pricing", type=str, default="claude-sonnet", help="Pricing preset (default: claude-sonnet)")
 @click.option("--quiet", "-q", is_flag=True, help="Minimal output")
+@click.option("--profile", type=click.Choice(["security", "quality", "bugs", "all", "custom"]),
+              default=None, help="Scan profile (default: from config or 'auto')")
+@click.option("--rules", type=click.Path(exists=True), default=None, help="Custom semgrep rules path")
 def learn_command(
     path: str,
     budget: float,
@@ -63,6 +66,8 @@ def learn_command(
     prove: bool,
     pricing: str,
     quiet: bool,
+    profile: str | None = None,
+    rules: str | None = None,
 ) -> None:
     """Learn which patches fail on your codebase.
 
@@ -168,11 +173,26 @@ def learn_command(
         from capseal.shared.receipts import build_round_receipt, build_run_receipt
 
         # Step 1: Scan with Semgrep
-        if not quiet:
-            click.echo(f"{DIM}[1/4] Scanning codebase with Semgrep...{RESET}")
+        from .scan_profiles import build_semgrep_args, PROFILE_DISPLAY
 
+        # Load config for default profile
+        config_json = None
+        config_path = target_path / ".capseal" / "config.json"
+        if config_path.exists():
+            try:
+                config_json = json.loads(config_path.read_text())
+            except (json.JSONDecodeError, OSError):
+                pass
+
+        effective_profile = profile or (config_json or {}).get("scan_profile")
+
+        if not quiet:
+            profile_label = PROFILE_DISPLAY.get(effective_profile, effective_profile or "auto")
+            click.echo(f"{DIM}[1/4] Scanning codebase with Semgrep ({profile_label})...{RESET}")
+
+        semgrep_cmd = build_semgrep_args(target_path, profile=profile, custom_rules=rules, config_json=config_json)
         result = subprocess.run(
-            ["semgrep", "--config", "auto", "--json", "--exclude", "node_modules", "--exclude", ".venv", "--exclude", "vendor", str(target_path)],
+            semgrep_cmd,
             capture_output=True,
             timeout=600,  # 10 minutes for large repos
         )
