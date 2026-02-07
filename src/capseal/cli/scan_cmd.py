@@ -274,6 +274,12 @@ def scan_command(path: str, gate: bool, output_json: bool, threshold: float) -> 
             run_type="review",
         )
 
+        # Create "latest.cap" symlink
+        latest_cap_link = capseal_dir / "runs" / "latest.cap"
+        if latest_cap_link.is_symlink() or latest_cap_link.exists():
+            latest_cap_link.unlink()
+        latest_cap_link.symlink_to(cap_path.name)
+
         # Update latest symlink
         latest_link = capseal_dir / "runs" / "latest"
         if latest_link.is_symlink():

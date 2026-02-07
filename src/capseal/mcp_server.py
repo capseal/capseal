@@ -1,1116 +1,540 @@
-"""CapSeal MCP Server - expose deterministic CLI tools to IDE agents.
+"""MCP Server for CapSeal - Expose AgentRuntime as MCP tools.
 
-Security model:
-- Strict allowlist of subcommands + flags
-- Workspace-only path validation
-- Capped output sizes
-- Hash-chained append-only event log
+This allows any agent framework that speaks MCP (OpenClaw, Claude Code, Cursor,
+LangChain, etc.) to use CapSeal as a trust layer.
+
+Three tools:
+    capseal_gate   - Gate a proposed action before execution
+    capseal_record - Record what happened after execution
+    capseal_seal   - Seal the session into a .cap receipt
 
 Usage:
-    python -m bef_zk.capsule.mcp_server
+    # From project directory (uses .capseal/ in cwd):
+    cd ~/projects/my-project
+    capseal mcp-serve
 
-Configure in Cline (~/.config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json):
-    {
-      "mcpServers": {
-        "capseal": {
-          "command": "python",
-          "args": ["-m", "bef_zk.capsule.mcp_server"],
-          "env": {
-            "CAPSEAL_WORKSPACE_ROOT": "/home/ryan/BEF-main"
-          }
-        }
-      }
-    }
+    # Or with explicit workspace:
+    capseal mcp-serve --workspace ~/projects/my-project
+
+    # Programmatically:
+    from capseal.mcp_server import run_mcp_server
+    run_mcp_server(workspace="/path/to/project")
+
+MCP clients can then call:
+    tools/list                     # See available tools
+    tools/call capseal_gate {...}  # Gate an action
+    tools/call capseal_record {...} # Record an action
+    tools/call capseal_seal        # Seal the session
 """
 from __future__ import annotations
 
-import hashlib
+import asyncio
+import datetime
 import json
 import os
-import subprocess
-import time
+import sys
 from pathlib import Path
 from typing import Any
 
-# ============================================================
-# Policy knobs
-# ============================================================
-CAPSEAL_BIN = os.environ.get("CAPSEAL_BIN", str(Path(__file__).parent.parent.parent / "capseal"))
-MAX_OUTPUT_BYTES = 2_000_000  # 2MB
-WORKSPACE_ROOT = os.environ.get("CAPSEAL_WORKSPACE_ROOT", os.getcwd())
-EVENT_LOG_PATH = os.environ.get(
-    "CAPSEAL_MCP_EVENT_LOG",
-    os.path.join(WORKSPACE_ROOT, ".capseal", "mcp_events.jsonl")
-)
+from mcp.server import Server
+from mcp.server.stdio import stdio_server
+from mcp.types import Tool, TextContent, Prompt, PromptMessage, PromptArgument
 
-ALLOWED_TOOLS = {"doctor", "verify", "audit", "row", "diff_bundle", "spawn_agent", "load_context", "save_result", "collect_results", "greptile_review"}
+# Global runtime instance (initialized on first use)
+_runtime = None
+_runtime_path = None
+_workspace = None  # Set via --workspace or defaults to cwd
 
 
-# ============================================================
-# Utilities
-# ============================================================
-def _now_ms() -> int:
-    return int(time.time() * 1000)
+def _get_runtime():
+    """Get or create the AgentRuntime instance."""
+    global _runtime, _runtime_path, _workspace
+
+    if _runtime is not None:
+        return _runtime
+
+    from .agent_runtime import AgentRuntime
+
+    # Use workspace if set, otherwise cwd
+    workspace = Path(_workspace) if _workspace else Path.cwd()
+    workspace = workspace.resolve()
+
+    # Determine output directory
+    capseal_dir = workspace / ".capseal"
+    runs_dir = capseal_dir / "runs"
+    runs_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create timestamped run directory
+    timestamp = datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
+    run_dir = runs_dir / f"{timestamp}-mcp"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    _runtime_path = run_dir
+
+    # Check for learned posteriors
+    posteriors_path = capseal_dir / "models" / "beta_posteriors.npz"
+
+    # Log where we're looking for posteriors (to stderr so it doesn't interfere with MCP)
+    if posteriors_path.exists():
+        print(f"[capseal] Loaded posteriors from {posteriors_path}", file=sys.stderr)
+    else:
+        print(f"[capseal] No posteriors at {posteriors_path} (gate will approve all)", file=sys.stderr)
+
+    _runtime = AgentRuntime(
+        output_dir=run_dir,
+        gate_posteriors=posteriors_path if posteriors_path.exists() else None,
+    )
+
+    return _runtime
 
 
-def _is_within_workspace(path: str) -> bool:
-    """Check path is within workspace (no escape via symlinks)."""
-    try:
-        rp = os.path.realpath(path)
-        wr = os.path.realpath(WORKSPACE_ROOT)
-        return rp == wr or rp.startswith(wr + os.sep)
-    except (OSError, ValueError):
-        return False
+def _load_capseal_env():
+    """Load API keys from .capseal/.env if available."""
+    global _workspace
 
-
-def _run_checked(args: list[str], cwd: str | None = None) -> dict[str, Any]:
-    """Run a command with safety + bounded output."""
-    start = _now_ms()
-    try:
-        p = subprocess.run(
-            args,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=False,  # Get bytes, decode with error handling
-            check=False,
-            cwd=cwd,
-            timeout=120,  # 2 minute timeout
-        )
-        dur = _now_ms() - start
-
-        # Decode bytes with error handling (handles binary in diff output)
-        out = (p.stdout or b"").decode("utf-8", errors="replace")
-        err = (p.stderr or b"").decode("utf-8", errors="replace")
-
-        # Cap output
-        if len(out) > MAX_OUTPUT_BYTES:
-            out = out[:MAX_OUTPUT_BYTES] + "\n…(truncated)…"
-        if len(err) > MAX_OUTPUT_BYTES:
-            err = err[:MAX_OUTPUT_BYTES] + "\n…(truncated)…"
-
-        return {
-            "ok": p.returncode == 0,
-            "returncode": p.returncode,
-            "duration_ms": dur,
-            "stdout": out,
-            "stderr": err,
-        }
-    except subprocess.TimeoutExpired:
-        return {
-            "ok": False,
-            "returncode": -1,
-            "duration_ms": _now_ms() - start,
-            "stdout": "",
-            "stderr": "Command timed out after 120s",
-        }
-    except Exception as e:
-        return {
-            "ok": False,
-            "returncode": -1,
-            "duration_ms": _now_ms() - start,
-            "stdout": "",
-            "stderr": str(e),
-        }
-
-
-# ============================================================
-# Hash-chained event log (receipts for tool invocations)
-# ============================================================
-_last_hash: str | None = None
-
-
-def _log_event(tool: str, args: dict[str, Any], result: dict[str, Any]) -> str:
-    """Append event to hash-chained log. Returns event hash."""
-    global _last_hash
-
-    os.makedirs(os.path.dirname(EVENT_LOG_PATH), exist_ok=True)
-
-    # Load last hash from file if we don't have it
-    if _last_hash is None:
-        try:
-            with open(EVENT_LOG_PATH, "r") as f:
-                lines = f.readlines()
-                if lines:
-                    last_event = json.loads(lines[-1])
-                    _last_hash = last_event.get("event_hash", "")
-        except (FileNotFoundError, json.JSONDecodeError):
-            _last_hash = ""
-
-    event = {
-        "ts_ms": _now_ms(),
-        "tool": tool,
-        "args": args,
-        "result_ok": result.get("ok", False),
-        "result_returncode": result.get("returncode"),
-        "duration_ms": result.get("duration_ms"),
-        "prev_hash": _last_hash or "",
-    }
-
-    # Compute hash of this event (without event_hash field)
-    event_bytes = json.dumps(event, sort_keys=True, ensure_ascii=False).encode()
-    event_hash = hashlib.sha256(event_bytes).hexdigest()[:32]
-    event["event_hash"] = event_hash
-
-    with open(EVENT_LOG_PATH, "a", encoding="utf-8") as f:
-        f.write(json.dumps(event, ensure_ascii=False) + "\n")
-
-    _last_hash = event_hash
-    return event_hash
-
-
-# ============================================================
-# Tool implementations
-# ============================================================
-def tool_verify(
-    capsule_path: str,
-    dataset: list[str] | None = None,
-    json_out: bool = True,
-) -> dict[str, Any]:
-    """Verify a capsule cryptographic proof.
-
-    Args:
-        capsule_path: Path to capsule JSON file
-        dataset: Optional list of dataset bindings (format: "id=path")
-        json_out: Return JSON output (default True)
-
-    Returns:
-        Verification result with proof status
-    """
-    if not _is_within_workspace(capsule_path):
-        return {"ok": False, "error": "capsule_path outside workspace"}
-
-    argv = [CAPSEAL_BIN, "verify", capsule_path]
-    if dataset:
-        for d in dataset:
-            argv += ["--dataset", d]
-    if json_out:
-        argv += ["--json"]
-
-    result = _run_checked(argv)
-    _log_event("verify", {"capsule_path": capsule_path, "dataset": dataset}, result)
-    return result
-
-
-def tool_audit(
-    capsule_path: str,
-    json_out: bool = True,
-) -> dict[str, Any]:
-    """Export and inspect audit trail from a capsule.
-
-    Args:
-        capsule_path: Path to capsule JSON file
-        json_out: Return JSON output (default True)
-
-    Returns:
-        Audit trail with hash chain verification
-    """
-    if not _is_within_workspace(capsule_path):
-        return {"ok": False, "error": "capsule_path outside workspace"}
-
-    argv = [CAPSEAL_BIN, "audit", capsule_path]
-    if json_out:
-        argv += ["--json"]
-
-    result = _run_checked(argv)
-    _log_event("audit", {"capsule_path": capsule_path}, result)
-    return result
-
-
-def tool_row(
-    capsule_path: str,
-    row: int,
-    dataset: list[str] | None = None,
-    policy: str | None = None,
-    ticket: str | None = None,
-    opening_state_dir: str | None = None,
-    allow_opening_reset: bool = False,
-    json_out: bool = True,
-) -> dict[str, Any]:
-    """Open a specific trace row with STC membership proof.
-
-    Args:
-        capsule_path: Path to capsule JSON file
-        row: Row index to open
-        dataset: Optional dataset bindings
-        policy: Optional policy file path
-        ticket: Optional ticket file path
-        opening_state_dir: Directory for opening state persistence
-        allow_opening_reset: Allow resetting opening state
-        json_out: Return JSON output (default True)
-
-    Returns:
-        Row data with membership proof
-    """
-    if not _is_within_workspace(capsule_path):
-        return {"ok": False, "error": "capsule_path outside workspace"}
-
-    argv = [CAPSEAL_BIN, "row", capsule_path, "--row", str(row)]
-
-    if dataset:
-        for d in dataset:
-            argv += ["--dataset", d]
-    if policy:
-        if not _is_within_workspace(policy):
-            return {"ok": False, "error": "policy path outside workspace"}
-        argv += ["--policy", policy]
-    if ticket:
-        if not _is_within_workspace(ticket):
-            return {"ok": False, "error": "ticket path outside workspace"}
-        argv += ["--ticket", ticket]
-    if opening_state_dir:
-        if not _is_within_workspace(opening_state_dir):
-            return {"ok": False, "error": "opening_state_dir outside workspace"}
-        argv += ["--opening-state-dir", opening_state_dir]
-    if allow_opening_reset:
-        argv += ["--allow-opening-reset"]
-    if json_out:
-        argv += ["--json"]
-
-    result = _run_checked(argv)
-    _log_event("row", {"capsule_path": capsule_path, "row": row}, result)
-    return result
-
-
-def tool_doctor(
-    capsule_path: str,
-    out_dir: str | None = None,
-    sample_rows: int = 1,
-    json_out: bool = True,
-) -> dict[str, Any]:
-    """One-click pipeline verification with derived reports.
-
-    Args:
-        capsule_path: Path to capsule JSON file
-        out_dir: Output directory for reports (default: alongside capsule)
-        sample_rows: Number of rows to sample for verification (default: 1)
-        json_out: Return JSON output (default True)
-
-    Returns:
-        Verification report with all checks
-    """
-    if not _is_within_workspace(capsule_path):
-        return {"ok": False, "error": "capsule_path outside workspace"}
-
-    argv = [CAPSEAL_BIN, "doctor", capsule_path]
-
-    if out_dir:
-        if not _is_within_workspace(out_dir):
-            return {"ok": False, "error": "out_dir outside workspace"}
-        argv += ["-o", out_dir]
-    if sample_rows is not None:
-        argv += ["--sample-rows", str(sample_rows)]
-    if json_out:
-        argv += ["--json"]
-
-    result = _run_checked(argv)
-    _log_event("doctor", {"capsule_path": capsule_path, "sample_rows": sample_rows}, result)
-    return result
-
-
-def _call_anthropic_api(prompt: str, timeout: int = 120) -> tuple[bool, str]:
-    """Call Anthropic Claude API directly."""
-    import urllib.request
-    import urllib.error
-
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        return False, "ANTHROPIC_API_KEY not set"
-
-    url = "https://api.anthropic.com/v1/messages"
-    headers = {
-        "x-api-key": api_key,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-    }
-
-    data = json.dumps({
-        "model": "claude-sonnet-4-20250514",
-        "max_tokens": 4096,
-        "messages": [{"role": "user", "content": prompt}],
-    }).encode()
-
-    req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+    workspace = Path(_workspace) if _workspace else Path.cwd()
+    env_file = workspace / ".capseal" / ".env"
+    if not env_file.exists():
+        return
 
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            result = json.loads(resp.read().decode())
-            content = result.get("content", [])
-            if content and len(content) > 0:
-                return True, content[0].get("text", "")
-            return False, "Empty response"
-    except urllib.error.HTTPError as e:
-        return False, f"API error {e.code}: {e.read().decode()[:500]}"
-    except Exception as e:
-        return False, f"Error: {e}"
-
-
-def _call_gemini_api(prompt: str, timeout: int = 120) -> tuple[bool, str]:
-    """Call Google Gemini API directly."""
-    import urllib.request
-    import urllib.error
-
-    api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
-    if not api_key:
-        return False, "GEMINI_API_KEY not set"
-
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
-    headers = {"content-type": "application/json"}
-
-    data = json.dumps({
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"maxOutputTokens": 4096},
-    }).encode()
-
-    req = urllib.request.Request(url, data=data, headers=headers, method="POST")
-
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            result = json.loads(resp.read().decode())
-            candidates = result.get("candidates", [])
-            if candidates:
-                parts = candidates[0].get("content", {}).get("parts", [])
-                if parts:
-                    return True, parts[0].get("text", "")
-            return False, "Empty response"
-    except urllib.error.HTTPError as e:
-        return False, f"API error {e.code}: {e.read().decode()[:500]}"
-    except Exception as e:
-        return False, f"Error: {e}"
-
-
-def _call_openai_api(prompt: str, timeout: int = 120) -> tuple[bool, str]:
-    """Call OpenAI API directly."""
-    import urllib.request
-    import urllib.error
-
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        return False, "OPENAI_API_KEY not set"
-
-    url = "https://api.openai.com/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "content-type": "application/json",
-    }
-
-    data = json.dumps({
-        "model": "gpt-4o-mini",
-        "max_tokens": 4096,
-        "messages": [{"role": "user", "content": prompt}],
-    }).encode()
-
-    req = urllib.request.Request(url, data=data, headers=headers, method="POST")
-
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            result = json.loads(resp.read().decode())
-            choices = result.get("choices", [])
-            if choices:
-                return True, choices[0].get("message", {}).get("content", "")
-            return False, "Empty response"
-    except urllib.error.HTTPError as e:
-        return False, f"API error {e.code}: {e.read().decode()[:500]}"
-    except Exception as e:
-        return False, f"Error: {e}"
-
-
-def tool_spawn_agent(
-    task: str,
-    agent_id: str | None = None,
-    context_name: str = "latest",
-    timeout: int = 120,
-    backend: str = "auto",
-) -> dict[str, Any]:
-    """Spawn a subagent to work on a specific task.
-
-    Use this to parallelize work. Each subagent gets the context checkpoint
-    and works on its assigned task independently.
-
-    Args:
-        task: The specific task for this subagent (be detailed!)
-        agent_id: Optional ID for this agent (auto-generated if not provided)
-        context_name: Context checkpoint to load (default: latest)
-        timeout: Max seconds for subagent to run (default: 120)
-        backend: Which API to use: "anthropic", "gemini", "openai", or "auto" (tries in order)
-
-    Returns:
-        Subagent result with findings
-    """
-    import uuid
-
-    agent_id = agent_id or f"agent_{uuid.uuid4().hex[:8]}"
-
-    # Load context for the subagent
-    context_prompt = ""
-    try:
-        from capseal.cli.context import load_context
-        ctx = load_context(context_name)
-        if ctx:
-            summary = ctx.get("summary", {})
-            context_prompt = f"""
-CONTEXT: Comparing {summary.get('comparison', 'unknown')}
-Repository: {summary.get('repo', 'unknown')}
-Committed changes: {summary.get('total_files', 0)} files
-Uncommitted changes: {summary.get('uncommitted_files', 0)} files
-
-You are a code review subagent. Analyze and return findings.
-"""
-    except ImportError:
+        with open(env_file) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" in line:
+                    key, value = line.split("=", 1)
+                    key = key.strip()
+                    value = value.strip()
+                    if key and not os.environ.get(key):
+                        os.environ[key] = value
+    except Exception:
         pass
 
-    # Build subagent prompt with strict JSON output requirement
-    subagent_prompt = f"""{context_prompt}
-YOUR TASK: {task}
 
-CRITICAL: You MUST output ONLY a JSON block in this exact format, nothing else:
-
-```json
-{{
-  "scope": "your_scope_name",
-  "summary": "one sentence assessment",
-  "findings": [
-    {{
-      "severity": "HIGH|MEDIUM|LOW",
-      "issue": "description",
-      "file": "path/to/file",
-      "line": 123,
-      "recommendation": "how to fix"
-    }}
-  ]
-}}
-```
-
-If you find no issues, return: {{"scope": "your_scope", "summary": "No issues found", "findings": []}}
-"""
-
-    start = _now_ms()
-
-    # Try backends in order based on preference
-    backends_to_try = []
-    if backend == "auto":
-        # Try in order: anthropic, gemini, openai
-        if os.environ.get("ANTHROPIC_API_KEY"):
-            backends_to_try.append(("anthropic", _call_anthropic_api))
-        if os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"):
-            backends_to_try.append(("gemini", _call_gemini_api))
-        if os.environ.get("OPENAI_API_KEY"):
-            backends_to_try.append(("openai", _call_openai_api))
-    elif backend == "anthropic":
-        backends_to_try.append(("anthropic", _call_anthropic_api))
-    elif backend == "gemini":
-        backends_to_try.append(("gemini", _call_gemini_api))
-    elif backend == "openai":
-        backends_to_try.append(("openai", _call_openai_api))
-
-    if not backends_to_try:
-        response = {
-            "ok": False,
-            "agent_id": agent_id,
-            "task": task[:100],
-            "duration_ms": 0,
-            "output": "No API keys configured. Set ANTHROPIC_API_KEY, GEMINI_API_KEY, or OPENAI_API_KEY",
-            "backend": None,
-        }
-        _log_event("spawn_agent", {"agent_id": agent_id, "task": task[:100]}, response)
-        return response
-
-    # Try each backend until one succeeds
-    output = ""
-    ok = False
-    used_backend = None
-
-    for backend_name, backend_fn in backends_to_try:
-        ok, output = backend_fn(subagent_prompt, timeout)
-        used_backend = backend_name
-        if ok:
-            break
-
-    duration = _now_ms() - start
-
-    # Truncate if too long
-    if len(output) > 50000:
-        output = output[:50000] + "\n...(truncated)..."
-
-    response = {
-        "ok": ok,
-        "agent_id": agent_id,
-        "task": task[:100],
-        "duration_ms": duration,
-        "output": output,
-        "backend": used_backend,
-    }
-
-    _log_event("spawn_agent", {"agent_id": agent_id, "task": task[:100]}, response)
-    return response
+# Create the MCP server
+server = Server("capseal")
 
 
-def tool_load_context(
-    name: str = "latest",
-    format: str = "summary",
-) -> dict[str, Any]:
-    """Load a diff context checkpoint.
-
-    Use this to understand what changed between repos/refs.
-
-    Args:
-        name: Checkpoint name (default: latest)
-        format: 'summary' for overview, 'full' for complete diffs
-
-    Returns:
-        Context checkpoint data
-    """
-    try:
-        from capseal.cli.context import load_context, format_context_for_agent
-        ctx = load_context(name)
-        if not ctx:
-            return {"ok": False, "error": f"No checkpoint found: {name}"}
-
-        if format == "full":
-            return {
-                "ok": True,
-                "checkpoint_id": ctx.get("checkpoint_id"),
-                "prompt": format_context_for_agent(ctx)[:30000],
-            }
-        else:
-            return {
-                "ok": True,
-                "checkpoint_id": ctx.get("checkpoint_id"),
-                "name": ctx.get("name"),
-                "created_at": ctx.get("created_at"),
-                "summary": ctx.get("summary"),
-                "files": ctx.get("files", [])[:30],
-                "uncommitted": [f["path"] for f in ctx.get("working_tree", {}).get("files", [])[:30]] if ctx.get("working_tree") else [],
-            }
-    except ImportError:
-        return {"ok": False, "error": "Context module not available"}
-
-
-def tool_save_result(
-    agent_id: str,
-    result_type: str,
-    content: str,
-) -> dict[str, Any]:
-    """Save a result from a subagent for the lead agent to collect.
-
-    Args:
-        agent_id: ID of the agent saving the result
-        result_type: Type of result (e.g., 'findings', 'recommendation', 'diff_analysis')
-        content: The result content
-
-    Returns:
-        Confirmation with result ID
-    """
-    results_dir = Path(WORKSPACE_ROOT) / ".capseal" / "agent_results"
-    results_dir.mkdir(parents=True, exist_ok=True)
-
-    result_id = f"{agent_id}_{int(time.time())}"
-    result_file = results_dir / f"{result_id}.json"
-
-    result_data = {
-        "result_id": result_id,
-        "agent_id": agent_id,
-        "result_type": result_type,
-        "content": content,
-        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-    }
-
-    result_file.write_text(json.dumps(result_data, indent=2))
-
-    _log_event("save_result", {"agent_id": agent_id, "result_type": result_type}, {"ok": True})
-
-    return {
-        "ok": True,
-        "result_id": result_id,
-        "path": str(result_file),
-    }
-
-
-def tool_collect_results(
-    agent_ids: list[str] | None = None,
-    result_type: str | None = None,
-    since_minutes: int = 30,
-) -> dict[str, Any]:
-    """Collect results from subagents.
-
-    Use this to gather all findings from spawned subagents.
-
-    Args:
-        agent_ids: Filter to specific agent IDs (default: all)
-        result_type: Filter to specific result type (default: all)
-        since_minutes: Only include results from last N minutes (default: 30)
-
-    Returns:
-        All matching subagent results
-    """
-    results_dir = Path(WORKSPACE_ROOT) / ".capseal" / "agent_results"
-
-    if not results_dir.exists():
-        return {"ok": True, "results": [], "count": 0}
-
-    cutoff = time.time() - (since_minutes * 60)
-    collected = []
-
-    for result_file in results_dir.glob("*.json"):
-        try:
-            result = json.loads(result_file.read_text())
-
-            # Apply filters
-            if agent_ids and result.get("agent_id") not in agent_ids:
-                continue
-            if result_type and result.get("result_type") != result_type:
-                continue
-
-            # Check timestamp
-            file_mtime = result_file.stat().st_mtime
-            if file_mtime < cutoff:
-                continue
-
-            collected.append(result)
-        except (json.JSONDecodeError, OSError):
-            continue
-
-    # Sort by timestamp
-    collected.sort(key=lambda r: r.get("timestamp", ""), reverse=True)
-
-    _log_event("collect_results", {"agent_ids": agent_ids, "result_type": result_type}, {"ok": True, "count": len(collected)})
-
-    return {
-        "ok": True,
-        "results": collected,
-        "count": len(collected),
-    }
-
-
-def tool_greptile_review(
-    repo: str,
-    context_name: str = "latest",
-    focus: str | None = None,
-) -> dict[str, Any]:
-    """Review code changes using Greptile's codebase understanding.
-
-    Loads a context checkpoint and asks Greptile to review the diff
-    against the indexed codebase for bugs, security issues, and suggestions.
-
-    Args:
-        repo: Repository to review against (format: owner/repo or github:owner/repo:branch)
-        context_name: Context checkpoint to review (default: latest)
-        focus: Optional focus area (e.g., 'security', 'performance', 'style')
-
-    Returns:
-        Review with summary, concerns, suggestions, and verdict
-    """
-    try:
-        from capseal.cli.greptile import greptile_review_api
-        result = greptile_review_api(repo=repo, context_name=context_name, focus=focus)
-        _log_event("greptile_review", {"repo": repo, "context": context_name, "focus": focus}, result)
-        return result
-    except ImportError:
-        return {"ok": False, "error": "Greptile module not available"}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
-
-
-def tool_diff_bundle(
-    repo_path: str,
-    base_ref: str,
-    head_ref: str,
-    paths: list[str] | None = None,
-    context_lines: int = 5,
-) -> dict[str, Any]:
-    """Generate a diff artifact between two git refs.
-
-    Args:
-        repo_path: Path to git repository
-        base_ref: Base git reference (commit, branch, tag)
-        head_ref: Head git reference
-        paths: Optional list of paths to limit diff
-        context_lines: Lines of context around changes (default: 5)
-
-    Returns:
-        Diff artifact with patch text, file list, and metadata
-    """
-    if not _is_within_workspace(repo_path):
-        return {"ok": False, "error": "repo_path outside workspace"}
-
-    # Get the diff
-    diff_argv = [
-        "git", "-C", repo_path, "diff",
-        f"{base_ref}..{head_ref}",
-        f"--unified={context_lines}",
+@server.list_tools()
+async def list_tools() -> list[Tool]:
+    """Return the list of available CapSeal tools."""
+    return [
+        Tool(
+            name="capseal_gate",
+            description="⚠️ REQUIRED before any code change. Gate a proposed action through the learned risk model. You MUST call this before editing any file. Returns approve/deny/flag. If 'deny': DO NOT proceed, tell user it was blocked.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "action_type": {
+                        "type": "string",
+                        "description": "Type of action (tool_call, code_edit, file_write, api_request, etc.)",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Human-readable description of what the action does",
+                    },
+                    "files_affected": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of file paths that will be affected",
+                    },
+                    "diff_text": {
+                        "type": "string",
+                        "description": "Optional unified diff for code changes",
+                    },
+                },
+                "required": ["action_type", "description"],
+            },
+        ),
+        Tool(
+            name="capseal_record",
+            description="⚠️ REQUIRED after any code change. Record what you did for the cryptographic audit trail. Call this after each file edit with action type, tool used, and success status.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "action_type": {
+                        "type": "string",
+                        "description": "Type of action that was executed",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Human-readable description of what happened",
+                    },
+                    "tool_name": {
+                        "type": "string",
+                        "description": "Name of the tool that was called",
+                    },
+                    "success": {
+                        "type": "boolean",
+                        "description": "Whether the action succeeded",
+                    },
+                    "files_affected": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of file paths that were affected",
+                    },
+                    "duration_ms": {
+                        "type": "integer",
+                        "description": "How long the action took in milliseconds",
+                    },
+                    "output": {
+                        "type": "string",
+                        "description": "Output or result of the action",
+                    },
+                    "error": {
+                        "type": "string",
+                        "description": "Error message if the action failed",
+                    },
+                },
+                "required": ["action_type", "description", "tool_name", "success"],
+            },
+        ),
+        Tool(
+            name="capseal_seal",
+            description="⚠️ REQUIRED at end of session. Seal all recorded actions into a verifiable .cap receipt. You MUST call this before ending any session where you made code changes.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "session_name": {
+                        "type": "string",
+                        "description": "Optional name for this session (used in receipt metadata)",
+                    },
+                },
+            },
+        ),
+        Tool(
+            name="capseal_status",
+            description="⚠️ Call this at the START of every session and after any conversation compaction/summary. Returns current CapSeal session state: how many actions recorded, last gate decision, whether sealed. Use this to recover context if you lose track of what has been gated and recorded.",
+            inputSchema={
+                "type": "object",
+                "properties": {},
+            },
+        ),
     ]
-    if paths:
-        diff_argv += ["--"] + paths
 
-    diff_result = _run_checked(diff_argv)
-    if not diff_result.get("ok"):
-        _log_event("diff_bundle", {"repo_path": repo_path, "base_ref": base_ref, "head_ref": head_ref}, diff_result)
-        return diff_result
 
-    # Get file list
-    files_argv = [
-        "git", "-C", repo_path, "diff",
-        "--name-only",
-        f"{base_ref}..{head_ref}",
+# ── Prompts ──────────────────────────────────────────────────────────────────
+
+CAPSEAL_SYSTEM_PROMPT = """You have CapSeal tools available for verified code execution.
+
+**At the START of every session (or after any conversation compaction/summary):**
+Call `capseal_status` to check if there is an existing session with recorded actions. This recovers your place if context was lost.
+
+**Before making any code change:**
+Call `capseal_gate` with a description of what you plan to change and which files will be affected.
+- If decision is "approve": proceed with the change
+- If decision is "deny": do NOT proceed — explain to the user why it was blocked (high predicted failure rate)
+- If decision is "flag": proceed with caution, mention the uncertainty to the user
+
+**After each code change:**
+Call `capseal_record` to log what happened (action type, tool used, success/failure).
+
+**When your session is complete:**
+Call `capseal_seal` to create a cryptographic receipt proving exactly what you did.
+
+This creates a verifiable audit trail. The user can run `capseal verify` to cryptographically verify your session."""
+
+
+@server.list_prompts()
+async def list_prompts() -> list[Prompt]:
+    """Return available prompts."""
+    return [
+        Prompt(
+            name="capseal-instructions",
+            description="Instructions for using CapSeal tools to gate, record, and seal code changes",
+            arguments=[],
+        ),
     ]
-    if paths:
-        files_argv += ["--"] + paths
-
-    files_result = _run_checked(files_argv)
-    file_list = [ln for ln in files_result.get("stdout", "").splitlines() if ln.strip()]
-
-    # Get commit info
-    base_info = _run_checked(["git", "-C", repo_path, "rev-parse", base_ref])
-    head_info = _run_checked(["git", "-C", repo_path, "rev-parse", head_ref])
-
-    result = {
-        "ok": True,
-        "repo_path": repo_path,
-        "base_ref": base_ref,
-        "head_ref": head_ref,
-        "base_sha": base_info.get("stdout", "").strip()[:12],
-        "head_sha": head_info.get("stdout", "").strip()[:12],
-        "files": file_list,
-        "file_count": len(file_list),
-        "patch": diff_result.get("stdout", ""),
-        "patch_lines": len(diff_result.get("stdout", "").splitlines()),
-    }
-
-    _log_event("diff_bundle", {"repo_path": repo_path, "base_ref": base_ref, "head_ref": head_ref}, result)
-    return result
 
 
-# ============================================================
-# MCP Server implementation
-# ============================================================
-try:
-    from mcp.server import Server
-    from mcp.server.stdio import stdio_server
-    from mcp.types import Tool, TextContent
-    import asyncio
-
-    MCP_AVAILABLE = True
-except ImportError:
-    MCP_AVAILABLE = False
-
-
-def create_mcp_server() -> "Server":
-    """Create and configure the MCP server."""
-    if not MCP_AVAILABLE:
-        raise ImportError("MCP package not installed. Run: pip install mcp")
-
-    server = Server("capseal")
-
-    @server.list_tools()
-    async def list_tools() -> list[Tool]:
+@server.get_prompt()
+async def get_prompt(name: str, arguments: dict[str, str] | None = None) -> list[PromptMessage]:
+    """Return prompt content."""
+    if name == "capseal-instructions":
         return [
-            Tool(
-                name="verify",
-                description="Verify a capsule cryptographic proof",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "capsule_path": {
-                            "type": "string",
-                            "description": "Path to capsule JSON file",
-                        },
-                        "dataset": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Dataset bindings (format: id=path)",
-                        },
-                        "json_out": {
-                            "type": "boolean",
-                            "default": True,
-                            "description": "Return JSON output",
-                        },
-                    },
-                    "required": ["capsule_path"],
-                },
-            ),
-            Tool(
-                name="audit",
-                description="Export and inspect audit trail from a capsule",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "capsule_path": {
-                            "type": "string",
-                            "description": "Path to capsule JSON file",
-                        },
-                        "json_out": {
-                            "type": "boolean",
-                            "default": True,
-                            "description": "Return JSON output",
-                        },
-                    },
-                    "required": ["capsule_path"],
-                },
-            ),
-            Tool(
-                name="row",
-                description="Open a specific trace row with STC membership proof",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "capsule_path": {
-                            "type": "string",
-                            "description": "Path to capsule JSON file",
-                        },
-                        "row": {
-                            "type": "integer",
-                            "description": "Row index to open",
-                        },
-                        "dataset": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Dataset bindings (format: id=path)",
-                        },
-                        "policy": {
-                            "type": "string",
-                            "description": "Policy file path",
-                        },
-                        "json_out": {
-                            "type": "boolean",
-                            "default": True,
-                            "description": "Return JSON output",
-                        },
-                    },
-                    "required": ["capsule_path", "row"],
-                },
-            ),
-            Tool(
-                name="doctor",
-                description="One-click pipeline verification with derived reports",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "capsule_path": {
-                            "type": "string",
-                            "description": "Path to capsule JSON file",
-                        },
-                        "out_dir": {
-                            "type": "string",
-                            "description": "Output directory for reports",
-                        },
-                        "sample_rows": {
-                            "type": "integer",
-                            "default": 1,
-                            "description": "Number of rows to sample",
-                        },
-                        "json_out": {
-                            "type": "boolean",
-                            "default": True,
-                            "description": "Return JSON output",
-                        },
-                    },
-                    "required": ["capsule_path"],
-                },
-            ),
-            Tool(
-                name="diff_bundle",
-                description="Generate a diff artifact between two git refs",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "repo_path": {
-                            "type": "string",
-                            "description": "Path to git repository",
-                        },
-                        "base_ref": {
-                            "type": "string",
-                            "description": "Base git reference (commit, branch, tag)",
-                        },
-                        "head_ref": {
-                            "type": "string",
-                            "description": "Head git reference",
-                        },
-                        "paths": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Paths to limit diff scope",
-                        },
-                        "context_lines": {
-                            "type": "integer",
-                            "default": 5,
-                            "description": "Lines of context around changes",
-                        },
-                    },
-                    "required": ["repo_path", "base_ref", "head_ref"],
-                },
-            ),
-            # Multi-agent orchestration tools
-            Tool(
-                name="spawn_agent",
-                description="Spawn a subagent to work on a specific task in parallel. Use this to delegate work to specialized agents.",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "task": {
-                            "type": "string",
-                            "description": "The specific task for this subagent (be detailed!)",
-                        },
-                        "agent_id": {
-                            "type": "string",
-                            "description": "Optional ID for this agent (auto-generated if not provided)",
-                        },
-                        "context_name": {
-                            "type": "string",
-                            "default": "latest",
-                            "description": "Context checkpoint to load",
-                        },
-                        "timeout": {
-                            "type": "integer",
-                            "default": 120,
-                            "description": "Max seconds for subagent to run",
-                        },
-                    },
-                    "required": ["task"],
-                },
-            ),
-            Tool(
-                name="load_context",
-                description="Load a diff context checkpoint to understand what changed between repos/refs",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "name": {
-                            "type": "string",
-                            "default": "latest",
-                            "description": "Checkpoint name (default: latest)",
-                        },
-                        "format": {
-                            "type": "string",
-                            "enum": ["summary", "full"],
-                            "default": "summary",
-                            "description": "'summary' for overview, 'full' for complete diffs",
-                        },
-                    },
-                },
-            ),
-            Tool(
-                name="save_result",
-                description="Save a result from a subagent for the lead agent to collect",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "agent_id": {
-                            "type": "string",
-                            "description": "ID of the agent saving the result",
-                        },
-                        "result_type": {
-                            "type": "string",
-                            "description": "Type of result (e.g., 'findings', 'recommendation', 'diff_analysis')",
-                        },
-                        "content": {
-                            "type": "string",
-                            "description": "The result content",
-                        },
-                    },
-                    "required": ["agent_id", "result_type", "content"],
-                },
-            ),
-            Tool(
-                name="collect_results",
-                description="Collect results from all spawned subagents. Use this after spawning agents to gather their findings.",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "agent_ids": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Filter to specific agent IDs (default: all)",
-                        },
-                        "result_type": {
-                            "type": "string",
-                            "description": "Filter to specific result type (default: all)",
-                        },
-                        "since_minutes": {
-                            "type": "integer",
-                            "default": 30,
-                            "description": "Only include results from last N minutes",
-                        },
-                    },
-                },
-            ),
-            Tool(
-                name="greptile_review",
-                description="Review code changes using Greptile's codebase understanding. Analyzes diffs for bugs, security issues, and improvements.",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "repo": {
-                            "type": "string",
-                            "description": "Repository to review against (format: owner/repo)",
-                        },
-                        "context_name": {
-                            "type": "string",
-                            "default": "latest",
-                            "description": "Context checkpoint to review",
-                        },
-                        "focus": {
-                            "type": "string",
-                            "description": "Focus area: 'security', 'performance', 'style', etc.",
-                        },
-                    },
-                    "required": ["repo"],
-                },
+            PromptMessage(
+                role="user",
+                content=TextContent(type="text", text=CAPSEAL_SYSTEM_PROMPT),
             ),
         ]
+    raise ValueError(f"Unknown prompt: {name}")
 
-    @server.call_tool()
-    async def call_tool(name: str, arguments: dict) -> list[TextContent]:
-        if name not in ALLOWED_TOOLS:
-            return [TextContent(type="text", text=json.dumps({"ok": False, "error": f"Tool '{name}' not allowed"}))]
 
-        if name == "verify":
-            result = tool_verify(**arguments)
-        elif name == "audit":
-            result = tool_audit(**arguments)
-        elif name == "row":
-            result = tool_row(**arguments)
-        elif name == "doctor":
-            result = tool_doctor(**arguments)
-        elif name == "diff_bundle":
-            result = tool_diff_bundle(**arguments)
-        elif name == "spawn_agent":
-            result = tool_spawn_agent(**arguments)
-        elif name == "load_context":
-            result = tool_load_context(**arguments)
-        elif name == "save_result":
-            result = tool_save_result(**arguments)
-        elif name == "collect_results":
-            result = tool_collect_results(**arguments)
-        elif name == "greptile_review":
-            result = tool_greptile_review(**arguments)
-        else:
-            result = {"ok": False, "error": f"Unknown tool: {name}"}
+@server.call_tool()
+async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
+    """Handle tool calls."""
 
-        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+    if name == "capseal_gate":
+        return await _handle_gate(arguments)
+    elif name == "capseal_record":
+        return await _handle_record(arguments)
+    elif name == "capseal_seal":
+        return await _handle_seal(arguments)
+    elif name == "capseal_status":
+        return await _handle_status(arguments)
+    else:
+        return [TextContent(type="text", text=json.dumps({
+            "error": f"Unknown tool: {name}",
+        }))]
 
-    return server
+
+async def _handle_gate(args: dict[str, Any]) -> list[TextContent]:
+    """Handle capseal_gate tool call."""
+    runtime = _get_runtime()
+
+    action_type = args.get("action_type", "unknown")
+    description = args.get("description", "")
+    files_affected = args.get("files_affected", [])
+    diff_text = args.get("diff_text", "")
+
+    # Build findings from files_affected for feature extraction
+    findings = []
+    for f in files_affected:
+        findings.append({
+            "path": f,
+            "extra": {"severity": "warning"},
+        })
+
+    try:
+        # Call the gate
+        gate_result = runtime.gate(diff_text=diff_text, findings=findings)
+
+        # Map internal decision to simpler output
+        decision_map = {
+            "pass": "approve",
+            "skip": "deny",
+            "human_review": "flag",
+        }
+
+        decision = gate_result.get("decision", "pass")
+        mapped_decision = decision_map.get(decision, decision)
+
+        result = {
+            "decision": mapped_decision,
+            "predicted_failure": gate_result.get("q", 0.0),
+            "confidence": 1.0 - gate_result.get("uncertainty", 0.0),
+            "reason": gate_result.get("reason", ""),
+            "grid_idx": gate_result.get("grid_idx", 0),
+        }
+
+        # Store for status reporting
+        runtime._last_gate_result = {"decision": mapped_decision, "q": gate_result.get("q", 0.0)}
+
+    except Exception as e:
+        # If gating fails (no model, etc.), approve by default
+        result = {
+            "decision": "approve",
+            "predicted_failure": 0.0,
+            "confidence": 0.0,
+            "reason": f"No risk model available: {e}",
+        }
+
+    return [TextContent(type="text", text=json.dumps(result))]
+
+
+async def _handle_record(args: dict[str, Any]) -> list[TextContent]:
+    """Handle capseal_record tool call."""
+    runtime = _get_runtime()
+
+    action_type = args.get("action_type", "unknown")
+    description = args.get("description", "")
+    tool_name = args.get("tool_name", "unknown")
+    success = args.get("success", True)
+    files_affected = args.get("files_affected", [])
+    duration_ms = args.get("duration_ms", 0)
+    output = args.get("output", "")
+    error = args.get("error")
+
+    try:
+        # Build inputs dict
+        inputs = {
+            "tool_name": tool_name,
+            "files_affected": files_affected,
+        }
+
+        # Build outputs dict
+        outputs = {
+            "output": output,
+            "duration_ms": duration_ms,
+        }
+        if error:
+            outputs["error"] = error
+
+        # Record the action
+        # Note: record_simple takes "instruction" not "description"
+        receipt_hash = runtime.record_simple(
+            action_type=action_type,
+            instruction=description,  # MCP calls it "description", runtime calls it "instruction"
+            inputs=inputs,
+            outputs=outputs,
+            success=success,
+            duration_ms=duration_ms,
+        )
+
+        result = {
+            "recorded": True,
+            "receipt_hash": receipt_hash,
+            "actions_count": len(runtime.actions),
+        }
+
+    except Exception as e:
+        result = {
+            "recorded": False,
+            "error": str(e),
+            "actions_count": len(runtime.actions) if hasattr(runtime, 'actions') else 0,
+        }
+
+    return [TextContent(type="text", text=json.dumps(result))]
+
+
+async def _handle_seal(args: dict[str, Any]) -> list[TextContent]:
+    """Handle capseal_seal tool call."""
+    global _runtime, _runtime_path
+
+    runtime = _get_runtime()
+    session_name = args.get("session_name", "mcp-session")
+
+    try:
+        # Finalize the runtime (generates proof)
+        capsule = runtime.finalize(prove=True)
+
+        # Create .cap file
+        from .cli.cap_format import create_run_cap_file
+
+        cap_path = _runtime_path.parent / f"{_runtime_path.name}.cap"
+        create_run_cap_file(
+            run_dir=_runtime_path,
+            output_path=cap_path,
+            run_type="mcp",
+            extras={
+                "session_name": session_name,
+                "actions_count": len(runtime.actions),
+            },
+        )
+
+        # Update latest.cap symlink
+        latest_cap_link = _runtime_path.parent / "latest.cap"
+        if latest_cap_link.is_symlink() or latest_cap_link.exists():
+            latest_cap_link.unlink()
+        latest_cap_link.symlink_to(cap_path.name)
+
+        # Update latest symlink
+        latest_link = _runtime_path.parent / "latest"
+        if latest_link.is_symlink() or latest_link.exists():
+            latest_link.unlink()
+        latest_link.symlink_to(_runtime_path.name)
+
+        result = {
+            "sealed": True,
+            "cap_file": str(cap_path),
+            "chain_hash": capsule.get("capsule_hash", capsule.get("run_hash", ""))[:16] + "...",
+            "actions_sealed": len(runtime.actions),
+        }
+
+        # Reset runtime for next session
+        _runtime = None
+        _runtime_path = None
+
+    except Exception as e:
+        result = {
+            "sealed": False,
+            "error": str(e),
+            "actions_sealed": 0,
+        }
+
+    return [TextContent(type="text", text=json.dumps(result))]
+
+
+async def _handle_status(args: dict[str, Any]) -> list[TextContent]:
+    """Handle capseal_status tool call."""
+    global _runtime, _runtime_path, _workspace
+
+    workspace = Path(_workspace) if _workspace else Path.cwd()
+
+    # Check if we have an active session
+    if _runtime is None:
+        result = {
+            "session_active": False,
+            "actions_recorded": 0,
+            "actions": [],
+            "last_gate_decision": None,
+            "last_gate_predicted_failure": None,
+            "sealed": False,
+            "workspace": str(workspace),
+            "posteriors_loaded": False,
+        }
+        return [TextContent(type="text", text=json.dumps(result))]
+
+    runtime = _runtime
+
+    # Build actions list from recorded actions
+    actions_list = []
+    for i, action in enumerate(runtime.actions):
+        actions_list.append({
+            "index": i,
+            "type": action.get("action_type", "unknown"),
+            "description": action.get("instruction", action.get("description", "")),
+            "receipt_hash": action.get("receipt_hash", "")[:16] + "..." if action.get("receipt_hash") else "",
+        })
+
+    # Get last gate info if available
+    last_gate_decision = None
+    last_gate_failure = None
+    if hasattr(runtime, '_last_gate_result') and runtime._last_gate_result:
+        last_gate_decision = runtime._last_gate_result.get("decision", "approve")
+        last_gate_failure = runtime._last_gate_result.get("q", 0.0)
+
+    # Check if posteriors are loaded
+    posteriors_loaded = runtime.gate_posteriors is not None if hasattr(runtime, 'gate_posteriors') else False
+
+    result = {
+        "session_active": True,
+        "actions_recorded": len(runtime.actions),
+        "actions": actions_list,
+        "last_gate_decision": last_gate_decision,
+        "last_gate_predicted_failure": last_gate_failure,
+        "sealed": False,  # If we're here, not sealed yet
+        "workspace": str(workspace),
+        "posteriors_loaded": posteriors_loaded,
+    }
+
+    return [TextContent(type="text", text=json.dumps(result))]
 
 
 async def run_server():
-    """Run the MCP server."""
-    server = create_mcp_server()
+    """Run the MCP server with stdio transport."""
+    global _workspace
+
+    _load_capseal_env()
+
+    # Log startup info to stderr
+    workspace = Path(_workspace) if _workspace else Path.cwd()
+    print(f"[capseal] MCP server starting (workspace: {workspace})", file=sys.stderr)
+
     async with stdio_server() as (read_stream, write_stream):
-        await server.run(read_stream, write_stream, server.create_initialization_options())
+        await server.run(
+            read_stream,
+            write_stream,
+            server.create_initialization_options(),
+        )
 
 
-def main():
-    """Entry point."""
-    if not MCP_AVAILABLE:
-        print("MCP package not installed. Install with:")
-        print("  pip install mcp")
-        raise SystemExit(1)
+def run_mcp_server(workspace: str | Path | None = None):
+    """Entry point for running the MCP server.
 
-    print(f"Starting CapSeal MCP server...", file=__import__("sys").stderr)
-    print(f"  Workspace: {WORKSPACE_ROOT}", file=__import__("sys").stderr)
-    print(f"  Event log: {EVENT_LOG_PATH}", file=__import__("sys").stderr)
-    print(f"  Capseal bin: {CAPSEAL_BIN}", file=__import__("sys").stderr)
-
+    Args:
+        workspace: Project directory containing .capseal/. Defaults to cwd.
+    """
+    global _workspace
+    _workspace = str(workspace) if workspace else None
     asyncio.run(run_server())
 
 
 if __name__ == "__main__":
-    main()
+    # Simple CLI for direct invocation
+    import argparse
+    parser = argparse.ArgumentParser(description="CapSeal MCP Server")
+    parser.add_argument("--workspace", "-w", help="Project directory containing .capseal/")
+    args = parser.parse_args()
+    run_mcp_server(workspace=args.workspace)

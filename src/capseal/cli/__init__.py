@@ -114,6 +114,69 @@ cli.add_command(watch_command, name="watch")
 cli.add_command(demo_command, name="demo")
 
 
+@cli.command("mcp-serve")
+@click.option(
+    "--workspace", "-w",
+    type=click.Path(exists=True, file_okay=False),
+    help="Project directory containing .capseal/ (defaults to cwd)"
+)
+def mcp_serve_command(workspace: str | None) -> None:
+    """Start the MCP server for agent integration.
+
+    Exposes CapSeal as an MCP server that any agent framework can call.
+    Uses stdio transport (what mcporter and most MCP clients expect).
+
+    \b
+    Tools exposed:
+        capseal_gate   - Gate a proposed action (returns approve/deny/flag)
+        capseal_record - Record an executed action
+        capseal_seal   - Seal the session into a .cap receipt
+
+    \b
+    Usage:
+        # From project directory:
+        cd ~/projects/my-project
+        capseal mcp-serve
+
+        # Or with explicit workspace:
+        capseal mcp-serve --workspace ~/projects/my-project
+
+    \b
+    Usage with Claude Code:
+        claude mcp add capseal -- capseal mcp-serve -w /path/to/project
+
+    \b
+    Test with:
+        echo '{"jsonrpc":"2.0","method":"tools/list","id":1}' | capseal mcp-serve
+    """
+    from ..mcp_server import run_mcp_server
+    run_mcp_server(workspace=workspace)
+
+
+@cli.command("export-skill")
+@click.argument("destination", type=click.Path())
+def export_skill_command(destination: str) -> None:
+    """Export CapSeal as an OpenClaw skill.
+
+    Copies SKILL.md and manifest.json to the destination directory.
+    Use this to install CapSeal as a skill in OpenClaw or similar agent frameworks.
+
+    \b
+    Example:
+        capseal export-skill ~/.openclaw/workspace/skills/capseal
+
+    After export, the skill will be available to OpenClaw agents.
+    """
+    from pathlib import Path
+    from .skill_export import export_skill
+
+    dest = Path(destination)
+    export_skill(dest)
+    click.echo(f"Skill exported to {dest}")
+    click.echo(f"  {dest / 'SKILL.md'}")
+    click.echo(f"  {dest / 'manifest.json'}")
+
+
 @cli.command("review")
 @click.argument("path", type=click.Path(exists=True), default=".")
 @click.option("--gate", is_flag=True, help="Gate findings based on learned model")

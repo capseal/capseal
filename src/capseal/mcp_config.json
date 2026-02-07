@@ -1,0 +1,8 @@
+{
+  "capseal": {
+    "command": "capseal",
+    "args": ["mcp-serve"],
+    "transport": "stdio",
+    "description": "CapSeal risk gating and audit trail for agent actions"
+  }
+}

@@ -14,6 +14,35 @@ import click
 from pathlib import Path
 
 
+def _load_capseal_env(target_path: Path) -> None:
+    """Load API keys from .capseal/.env if not already in environment.
+
+    This allows users to run capseal commands without manually exporting
+    API keys every time they open a new terminal.
+    """
+    import os
+
+    env_file = target_path / ".capseal" / ".env"
+    if not env_file.exists():
+        return
+
+    try:
+        with open(env_file) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" in line:
+                    key, value = line.split("=", 1)
+                    key = key.strip()
+                    value = value.strip()
+                    # Only set if not already in environment
+                    if key and not os.environ.get(key):
+                        os.environ[key] = value
+    except Exception:
+        pass  # Silently ignore any errors reading the file
+
+
 @click.command("learn")
 @click.argument("path", type=click.Path(exists=True), required=True)
 @click.option("--budget", "-b", type=float, default=5.0, help="Max spend in dollars (default: $5)")
@@ -59,13 +88,18 @@ def learn_command(
     import subprocess
     import uuid
 
-    # Check for API key early
+    # Check for API key - first try environment, then .capseal/.env fallback
+    target_path = Path(path).expanduser().resolve()
+    _load_capseal_env(target_path)
+
     if not os.environ.get("OPENAI_API_KEY") and not os.environ.get("ANTHROPIC_API_KEY"):
         click.echo("Error: No API key found.", err=True)
         click.echo("", err=True)
         click.echo("Set one of:", err=True)
         click.echo("  export OPENAI_API_KEY=sk-...", err=True)
         click.echo("  export ANTHROPIC_API_KEY=sk-ant-...", err=True)
+        click.echo("", err=True)
+        click.echo("Or run 'capseal init' to set up API credentials.", err=True)
         raise SystemExit(1)
 
     import numpy as np
@@ -82,7 +116,7 @@ def learn_command(
     BOLD = "\033[1m"
     RESET = "\033[0m"
 
-    target_path = Path(path).expanduser().resolve()
+    # target_path already set above for env loading
 
     # Parse time limit
     time_limit_seconds = None
@@ -388,6 +422,12 @@ def learn_command(
                 "cost": budget_tracker.total_cost,
             },
         )
+
+        # Create "latest.cap" symlink
+        latest_cap_link = target_path / ".capseal" / "runs" / "latest.cap"
+        if latest_cap_link.is_symlink() or latest_cap_link.exists():
+            latest_cap_link.unlink()
+        latest_cap_link.symlink_to(cap_path.name)
 
         # Generate proof if requested
         capsule = None

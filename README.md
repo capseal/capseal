@@ -46,7 +46,36 @@ capseal verify .capseal/runs/latest.cap   # verify the sealed run
 | `capseal report <run>` | Generate summary report |
 | `capseal watch .` | CI integration (JSON output) |
 | `capseal demo` | 30-second interactive demo |
+| `capseal mcp-serve` | MCP server for agent integration |
 | `capseal advanced` | Power user commands (shell, trace, merge, refactor) |
+
+## Agent Integration (MCP)
+
+CapSeal exposes itself as an MCP server, allowing any agent framework to use it as a trust layer:
+
+```bash
+capseal mcp-serve   # Start MCP server (stdio transport)
+```
+
+**MCP Tools:**
+| Tool | When to call | What it does |
+|------|-------------|--------------|
+| `capseal_gate` | Before every tool call | Returns approve/deny/flag based on learned risk |
+| `capseal_record` | After every tool call | Records what happened for audit trail |
+| `capseal_seal` | End of session | Seals everything into a .cap receipt |
+
+**mcporter config:**
+```json
+{
+  "capseal": {
+    "command": "capseal",
+    "args": ["mcp-serve"],
+    "transport": "stdio"
+  }
+}
+```
+
+Works with OpenClaw, Claude Code, Cursor, LangChain — anything that speaks MCP.
 
 ## Configuration
 

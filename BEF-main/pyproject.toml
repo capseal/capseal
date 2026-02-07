@@ -69,9 +69,20 @@ agent = [
     "httpx>=0.25",
 ]
 
+# MCP server
+mcp = [
+    "mcp>=1.0",
+]
+
+# TUI (interactive terminal interface)
+tui = [
+    "rich>=13.0",
+    "questionary>=2.0",
+]
+
 # Full installation
 all = [
-    "capseal[server,db,cloud,crypto,agent]",
+    "capseal[server,db,cloud,crypto,agent,tui]",
 ]
 
 [project.urls]

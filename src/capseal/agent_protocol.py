@@ -39,13 +39,29 @@ from datetime import datetime, timezone
 from typing import Any
 
 
-# Valid action types
+# Valid action types - accept common agent action categories
+# Keep this permissive so agents don't need to memorize our vocabulary
 ACTION_TYPES = frozenset({
+    # Core types
     "tool_call",
     "code_gen",
     "api_request",
     "decision",
     "observation",
+    # File operations
+    "file_read",
+    "file_write",
+    "file_delete",
+    "code_edit",
+    # Shell/system
+    "shell_exec",
+    "command",
+    # Browser/web
+    "browser_action",
+    "web_request",
+    # Generic fallbacks
+    "action",
+    "unknown",
 })
 
 # Valid gate decisions

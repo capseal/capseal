@@ -67,7 +67,12 @@ DEFAULT_CONFIG = {
     is_flag=True,
     help="Output JSON summary",
 )
-def init_command(path: str, force: bool, policy: str | None, json_output: bool) -> None:
+@click.option(
+    "--tui/--no-tui",
+    default=True,
+    help="Use interactive TUI (default: on if terminal)",
+)
+def init_command(path: str, force: bool, policy: str | None, json_output: bool, tui: bool) -> None:
     """Initialize a capseal workspace.
 
     Creates the .capseal/ directory structure with default configuration
@@ -79,6 +84,22 @@ def init_command(path: str, force: bool, policy: str | None, json_output: bool) 
         capseal init -p ./my-project
         capseal init --policy existing_policy.json
     """
+    import sys
+
+    # Use TUI if terminal is interactive and no JSON output
+    if tui and not json_output and sys.stdin.isatty() and sys.stdout.isatty():
+        try:
+            from .init_tui import run_init_tui
+            run_init_tui(path)
+            return
+        except ImportError:
+            # Fall through to non-TUI mode if dependencies missing
+            click.echo("Note: TUI dependencies not installed. Using basic mode.")
+            click.echo("Install with: pip install rich questionary")
+        except KeyboardInterrupt:
+            click.echo("\nAborted.")
+            raise SystemExit(1)
+
     root = Path(path).resolve()
     workspace = root / WorkspaceContract.PROJECT_WORKSPACE
 

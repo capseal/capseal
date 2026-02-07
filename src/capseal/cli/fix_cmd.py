@@ -30,6 +30,28 @@ DIM = "\033[2m"
 RESET = "\033[0m"
 
 
+def _load_capseal_env(target_path: Path) -> None:
+    """Load API keys from .capseal/.env if not already in environment."""
+    env_file = target_path / ".capseal" / ".env"
+    if not env_file.exists():
+        return
+
+    try:
+        with open(env_file) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" in line:
+                    key, value = line.split("=", 1)
+                    key = key.strip()
+                    value = value.strip()
+                    if key and not os.environ.get(key):
+                        os.environ[key] = value
+    except Exception:
+        pass
+
+
 @click.command("fix")
 @click.argument("path", type=click.Path(exists=True), default=".")
 @click.option("--dry-run", is_flag=True, help="Show plan and gate decisions without generating patches")
@@ -69,6 +91,11 @@ def fix_command(
         capseal verify .capseal/runs/latest.cap    # Verify the run
         capseal report .capseal/runs/latest        # View summary
     """
+    target_path = Path(path).expanduser().resolve()
+
+    # Load API keys from .capseal/.env if available
+    _load_capseal_env(target_path)
+
     # Check for API key
     if not dry_run:
         if not os.environ.get("OPENAI_API_KEY") and not os.environ.get("ANTHROPIC_API_KEY"):
@@ -77,9 +104,11 @@ def fix_command(
             click.echo("Set one of:", err=True)
             click.echo("  export OPENAI_API_KEY=sk-...", err=True)
             click.echo("  export ANTHROPIC_API_KEY=sk-ant-...", err=True)
+            click.echo("", err=True)
+            click.echo("Or run 'capseal init' to set up API credentials.", err=True)
             raise SystemExit(1)
 
-    target_path = Path(path).resolve()
+    # target_path already set above for env loading
     capseal_dir = target_path / ".capseal"
     model_path = capseal_dir / "models" / "beta_posteriors.npz"
     runs_dir = capseal_dir / "runs"
@@ -463,6 +492,12 @@ def fix_command(
             "patches_valid": patches_valid,
         },
     )
+
+    # Create "latest.cap" symlink
+    latest_cap_link = runs_dir / "latest.cap"
+    if latest_cap_link.is_symlink() or latest_cap_link.exists():
+        latest_cap_link.unlink()
+    latest_cap_link.symlink_to(cap_path.name)
 
     # Update latest symlink
     latest_link = runs_dir / "latest"
