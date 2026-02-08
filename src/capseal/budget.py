@@ -6,6 +6,7 @@ for different models. Supports budget limits and cost estimation.
 from __future__ import annotations
 
 import json
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -90,6 +91,7 @@ class BudgetTracker:
 
     # Persistent storage
     _storage_path: Path | None = None
+    _lock: threading.Lock = field(default_factory=threading.Lock)
 
     @classmethod
     def create(
@@ -119,16 +121,18 @@ class BudgetTracker:
     @property
     def remaining_budget(self) -> float | None:
         """Remaining budget in dollars, or None if unlimited."""
-        if self.budget_limit is None:
-            return None
-        return max(0.0, self.budget_limit - self.total_cost)
+        with self._lock:
+            if self.budget_limit is None:
+                return None
+            return max(0.0, self.budget_limit - self.total_cost)
 
     @property
     def budget_exhausted(self) -> bool:
         """True if budget limit reached."""
-        if self.budget_limit is None:
-            return False
-        return self.total_cost >= self.budget_limit
+        with self._lock:
+            if self.budget_limit is None:
+                return False
+            return self.total_cost >= self.budget_limit
 
     def estimate_cost(self, input_tokens: int, output_tokens: int) -> float:
         """Estimate cost for a hypothetical call."""
@@ -139,10 +143,11 @@ class BudgetTracker:
 
     def can_afford(self, estimated_input: int = 4000, estimated_output: int = 2000) -> bool:
         """Check if we can afford another call with estimated tokens."""
-        if self.budget_limit is None:
-            return True
-        estimated = self.estimate_cost(estimated_input, estimated_output)
-        return (self.total_cost + estimated) <= self.budget_limit
+        with self._lock:
+            if self.budget_limit is None:
+                return True
+            estimated = self.estimate_cost(estimated_input, estimated_output)
+            return (self.total_cost + estimated) <= self.budget_limit
 
     def record(
         self,
@@ -153,7 +158,7 @@ class BudgetTracker:
         success: bool = True,
         error: str | None = None,
     ) -> LLMCall:
-        """Record an LLM API call.
+        """Record an LLM API call. Thread-safe.
 
         Returns the recorded call.
         Raises BudgetExhaustedError if budget would be exceeded.
@@ -170,20 +175,21 @@ class BudgetTracker:
 
         cost = call.cost(self.pricing)
 
-        # Update statistics
-        self.calls.append(call)
-        self.total_input_tokens += input_tokens
-        self.total_output_tokens += output_tokens
-        self.total_cost += cost
-        self.call_count += 1
-        if success:
-            self.success_count += 1
-        else:
-            self.failure_count += 1
+        with self._lock:
+            # Update statistics
+            self.calls.append(call)
+            self.total_input_tokens += input_tokens
+            self.total_output_tokens += output_tokens
+            self.total_cost += cost
+            self.call_count += 1
+            if success:
+                self.success_count += 1
+            else:
+                self.failure_count += 1
 
-        # Persist if storage configured
-        if self._storage_path:
-            self._save()
+            # Persist if storage configured
+            if self._storage_path:
+                self._save()
 
         return call
 

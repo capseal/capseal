@@ -597,6 +597,30 @@ Gate decisions from CapSeal are not suggestions. They are requirements.
         style=CAPSEAL_STYLE,
     ).ask()
 
+    # ── Test command ──────────────────────────────────────────────────────
+    console.print("│")
+    test_cmd_choice = questionary.select(
+        "Do you have a test command? (validates patches during learning)",
+        choices=[
+            questionary.Choice("No tests (use semgrep re-scan for validation)", value=""),
+            questionary.Choice("pytest", value="pytest"),
+            questionary.Choice("npm test", value="npm test"),
+            questionary.Choice("make test", value="make test"),
+            questionary.Choice("Custom command", value="__custom__"),
+        ],
+        default="",
+        style=CAPSEAL_STYLE,
+    ).ask()
+
+    test_cmd = ""
+    if test_cmd_choice == "__custom__":
+        test_cmd = questionary.text(
+            "Enter test command:",
+            style=CAPSEAL_STYLE,
+        ).ask() or ""
+    elif test_cmd_choice:
+        test_cmd = test_cmd_choice
+
     # ── Advanced options ─────────────────────────────────────────────────
     gate_threshold = 0.6
     uncertainty_threshold = 0.15
@@ -659,6 +683,7 @@ Gate decisions from CapSeal are not suggestions. They are requirements.
             "threshold": gate_threshold,
             "uncertainty_threshold": uncertainty_threshold,
         },
+        "test_cmd": test_cmd if test_cmd else None,
         "learn": {
             "default_rounds": learn_rounds,
             "default_budget": learn_budget,
@@ -731,6 +756,7 @@ Gate decisions from CapSeal are not suggestions. They are requirements.
         f"",
         f"Gate:       block patches with >{gate_threshold*100:.0f}% predicted failure",
         f"Flag:       human review when uncertainty >{uncertainty_threshold}",
+        f"Test cmd:   {test_cmd}" if test_cmd else f"Test cmd:   (none — using semgrep re-scan)",
     ])
 
     # ── Semgrep check ────────────────────────────────────────────────────

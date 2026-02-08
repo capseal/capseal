@@ -1,451 +1,551 @@
-"""capseal report - Generate human-readable summary of a CapSeal run.
+"""capseal report — Enterprise risk dashboard.
 
-Creates a markdown report summarizing:
-- What was reviewed
-- Gate decisions (pass/skip/review)
-- Why skips happened
-- Verification status
-- Cost summary
+Reads the trained model, current semgrep findings, and session history to
+produce a human-readable risk report suitable for engineering leads.
+
+Usage:
+    capseal report                   # Rich terminal output
+    capseal report . --json          # CI-friendly JSON
+    capseal report src/ --print      # Plain text to stdout
 """
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 import click
 
 
-@click.command("report")
-@click.argument("run_dir", type=click.Path(exists=True))
-@click.option("--output", "-o", type=click.Path(), help="Output path (default: run_dir/report.md)")
-@click.option("--format", "fmt", type=click.Choice(["markdown", "text", "json"]), default="markdown")
-@click.option("--print", "print_output", is_flag=True, help="Print to stdout instead of file")
-def report_command(run_dir: str, output: str | None, fmt: str, print_output: bool) -> None:
-    """Generate a human-readable summary of a CapSeal run.
+# ── Static suggestion map ────────────────────────────────────────────────────
+# Maps semgrep rule ID fragments to one-line remediation suggestions.
+SUGGESTIONS: dict[str, str] = {
+    # Python security
+    "dangerous-exec": "Replace exec() with ast.literal_eval() or a safe parser",
+    "eval": "Replace eval() with ast.literal_eval() or a whitelist",
+    "subprocess-shell": "Use subprocess.run() with a list instead of shell=True",
+    "sql-injection": "Use parameterized queries (e.g. cursor.execute(sql, params))",
+    "pickle": "Replace pickle with json or a safer serialization format",
+    "yaml-load": "Use yaml.safe_load() instead of yaml.load()",
+    "hardcoded-password": "Move secrets to environment variables or a vault",
+    "hardcoded-secret": "Move secrets to environment variables or a vault",
+    "import-module": "Add input validation instead of refactoring the import",
+    "importlib": "Add input validation instead of refactoring the import",
+    "path-traversal": "Validate and sanitize file paths against a base directory",
+    "command-injection": "Use subprocess.run() with a list; never interpolate user input",
+    "ssrf": "Validate URLs against an allowlist before making requests",
+    "xss": "Sanitize user input before rendering in HTML",
+    "open-redirect": "Validate redirect URLs against a domain allowlist",
+    "deserialization": "Use json instead of pickle/marshal for untrusted data",
+    # Broad patterns
+    "refactor": "Break into smaller single-file changes for safer automation",
+    "restructur": "Break into smaller single-file changes for safer automation",
+    "cross-cutting": "Split into focused per-file patches instead of broad changes",
+}
 
-    Creates a report with:
-    - Files and findings reviewed
-    - Gate decisions (patches passed, skipped, flagged)
-    - Risk explanations for skipped patches
-    - Verification status
-    - Cost summary
+
+def _suggest(check_id: str) -> str:
+    """Find a suggestion for a semgrep rule ID."""
+    lower = check_id.lower()
+    for fragment, suggestion in SUGGESTIONS.items():
+        if fragment in lower:
+            return suggestion
+    return ""
+
+
+@click.command("report")
+@click.argument("path", type=click.Path(exists=True), default=".")
+@click.option("--json", "output_json", is_flag=True, help="Output JSON for CI integration")
+@click.option("--print", "print_output", is_flag=True, help="Print plain text to stdout")
+def report_command(path: str, output_json: bool, print_output: bool) -> None:
+    """Generate a risk report for your project.
+
+    Reads the trained risk model, runs a semgrep scan, and aggregates
+    session history into an enterprise-grade security report.
 
     \b
     Examples:
-        capseal report .capseal/runs/latest
-        capseal report .capseal/runs/latest --format json
-        capseal report .capseal/runs/latest --print
+        capseal report               # Rich terminal dashboard
+        capseal report . --json      # JSON for CI pipelines
+        capseal report --print       # Plain text output
     """
-    run_path = Path(run_dir)
+    target = Path(path).resolve()
+    capseal_dir = target / ".capseal"
 
-    # Gather data from run directory
-    data = _gather_run_data(run_path)
+    if not capseal_dir.exists():
+        click.echo("Error: No .capseal/ workspace found. Run 'capseal init' first.", err=True)
+        raise SystemExit(1)
 
-    # Generate report
-    if fmt == "markdown":
-        content = _generate_markdown_report(data, run_path)
-    elif fmt == "json":
-        content = json.dumps(data, indent=2)
+    report_data = _build_report(target)
+
+    if output_json:
+        click.echo(json.dumps(report_data, indent=2))
+    elif print_output:
+        _print_text_report(report_data)
     else:
-        content = _generate_text_report(data, run_path)
-
-    # Output
-    if print_output:
-        click.echo(content)
-    else:
-        output_path = Path(output) if output else run_path / "report.md"
-        output_path.write_text(content)
-        click.echo(f"Report saved to: {output_path}")
-
-        # Print inline stats
-        receipt_status = "verified" if data["verification"].get("chain_hash") else "none"
-        if data["run_type"] == "learn" and "learning" in data:
-            learning = data["learning"]
-            total = learning["episodes"]
-            rate = learning["successes"] / total * 100 if total > 0 else 0
-            click.echo(f"  Type: learn | Episodes: {total} | Success rate: {rate:.0f}% | Receipt: {receipt_status}")
-        elif data["run_type"] == "review" or data.get("gate_result"):
-            gated = data["gate_decisions"]["skip"]
-            approved = data["gate_decisions"]["pass"]
-            click.echo(f"  Type: review | Gated: {gated} | Approved: {approved} | Receipt: {receipt_status}")
+        _print_rich_report(report_data)
 
 
-def _gather_run_data(run_path: Path) -> dict:
-    """Gather all data from a run directory."""
-    data = {
-        "run_dir": str(run_path),
-        "run_type": "unknown",
-        "metadata": {},
-        "files_reviewed": [],
+# ── Data gathering ───────────────────────────────────────────────────────────
+
+def _build_report(target: Path) -> dict:
+    """Gather all data needed for the report."""
+    import numpy as np
+
+    report: dict = {
+        "project": target.name,
+        "project_path": str(target),
+        "model": {"trained": False, "episodes": 0, "last_updated": ""},
+        "hotspots": [],
+        "recommendations": {"safe": [], "needs_review": [], "dont_automate": []},
+        "session_history": {
+            "total_sessions": 0,
+            "total_actions": 0,
+            "denied_actions": 0,
+            "flagged_actions": 0,
+            "chain_integrity": "no sessions",
+        },
         "findings_count": 0,
-        "gate_decisions": {"pass": 0, "skip": 0, "human_review": 0},
-        "skipped_reasons": [],
-        "actions": [],
-        "verification": {"valid": None, "capsule_hash": None},
-        "cost": {"total": 0.0, "tokens": 0},
-        "verdict": "",
     }
 
-    # Load run metadata
-    metadata_path = run_path / "run_metadata.json"
-    if metadata_path.exists():
-        data["metadata"] = json.loads(metadata_path.read_text())
-        data["run_type"] = data["metadata"].get("run_type") or data["metadata"].get("mode", "unknown")
+    # ── Load model ────────────────────────────────────────────────────────
+    posteriors_path = target / ".capseal" / "models" / "beta_posteriors.npz"
+    alpha = None
+    beta = None
+    if posteriors_path.exists():
+        try:
+            data = np.load(posteriors_path, allow_pickle=True)
+            alpha = data["alpha"]
+            beta = data["beta"]
+            n_episodes = int(data["n_episodes"]) if "n_episodes" in data else "?"
+            report["model"]["trained"] = True
+            report["model"]["episodes"] = n_episodes
 
-    # Load risk log (from agent runs)
-    risk_log_path = run_path / "risk_log.json"
-    if risk_log_path.exists():
-        risk_log = json.loads(risk_log_path.read_text())
-        data["run_type"] = "agent"
+            # Last updated from mtime
+            import datetime
+            mtime = posteriors_path.stat().st_mtime
+            dt = datetime.datetime.fromtimestamp(mtime)
+            delta = datetime.datetime.now() - dt
+            if delta.days > 0:
+                report["model"]["last_updated"] = f"{delta.days}d ago"
+            elif delta.seconds > 3600:
+                report["model"]["last_updated"] = f"{delta.seconds // 3600}h ago"
+            else:
+                report["model"]["last_updated"] = f"{delta.seconds // 60}m ago"
+        except Exception:
+            pass
 
-        for entry in risk_log:
-            decision = entry.get("decision", "pass")
-            data["gate_decisions"][decision] = data["gate_decisions"].get(decision, 0) + 1
+    # ── Run semgrep scan ──────────────────────────────────────────────────
+    findings = _run_semgrep(target)
+    report["findings_count"] = len(findings)
 
-            if decision in ("skip", "human_review"):
-                data["skipped_reasons"].append({
-                    "action": entry.get("description", "unknown"),
-                    "decision": decision,
-                    "risk_score": entry.get("risk_score"),
-                    "suggestion": entry.get("suggestion", ""),
-                })
+    if not findings:
+        return report
 
-    # Load actions (from agent runs)
-    actions_path = run_path / "actions.jsonl"
-    if actions_path.exists():
-        content = actions_path.read_text().strip()
-        for line in content.split("\n"):
-            if line.strip():
-                try:
-                    action = json.loads(line)
-                    data["actions"].append({
-                        "type": action.get("action_type"),
-                        "success": action.get("success"),
-                        "gate_decision": action.get("gate_decision"),
-                    })
-                except json.JSONDecodeError:
-                    pass
+    # ── Score findings and build hotspots ─────────────────────────────────
+    from capseal.shared.features import (
+        extract_patch_features,
+        discretize_features,
+        features_to_grid_idx,
+    )
+    from capseal.shared.scoring import lookup_posterior_at_idx
 
-    # Load episodes (from learn runs)
-    episodes_path = run_path / "episodes.jsonl"
-    if episodes_path.exists():
-        data["run_type"] = "learn"
-        data["learning"] = {
-            "episodes": 0,
-            "successes": 0,
-            "failures": 0,
-            "by_finding": {},
-        }
-        content = episodes_path.read_text().strip()
-        for line in content.split("\n"):
-            if line.strip():
-                try:
-                    ep = json.loads(line)
-                    data["cost"]["total"] += ep.get("cost", 0)
-                    data["cost"]["tokens"] += ep.get("tokens_used", 0)
-                    if ep.get("file_path"):
-                        data["files_reviewed"].append(ep["file_path"])
+    # Group findings by file (use relative paths for display)
+    by_file: dict[str, list] = {}
+    for f in findings:
+        fp = f.get("path", "unknown")
+        try:
+            fp = str(Path(fp).relative_to(target))
+        except ValueError:
+            pass
+        f["_display_path"] = fp
+        by_file.setdefault(fp, []).append(f)
 
-                    # Track learning stats
-                    data["learning"]["episodes"] += 1
-                    finding_id = ep.get("finding_id", "unknown")
-                    success = ep.get("success", False)
+    # Score each finding
+    scored_findings: list[dict] = []
+    for finding in findings:
+        file_path = finding.get("_display_path", finding.get("path", ""))
+        severity = finding.get("extra", {}).get("severity", "warning")
+        check_id = finding.get("check_id", "")
+        start_line = finding.get("start", {}).get("line", 1)
+        end_line = finding.get("end", {}).get("line", start_line + 5)
 
-                    if success:
-                        data["learning"]["successes"] += 1
-                    else:
-                        data["learning"]["failures"] += 1
+        # Build a minimal diff for feature extraction
+        diff_preview = f"diff --git a/{file_path} b/{file_path}\n"
+        diff_preview += f"+++ b/{file_path}\n"
+        lines_changed = max(5, end_line - start_line + 1)
+        diff_preview += f"@@ -{start_line},{lines_changed} @@\n"
 
-                    if finding_id not in data["learning"]["by_finding"]:
-                        data["learning"]["by_finding"][finding_id] = {"success": 0, "fail": 0}
-                    if success:
-                        data["learning"]["by_finding"][finding_id]["success"] += 1
-                    else:
-                        data["learning"]["by_finding"][finding_id]["fail"] += 1
-                except json.JSONDecodeError:
-                    pass
+        raw_features = extract_patch_features(diff_preview, [{"severity": severity}])
+        levels = discretize_features(raw_features)
+        grid_idx = features_to_grid_idx(levels)
 
-    # Load budget
-    budget_path = run_path / "budget.json"
-    if budget_path.exists():
-        budget = json.loads(budget_path.read_text())
-        data["cost"]["total"] = budget.get("total_cost", 0)
-        data["cost"]["tokens"] = budget.get("total_input_tokens", 0) + budget.get("total_output_tokens", 0)
+        p_fail = 0.50  # default uninformative prior
+        if alpha is not None and beta is not None:
+            posterior = lookup_posterior_at_idx(alpha, beta, grid_idx)
+            p_fail = posterior["q"]
 
-    # Check for capsules
-    for capsule_name in ["agent_capsule.json", "eval_capsule.json", "workflow_capsule.json"]:
-        capsule_path = run_path / capsule_name
-        if capsule_path.exists():
-            capsule = json.loads(capsule_path.read_text())
-            data["verification"]["capsule_hash"] = capsule.get("capsule_hash", "")[:32]
-            data["verification"]["valid"] = capsule.get("verification", {}).get("constraints_valid")
-            break
+        scored_findings.append({
+            "file": file_path,
+            "check_id": check_id,
+            "severity": severity,
+            "p_fail": p_fail,
+            "line": start_line,
+            "message": finding.get("extra", {}).get("message", ""),
+            "suggestion": _suggest(check_id),
+        })
 
-    # Check for run_receipt.json (learn runs)
-    run_receipt_path = run_path / "run_receipt.json"
-    if run_receipt_path.exists():
-        receipt = json.loads(run_receipt_path.read_text())
-        data["verification"]["receipt_file"] = "run_receipt.json"
-        data["verification"]["chain_hash"] = receipt.get("chain_hash", "")[:32]
-        data["verification"]["total_rounds"] = receipt.get("total_rounds", 0)
+    # ── Build per-file hotspots ───────────────────────────────────────────
+    for file_path, file_findings in sorted(by_file.items()):
+        # Find scored entries for this file
+        file_scores = [s for s in scored_findings if s["file"] == file_path]
+        if not file_scores:
+            continue
 
-    # Count round receipts
-    rounds_dir = run_path / "rounds"
-    if rounds_dir.exists():
-        round_receipts = list(rounds_dir.glob("*/round_receipt.json"))
-        data["verification"]["round_receipts"] = len(round_receipts)
+        avg_p_fail = sum(s["p_fail"] for s in file_scores) / len(file_scores)
+        max_p_fail = max(s["p_fail"] for s in file_scores)
 
-    # Load review findings
-    findings_path = run_path / "reviews" / "semgrep_report.json"
-    if findings_path.exists():
-        findings = json.loads(findings_path.read_text())
-        data["findings_count"] = len(findings.get("results", []))
-        for f in findings.get("results", []):
-            if f.get("path"):
-                data["files_reviewed"].append(f["path"])
-
-    # Deduplicate files
-    data["files_reviewed"] = list(set(data["files_reviewed"]))
-
-    # Load gate_result.json if exists
-    gate_result_path = run_path / "gate" / "gate_result.json"
-    if not gate_result_path.exists():
-        gate_result_path = run_path / "gate_result.json"
-    if gate_result_path.exists():
-        gate_result = json.loads(gate_result_path.read_text())
-        data["gate_result"] = gate_result
-        summary = gate_result.get("summary", {})
-        data["gate_decisions"]["pass"] = summary.get("approved", 0)
-        data["gate_decisions"]["skip"] = summary.get("gated", 0)
-        data["gate_decisions"]["human_review"] = summary.get("flagged", 0)
-
-    # Generate verdict
-    total_decisions = sum(data["gate_decisions"].values())
-
-    # For learn runs, use learning stats for verdict
-    if data["run_type"] == "learn" and "learning" in data:
-        learning = data["learning"]
-        total = learning["episodes"]
-        successes = learning["successes"]
-        failures = learning["failures"]
-        if total > 0:
-            data["verdict"] = f"Learned from {total} episodes: {successes} succeeded ({successes*100//total}%), {failures} failed"
+        if max_p_fail > 0.6:
+            recommendation = "NEEDS HUMAN REVIEW"
+        elif avg_p_fail < 0.3:
+            recommendation = "safe to auto-fix"
         else:
-            data["verdict"] = "No episodes run"
-    elif total_decisions == 0:
-        data["verdict"] = "No patches evaluated"
-    elif data["gate_decisions"]["skip"] == 0 and data["gate_decisions"]["human_review"] == 0:
-        data["verdict"] = f"All {data['gate_decisions']['pass']} patches passed verification"
+            recommendation = "review recommended"
+
+        # Find the highest risk finding for detail
+        riskiest = max(file_scores, key=lambda s: s["p_fail"])
+
+        hotspot: dict = {
+            "file": file_path,
+            "findings": len(file_scores),
+            "p_fail": round(avg_p_fail, 2),
+            "max_p_fail": round(max_p_fail, 2),
+            "recommendation": recommendation,
+        }
+        if riskiest["suggestion"]:
+            hotspot["detail_check"] = riskiest["check_id"].split(".")[-1] if "." in riskiest["check_id"] else riskiest["check_id"]
+            hotspot["detail_p_fail"] = round(riskiest["p_fail"], 2)
+            hotspot["suggestion"] = riskiest["suggestion"]
+
+        report["hotspots"].append(hotspot)
+
+    # Sort: highest risk first
+    report["hotspots"].sort(key=lambda h: -h["max_p_fail"])
+
+    # ── Build agent recommendations ───────────────────────────────────────
+    # Group by check_id (rule type)
+    by_rule: dict[str, list] = {}
+    for sf in scored_findings:
+        short_id = sf["check_id"].split(".")[-1] if "." in sf["check_id"] else sf["check_id"]
+        by_rule.setdefault(short_id, []).append(sf)
+
+    for rule_id, rule_findings in sorted(by_rule.items()):
+        avg_p = sum(f["p_fail"] for f in rule_findings) / len(rule_findings)
+        entry = {
+            "rule": rule_id,
+            "count": len(rule_findings),
+            "avg_p_fail": round(avg_p, 2),
+        }
+        if avg_p < 0.3:
+            report["recommendations"]["safe"].append(entry)
+        elif avg_p <= 0.6:
+            report["recommendations"]["needs_review"].append(entry)
+        else:
+            report["recommendations"]["dont_automate"].append(entry)
+
+    # ── Session history ───────────────────────────────────────────────────
+    report["session_history"] = _gather_session_history(target)
+
+    return report
+
+
+def _run_semgrep(target: Path) -> list[dict]:
+    """Run semgrep and return findings."""
+    from .scan_profiles import build_semgrep_args
+
+    config_path = target / ".capseal" / "config.json"
+    config_json = None
+    if config_path.exists():
+        try:
+            config_json = json.loads(config_path.read_text())
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    try:
+        cmd = build_semgrep_args(target, config_json=config_json)
+        result = subprocess.run(cmd, capture_output=True, timeout=120)
+        output = json.loads(result.stdout.decode())
+        return output.get("results", [])
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, FileNotFoundError):
+        return []
+
+
+def _gather_session_history(target: Path) -> dict:
+    """Count sessions, actions, decisions from .cap files."""
+    runs_dir = target / ".capseal" / "runs"
+    history: dict = {
+        "total_sessions": 0,
+        "total_actions": 0,
+        "denied_actions": 0,
+        "flagged_actions": 0,
+        "chain_integrity": "no sessions",
+    }
+
+    if not runs_dir.exists():
+        return history
+
+    cap_files = [f for f in runs_dir.glob("*.cap") if not f.is_symlink()]
+    history["total_sessions"] = len(cap_files)
+
+    if not cap_files:
+        return history
+
+    all_valid = True
+    for cap_file in cap_files:
+        actions = _load_actions(cap_file, runs_dir)
+        history["total_actions"] += len(actions)
+
+        prev_hash = None
+        for action in actions:
+            gate = action.get("gate_decision")
+            if gate == "skip":
+                history["denied_actions"] += 1
+            elif gate == "human_review":
+                history["flagged_actions"] += 1
+
+            # Verify chain link
+            expected_parent = action.get("parent_receipt_hash")
+            if expected_parent is not None and expected_parent != prev_hash:
+                all_valid = False
+
+            # Compute this action's receipt hash
+            try:
+                from capseal.agent_protocol import AgentAction
+                aa = AgentAction.from_dict(action)
+                prev_hash = aa.compute_receipt_hash()
+            except Exception:
+                prev_hash = None
+
+    if cap_files:
+        history["chain_integrity"] = "all receipts verified" if all_valid else "chain break detected"
+
+    return history
+
+
+def _load_actions(cap_file: Path, runs_dir: Path) -> list[dict]:
+    """Load actions from a .cap file or its run directory."""
+    import tarfile
+
+    actions = []
+    try:
+        with tarfile.open(cap_file, "r:*") as tar:
+            for member in tar.getmembers():
+                if member.name.endswith("actions.jsonl"):
+                    f = tar.extractfile(member)
+                    if f:
+                        content = f.read().decode("utf-8").strip()
+                        for line in content.split("\n"):
+                            if line.strip():
+                                try:
+                                    actions.append(json.loads(line))
+                                except json.JSONDecodeError:
+                                    pass
+                        return actions
+    except Exception:
+        pass
+
+    # Fallback: run directory
+    run_dir = runs_dir / cap_file.stem
+    actions_file = run_dir / "actions.jsonl"
+    if actions_file.exists():
+        for line in actions_file.read_text().strip().split("\n"):
+            if line.strip():
+                try:
+                    actions.append(json.loads(line))
+                except json.JSONDecodeError:
+                    pass
+
+    return actions
+
+
+# ── Rich output ──────────────────────────────────────────────────────────────
+
+def _print_rich_report(data: dict) -> None:
+    """Print the enterprise risk dashboard using Rich."""
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.table import Table
+    from rich.box import ROUNDED
+
+    console = Console()
+
+    # Header
+    model = data["model"]
+    if model["trained"]:
+        model_line = f"{model['episodes']} episodes, last updated {model['last_updated']}"
     else:
-        skipped = data["gate_decisions"]["skip"] + data["gate_decisions"]["human_review"]
-        total_findings = skipped + data["gate_decisions"]["pass"]
-        data["verdict"] = f"Gated {skipped} of {total_findings} findings, {data['gate_decisions']['pass']} approved"
+        model_line = "not trained — run 'capseal learn .' first"
 
-    return data
+    header = (
+        f"  Project: {data['project']}\n"
+        f"  Model:   {model_line}"
+    )
+    console.print()
+    console.print(Panel(
+        header,
+        title="[bold cyan]═══ CAPSEAL RISK REPORT ═══[/bold cyan]",
+        border_style="cyan",
+        padding=(1, 1),
+        expand=False,
+    ))
+
+    if data["findings_count"] == 0:
+        console.print("\n  [green]No security findings detected.[/green] Your code looks clean.\n")
+        return
+
+    # ── Risk Hotspots ─────────────────────────────────────────────────────
+    hotspots = data["hotspots"]
+    if hotspots:
+        table = Table(
+            title="RISK HOTSPOTS",
+            box=ROUNDED,
+            border_style="cyan",
+            show_header=True,
+            header_style="bold",
+        )
+        table.add_column("File", style="white", min_width=20)
+        table.add_column("Findings", justify="right", min_width=8)
+        table.add_column("p_fail", justify="right", min_width=8)
+        table.add_column("Recommendation", min_width=25)
+
+        for h in hotspots:
+            pf = h["p_fail"]
+            if pf < 0.3:
+                pf_style = "green"
+                rec_style = "green"
+            elif pf <= 0.6:
+                pf_style = "yellow"
+                rec_style = "yellow"
+            else:
+                pf_style = "red"
+                rec_style = "red bold"
+
+            table.add_row(
+                h["file"],
+                str(h["findings"]),
+                f"[{pf_style}]{pf:.2f}[/{pf_style}]",
+                f"[{rec_style}]{h['recommendation']}[/{rec_style}]",
+            )
+
+        console.print()
+        console.print(table)
+
+        # Detail lines for high-risk hotspots
+        for h in hotspots:
+            if h.get("suggestion") and h.get("max_p_fail", 0) > 0.5:
+                console.print(f"    [dim]└─ {h.get('detail_check', '')} — "
+                              f"refactors fail {h['detail_p_fail']*100:.0f}% of the time[/dim]")
+                console.print(f"       [dim]Suggestion: {h['suggestion']}[/dim]")
+
+    # ── Agent Recommendations ─────────────────────────────────────────────
+    recs = data["recommendations"]
+    console.print()
+
+    rec_lines = []
+    if recs["safe"]:
+        safe_names = ", ".join(r["rule"] for r in recs["safe"])
+        rec_lines.append(f"  [green]✓ Safe to automate:[/green] {safe_names}")
+    if recs["needs_review"]:
+        review_names = ", ".join(r["rule"] for r in recs["needs_review"])
+        rec_lines.append(f"  [yellow]⚠ Needs review:[/yellow] {review_names}")
+    if recs["dont_automate"]:
+        dont_names = ", ".join(r["rule"] for r in recs["dont_automate"])
+        rec_lines.append(f"  [red]✗ Don't automate:[/red] {dont_names}")
+
+    if rec_lines:
+        console.print(Panel(
+            "\n".join(rec_lines),
+            title="[bold]AGENT RECOMMENDATIONS[/bold]",
+            title_align="left",
+            border_style="cyan",
+            padding=(1, 1),
+            expand=False,
+        ))
+
+    # ── Session History ───────────────────────────────────────────────────
+    sh = data["session_history"]
+    if sh["total_sessions"] > 0:
+        integrity_style = "green" if "verified" in sh["chain_integrity"] else "red"
+        history_lines = (
+            f"  {sh['total_sessions']} sessions, "
+            f"{sh['total_actions']} total actions, "
+            f"{sh['denied_actions']} denied, "
+            f"{sh['flagged_actions']} flagged\n"
+            f"  Chain integrity: [{integrity_style}]✓ {sh['chain_integrity']}[/{integrity_style}]"
+        )
+        console.print(Panel(
+            history_lines,
+            title="[bold]SESSION HISTORY[/bold]",
+            title_align="left",
+            border_style="cyan",
+            padding=(0, 1),
+            expand=False,
+        ))
+    else:
+        console.print("  [dim]No sessions recorded yet.[/dim]")
+
+    console.print()
 
 
-def _generate_markdown_report(data: dict, run_path: Path) -> str:
-    """Generate markdown report."""
+# ── Plain text output ────────────────────────────────────────────────────────
+
+def _print_text_report(data: dict) -> None:
+    """Print plain text report to stdout."""
+    model = data["model"]
+    model_str = (f"{model['episodes']} episodes, last updated {model['last_updated']}"
+                 if model["trained"] else "not trained")
+
     lines = [
-        "# CapSeal Report",
-        "",
-        f"**Run:** `{run_path.name}`",
-        f"**Type:** {data['run_type']}",
-        f"**Verdict:** {data['verdict']}",
+        "═══ CAPSEAL RISK REPORT ═══",
+        f"Project: {data['project']}",
+        f"Model: {model_str}",
         "",
     ]
 
-    # Summary - different for learn vs other runs
-    if data["run_type"] == "learn" and "learning" in data:
-        learning = data["learning"]
-        total = learning["episodes"]
-        success_rate = learning["successes"] / total * 100 if total > 0 else 0
+    if data["findings_count"] == 0:
+        lines.append("No security findings detected.")
+        click.echo("\n".join(lines))
+        return
 
-        lines.extend([
-            "## Learning Summary",
-            "",
-            f"- **Episodes run:** {total}",
-            f"- **Successes:** {learning['successes']} ({success_rate:.0f}%)",
-            f"- **Failures:** {learning['failures']} ({100 - success_rate:.0f}%)",
-            f"- **Total cost:** ${data['cost']['total']:.2f}",
-            "",
-        ])
+    # Hotspots
+    lines.append("RISK HOTSPOTS")
+    for h in data["hotspots"]:
+        rec = h["recommendation"].upper() if h["max_p_fail"] > 0.6 else h["recommendation"]
+        lines.append(f"  {h['file']:<30} — {h['findings']} findings, p_fail={h['p_fail']:.2f} ({rec})")
+        if h.get("suggestion") and h.get("max_p_fail", 0) > 0.5:
+            lines.append(f"    └─ {h.get('detail_check', '')} — refactors fail {h['detail_p_fail']*100:.0f}% of the time")
+            lines.append(f"       Suggestion: {h['suggestion']}")
+    lines.append("")
 
-        # Results by finding type
-        if learning["by_finding"]:
-            lines.extend([
-                "## Results by Finding Type",
-                "",
-                "| Finding | Success | Fail | Rate | Risk |",
-                "|---------|---------|------|------|------|",
-            ])
-            for finding_id, stats in sorted(learning["by_finding"].items()):
-                s, f = stats["success"], stats["fail"]
-                total_f = s + f
-                rate = s / total_f * 100 if total_f > 0 else 0
-                risk = "LOW" if rate >= 70 else "HIGH" if rate < 40 else "MEDIUM"
-                # Shorten finding ID
-                short_id = finding_id.split(".")[-1] if "." in finding_id else finding_id
-                lines.append(f"| {short_id} | {s} | {f} | {rate:.0f}% | {risk} |")
-            lines.append("")
+    # Recommendations
+    recs = data["recommendations"]
+    lines.append("AGENT RECOMMENDATIONS")
+    if recs["safe"]:
+        lines.append(f"  ✓ Safe to automate: {', '.join(r['rule'] for r in recs['safe'])}")
+    if recs["needs_review"]:
+        lines.append(f"  ⚠ Needs review: {', '.join(r['rule'] for r in recs['needs_review'])}")
+    if recs["dont_automate"]:
+        lines.append(f"  ✗ Don't automate: {', '.join(r['rule'] for r in recs['dont_automate'])}")
+    lines.append("")
 
-            # What was learned
-            lines.extend([
-                "## What Was Learned",
-                "",
-            ])
-            for finding_id, stats in sorted(learning["by_finding"].items()):
-                s, f = stats["success"], stats["fail"]
-                total_f = s + f
-                rate = s / total_f * 100 if total_f > 0 else 0
-                short_id = finding_id.split(".")[-1] if "." in finding_id else finding_id
-                if rate >= 70:
-                    lines.append(f"- ✓ **{short_id}** patches succeed {rate:.0f}% → approve these")
-                elif rate < 40:
-                    lines.append(f"- ✗ **{short_id}** patches fail {100-rate:.0f}% → gate these")
-                else:
-                    lines.append(f"- ⚠ **{short_id}** uncertain ({rate:.0f}% success) → flag for review")
-            lines.append("")
+    # Session history
+    sh = data["session_history"]
+    lines.append("SESSION HISTORY")
+    lines.append(f"  {sh['total_sessions']} sessions, {sh['total_actions']} total actions, "
+                 f"{sh['denied_actions']} denied, {sh['flagged_actions']} flagged")
+    lines.append(f"  Chain integrity: ✓ {sh['chain_integrity']}")
 
-    else:
-        lines.extend([
-            "## Summary",
-            "",
-            f"- **Files reviewed:** {len(data['files_reviewed'])}",
-            f"- **Findings:** {data['findings_count']}",
-            f"- **Patches passed:** {data['gate_decisions']['pass']}",
-            f"- **Patches skipped:** {data['gate_decisions']['skip']}",
-            f"- **Flagged for review:** {data['gate_decisions']['human_review']}",
-            "",
-        ])
-
-    # Verification
-    lines.extend([
-        "## Verification",
-        "",
-    ])
-    if data["verification"].get("capsule_hash"):
-        valid_str = "✅ Valid" if data["verification"]["valid"] else "❌ Invalid"
-        lines.extend([
-            f"- **Capsule hash:** `{data['verification']['capsule_hash']}...`",
-            f"- **Proof status:** {valid_str}",
-            "",
-        ])
-    elif data["verification"].get("chain_hash"):
-        lines.extend([
-            f"- **Receipt:** {data['verification'].get('receipt_file', 'run_receipt.json')}",
-            f"- **Chain hash:** `{data['verification']['chain_hash']}...`",
-            f"- **Rounds chained:** {data['verification'].get('total_rounds', 0)}",
-        ])
-        if data["verification"].get("round_receipts"):
-            lines.append(f"- **Round receipts:** {data['verification']['round_receipts']}")
-        lines.append("")
-    else:
-        lines.append("- No cryptographic proof generated")
-        lines.append("")
-
-    # Skipped patches
-    if data["skipped_reasons"]:
-        lines.extend([
-            "## Skipped Patches",
-            "",
-            "| Action | Decision | Risk Score | Reason |",
-            "|--------|----------|------------|--------|",
-        ])
-        for skip in data["skipped_reasons"]:
-            risk = f"{skip['risk_score']:.2f}" if skip["risk_score"] is not None else "N/A"
-            lines.append(f"| {skip['action']} | {skip['decision']} | {risk} | {skip['suggestion'][:50]} |")
-        lines.append("")
-
-    # Cost
-    if data["cost"]["total"] > 0:
-        lines.extend([
-            "## Cost Summary",
-            "",
-            f"- **Total cost:** ${data['cost']['total']:.2f}",
-            f"- **Tokens used:** {data['cost']['tokens']:,}",
-            "",
-        ])
-
-    # Files reviewed
-    if data["files_reviewed"]:
-        lines.extend([
-            "## Files Reviewed",
-            "",
-        ])
-        for f in sorted(data["files_reviewed"])[:20]:
-            lines.append(f"- `{f}`")
-        if len(data["files_reviewed"]) > 20:
-            lines.append(f"- ... and {len(data['files_reviewed']) - 20} more")
-        lines.append("")
-
-    # Footer
-    lines.extend([
-        "---",
-        "*Generated by [CapSeal](https://capseal.dev)*",
-    ])
-
-    return "\n".join(lines)
-
-
-def _generate_text_report(data: dict, run_path: Path) -> str:
-    """Generate plain text report."""
-    lines = [
-        "=" * 60,
-        "CAPSEAL REPORT",
-        "=" * 60,
-        "",
-        f"Run:     {run_path.name}",
-        f"Type:    {data['run_type']}",
-        f"Verdict: {data['verdict']}",
-        "",
-        "-" * 60,
-        "SUMMARY",
-        "-" * 60,
-        f"Files reviewed:    {len(data['files_reviewed'])}",
-        f"Findings:          {data['findings_count']}",
-        f"Patches passed:    {data['gate_decisions']['pass']}",
-        f"Patches skipped:   {data['gate_decisions']['skip']}",
-        f"Flagged for review: {data['gate_decisions']['human_review']}",
-        "",
-    ]
-
-    if data["verification"]["capsule_hash"]:
-        valid_str = "VALID" if data["verification"]["valid"] else "INVALID"
-        lines.extend([
-            "-" * 60,
-            "VERIFICATION",
-            "-" * 60,
-            f"Capsule: {data['verification']['capsule_hash']}...",
-            f"Status:  {valid_str}",
-            "",
-        ])
-
-    if data["skipped_reasons"]:
-        lines.extend([
-            "-" * 60,
-            "SKIPPED PATCHES",
-            "-" * 60,
-        ])
-        for skip in data["skipped_reasons"]:
-            risk = f"{skip['risk_score']:.2f}" if skip["risk_score"] is not None else "N/A"
-            lines.append(f"  [{skip['decision'].upper()}] {skip['action']}")
-            lines.append(f"    Risk: {risk} | {skip['suggestion']}")
-        lines.append("")
-
-    if data["cost"]["total"] > 0:
-        lines.extend([
-            "-" * 60,
-            "COST",
-            "-" * 60,
-            f"Total:  ${data['cost']['total']:.2f}",
-            f"Tokens: {data['cost']['tokens']:,}",
-            "",
-        ])
-
-    lines.append("=" * 60)
-
-    return "\n".join(lines)
+    click.echo("\n".join(lines))
 
 
 __all__ = ["report_command"]

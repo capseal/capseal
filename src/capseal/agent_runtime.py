@@ -190,10 +190,14 @@ class AgentRuntime:
         self._actions.append(action)
 
         # Append to log file (append-only for durability)
+        # Include canonical_fields and receipt_hash for recomputable proofs
+        d = action.to_dict()
+        d["receipt_hash"] = action.compute_receipt_hash()
+        d["canonical_fields"] = json.loads(action.canonical_json())
         with open(self._action_log_path, "a") as f:
-            f.write(json.dumps(action.to_dict()) + "\n")
+            f.write(json.dumps(d) + "\n")
 
-        return action.compute_receipt_hash()
+        return d["receipt_hash"]
 
     def record_simple(
         self,
@@ -295,8 +299,15 @@ class AgentRuntime:
             q = posterior["q"]
             uncertainty = posterior["uncertainty"]
 
-            # Make decision
-            if q >= SKIP_THRESHOLD:
+            # Total episodes across all grid points (alpha+beta started at 1,1 prior)
+            n_episodes = int(np.sum(alpha + beta - 2))
+
+            # Make decision — progressive trust for young models
+            if n_episodes < 20 and uncertainty > 0.3:
+                # Not enough data to block confidently — approve with caution
+                decision = "pass"
+                reason = f"low confidence (n={n_episodes}, uncertainty={uncertainty:.3f}) — approving with caution"
+            elif q >= SKIP_THRESHOLD:
                 decision = "skip"
                 reason = f"q={q:.3f} >= skip_threshold={SKIP_THRESHOLD}"
             elif uncertainty > HUMAN_REVIEW_UNCERTAINTY:

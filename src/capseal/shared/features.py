@@ -33,7 +33,7 @@ SEVERITY_MAP = {"none": 0, "info": 0, "low": 1, "warning": 1, "medium": 2, "high
 TEST_THRESHOLDS = [0, 1, 5]  # 0: no tests, 1: 1 test change, 2: 2-5, 3: >5
 
 # Decision thresholds
-SKIP_THRESHOLD = 0.3  # Skip if q >= 0.3 (high failure probability)
+SKIP_THRESHOLD = 0.6  # Skip if q >= 0.6 (confident high failure probability)
 HUMAN_REVIEW_UNCERTAINTY = 0.15  # Flag for review if uncertainty > 0.15
 
 

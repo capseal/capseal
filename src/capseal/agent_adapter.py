@@ -37,6 +37,72 @@ from capseal.agent_constraints import (
 if TYPE_CHECKING:
     from capseal.agent_protocol import AgentAction
 
+# Optional FRI proof upgrade — when bef_zk.fri is available, generate real FRI proofs
+# instead of just constraint-check proofs.
+try:
+    from bef_zk.fri.prover import fri_prove
+    from bef_zk.fri.verifier import fri_verify
+    from bef_zk.fri.config import FRIConfig
+    from bef_zk.stc.vc import VectorCommitment, VCCommitment
+    HAS_FRI = True
+except ImportError:
+    HAS_FRI = False
+
+
+def _generate_fri_proof(composition: list[int], row_root: str) -> dict[str, Any]:
+    """Generate a FRI proof over the composition polynomial.
+
+    Requires bef_zk.fri to be installed (HAS_FRI=True).
+    The composition vector must be all zeros for a valid trace.
+    """
+    import math
+
+    # Pad composition to next power of 2
+    n = len(composition)
+    domain_size = 1 << math.ceil(math.log2(max(n * 4, 8)))
+    padded = list(composition) + [0] * (domain_size - n)
+
+    # Build FRI config
+    num_rounds = max(1, math.ceil(math.log2(domain_size)) - 2)
+    num_queries = min(16, domain_size // 2)
+    fri_cfg = FRIConfig(
+        domain_size=domain_size,
+        max_degree=n - 1,
+        num_rounds=num_rounds,
+        num_queries=num_queries,
+    )
+
+    # Commit to evaluations
+    vc = VectorCommitment(chunk_size=64)
+    base_commitment = vc.commit(padded)
+
+    # Derive query indices via Fiat-Shamir
+    seed = hashlib.sha256(
+        row_root.encode() + base_commitment.root
+    ).digest()
+    query_indices = []
+    for i in range(num_queries):
+        idx_bytes = hashlib.sha256(seed + i.to_bytes(4, "little")).digest()
+        idx = int.from_bytes(idx_bytes[:4], "little") % domain_size
+        query_indices.append(idx)
+
+    # Generate FRI proof
+    proof = fri_prove(fri_cfg, vc, padded, base_commitment, query_indices)
+
+    # Verify
+    query_values = [padded[qi] for qi in query_indices]
+    verified = fri_verify(
+        fri_cfg, vc, base_commitment, proof, query_indices, query_values,
+    )
+
+    return {
+        "verified": verified,
+        "domain_size": domain_size,
+        "num_rounds": num_rounds,
+        "num_queries": num_queries,
+        "commitment_root": base_commitment.root.hex() if isinstance(base_commitment.root, bytes) else str(base_commitment.root),
+    }
+
 
 @dataclass
 class AgentContext:
@@ -99,6 +165,7 @@ class AgentProofArtifacts:
     statement: AgentStatement
     verification_result: bool
     profile_data: dict[str, float]
+    proof_type: str = "constraint_check"
 
 
 def _hash_row(row_index: int, row: list[int]) -> bytes:
@@ -354,6 +421,7 @@ class AgentAdapter:
         proof_data = {
             "air_id": encoding_id,
             "version": "1.0",
+            "proof_type": "constraint_check",
             "statement": statement.to_dict(),
             "commitment": {
                 "row_root": commitment.row_root,
@@ -367,6 +435,15 @@ class AgentAdapter:
             "alphas_seed": alpha_seed.hex(),
             "binding_material": (binding_hash or statement_hash or b"").hex(),
         }
+
+        # Upgrade to full FRI proof when bef_zk.fri is available
+        if HAS_FRI and valid and composition:
+            try:
+                fri_result = _generate_fri_proof(composition, commitment.row_root)
+                proof_data["proof_type"] = "fri"
+                proof_data["fri_proof"] = fri_result
+            except Exception:
+                pass  # Fall back to constraint_check proof
 
         # Add constraint details (for debugging/audit)
         failed_constraints = [
@@ -396,6 +473,7 @@ class AgentAdapter:
             statement=statement,
             verification_result=valid,
             profile_data=profile_data,
+            proof_type=proof_data.get("proof_type", "constraint_check"),
         )
 
     def verify(
@@ -501,6 +579,7 @@ class AgentAdapter:
             "final_receipt_hash": artifacts.context.final_receipt_hash,
             "num_actions": len(actions),
             "verified": proof_artifacts.verification_result,
+            "proof_type": proof_artifacts.proof_type,
         }
 
     def _emit_progress(self, event_type: str, data: dict[str, Any]) -> None:
@@ -571,6 +650,7 @@ def build_agent_capsule(
         },
         "verification": {
             "constraints_valid": proof_artifacts.verification_result,
+            "proof_type": proof_artifacts.proof_type,
         },
         "profile": proof_artifacts.profile_data,
     }

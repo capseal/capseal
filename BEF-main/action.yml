@@ -103,11 +103,8 @@ runs:
     - name: Generate Report
       shell: bash
       run: |
-        RUN_DIR=$(find .capseal/runs -type d | sort | tail -1)
-        if [ -n "$RUN_DIR" ]; then
-          capseal report "$RUN_DIR" --format markdown
-          echo "report-path=$RUN_DIR/report.md" >> $GITHUB_OUTPUT
-        fi
+        capseal ci-report . --format markdown -o capseal-report.md || true
+        echo "report-path=capseal-report.md" >> $GITHUB_OUTPUT
 
     - name: Post PR Comment
       if: github.event_name == 'pull_request' && inputs.comment == 'true'
@@ -115,25 +112,8 @@ runs:
       env:
         GH_TOKEN: ${{ github.token }}
       run: |
-        REPORT_PATH=$(find .capseal/runs -name 'report.md' -type f | sort | tail -1)
-        if [ -n "$REPORT_PATH" ]; then
-          # Add summary header
-          PASSED=${{ steps.review.outputs.patches-passed }}
-          SKIPPED=${{ steps.review.outputs.patches-skipped }}
-
-          HEADER="## CapSeal Review"
-          if [ "$SKIPPED" -gt 0 ]; then
-            HEADER="$HEADER (:warning: $SKIPPED patches skipped)"
-          else
-            HEADER="$HEADER (:white_check_mark: All patches passed)"
-          fi
-
-          # Post comment
-          echo "$HEADER" > /tmp/comment.md
-          echo "" >> /tmp/comment.md
-          cat "$REPORT_PATH" >> /tmp/comment.md
-
-          gh pr comment ${{ github.event.pull_request.number }} --body-file /tmp/comment.md
+        if [ -f "capseal-report.md" ]; then
+          gh pr comment ${{ github.event.pull_request.number }} --body-file capseal-report.md
         fi
 
     - name: Check Skip Policy

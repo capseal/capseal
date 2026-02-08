@@ -90,7 +90,7 @@ Output:
   Actions:  12
   Chain:    intact (12/12 hashes valid)
   Session:  refactor-auth-module
-  Proof:    constraints_valid=true
+  Validations: passed
 ```
 '''
 

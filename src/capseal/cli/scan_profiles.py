@@ -27,10 +27,8 @@ SCAN_PROFILES: dict[str, list[str]] = {
     ],
 }
 
-# "all" is the union of all built-in profiles
-SCAN_PROFILES["all"] = sorted(
-    set(rule for rules in SCAN_PROFILES.values() for rule in rules)
-)
+# "all" uses semgrep's broadest built-in ruleset
+SCAN_PROFILES["all"] = ["auto"]
 
 PROFILE_NAMES = list(SCAN_PROFILES.keys()) + ["custom"]
 

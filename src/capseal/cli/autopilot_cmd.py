@@ -43,7 +43,7 @@ RESET = "\033[0m"
 
 # Provider detection order and defaults
 PROVIDERS = [
-    ("anthropic", "ANTHROPIC_API_KEY", "claude-sonnet-4-20250514"),
+    ("anthropic", "ANTHROPIC_API_KEY", "claude-opus-4-6"),
     ("openai", "OPENAI_API_KEY", "chatgpt-5.2"),
     ("google", "GOOGLE_API_KEY", "gemini-3-flash"),
 ]
@@ -262,16 +262,47 @@ def autopilot_command(
 
     # ── Detect provider ───────────────────────────────────────────
     detected = _detect_provider()
-    if not detected:
-        click.echo(f"{RED}Error: No API key found.{RESET}", err=True)
-        click.echo("", err=True)
-        click.echo("Set one of:", err=True)
-        click.echo("  export ANTHROPIC_API_KEY=sk-ant-...", err=True)
-        click.echo("  export OPENAI_API_KEY=sk-...", err=True)
-        click.echo("  export GOOGLE_API_KEY=AI...", err=True)
-        raise SystemExit(1)
 
-    provider, env_var, model = detected
+    if not detected:
+        # Check for subscription mode — load config and look for CLI binary
+        config_path = target / ".capseal" / "config.json"
+        cfg = None
+        if config_path.exists():
+            try:
+                cfg = json.loads(config_path.read_text())
+            except (json.JSONDecodeError, OSError):
+                pass
+
+        cli_map = {"anthropic": "claude", "openai": "codex", "google": "gemini"}
+        provider_from_config = (cfg or {}).get("provider", "")
+        preferred_cli = cli_map.get(provider_from_config)
+
+        cli_binary = None
+        if preferred_cli and shutil.which(preferred_cli):
+            cli_binary = preferred_cli
+        else:
+            for binary in ("claude", "codex", "gemini"):
+                if shutil.which(binary):
+                    cli_binary = binary
+                    break
+
+        if cli_binary:
+            # Subscription mode — derive provider info from CLI binary
+            cli_to_provider = {"claude": "anthropic", "codex": "openai", "gemini": "google"}
+            provider = cli_to_provider.get(cli_binary, provider_from_config or "anthropic")
+            env_var = {"anthropic": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY", "google": "GOOGLE_API_KEY"}[provider]
+            model = (cfg or {}).get("model", {"anthropic": "claude-opus-4-6", "openai": "chatgpt-5.2", "google": "gemini-3-flash"}[provider])
+        else:
+            click.echo(f"{RED}Error: No API key or provider CLI found.{RESET}", err=True)
+            click.echo("", err=True)
+            click.echo("Autopilot requires either:", err=True)
+            click.echo("  • A provider CLI (claude, codex, gemini) — uses your subscription", err=True)
+            click.echo("  • An API key (ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_API_KEY)", err=True)
+            click.echo("", err=True)
+            click.echo("Install your provider's CLI or set an API key, then try again.", err=True)
+            raise SystemExit(1)
+    else:
+        provider, env_var, model = detected
     provider_display = {
         "anthropic": "Anthropic",
         "openai": "OpenAI",

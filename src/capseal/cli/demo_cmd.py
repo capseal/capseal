@@ -298,9 +298,9 @@ def _verify_capsule(capsule_path: Path) -> dict:
             is_valid = False
 
         if capsule.get("verification", {}).get("constraints_valid"):
-            checks.append(("constraints_valid", True))
+            checks.append(("validations_passed", True))
         else:
-            checks.append(("constraints_valid", False))
+            checks.append(("validations_passed", False))
             is_valid = False
 
         # Actually verify the hash matches content

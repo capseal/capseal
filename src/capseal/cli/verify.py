@@ -31,7 +31,7 @@ from .exit_codes import (
     error_to_exit_code,
     exit_code_description,
 )
-from .cap_format import CapExtractionError, extract_cap_file, read_cap_capsule
+from .cap_format import CapExtractionError, extract_cap_file, read_cap_capsule, verify_cap_integrity
 
 MAX_PROOF_BYTES = int(os.environ.get("CAP_MAX_PROOF_BYTES", str(512 * 1024 * 1024)))
 
@@ -208,6 +208,14 @@ def _verify_capsule(
 
     # Handle .cap files by extracting first
     if capsule_path.suffix == ".cap":
+        # Integrity check: detect tampered files
+        integrity_ok, integrity_msg = verify_cap_integrity(capsule_path)
+        if not integrity_ok:
+            return EXIT_MALFORMED, {
+                "status": "TAMPERED",
+                "error": integrity_msg,
+            }
+
         with tempfile.TemporaryDirectory() as tmpdir:
             extract_dir = Path(tmpdir)
             try:
@@ -319,6 +327,23 @@ def _verify_agent_cap(cap_or_dir: Path, output_json: bool) -> int:
     try:
         # Handle .cap file
         if cap_or_dir.suffix == ".cap":
+            # Integrity check: detect tampered files
+            integrity_ok, integrity_msg = verify_cap_integrity(cap_or_dir)
+            if not integrity_ok:
+                if output_json:
+                    click.echo(json.dumps({
+                        "status": "TAMPERED",
+                        "error": integrity_msg,
+                    }, indent=2))
+                else:
+                    RED = "\033[91m"
+                    BOLD = "\033[1m"
+                    RESET = "\033[0m"
+                    click.echo(f"\n{RED}{BOLD}  ✗ TAMPERED{RESET}", err=True)
+                    click.echo(f"{RED}  {integrity_msg}{RESET}", err=True)
+                    click.echo(f"{RED}  This receipt has been modified and CANNOT be trusted.{RESET}\n", err=True)
+                return EXIT_MALFORMED
+
             try:
                 manifest = read_cap_manifest(cap_or_dir)
             except Exception:
@@ -371,6 +396,7 @@ def _verify_agent_cap(cap_or_dir: Path, output_json: bool) -> int:
         capsule_hash = capsule.get("capsule_hash", "")[:16]
         num_actions = capsule.get("statement", {}).get("public_inputs", {}).get("num_actions", len(actions))
         constraints_valid = capsule.get("verification", {}).get("constraints_valid", False)
+        proof_type = capsule.get("verification", {}).get("proof_type", "constraint_check")
         final_hash = capsule.get("statement", {}).get("public_inputs", {}).get("final_receipt_hash", "")[:16]
 
         # Parse timestamps
@@ -397,6 +423,7 @@ def _verify_agent_cap(cap_or_dir: Path, output_json: bool) -> int:
                 "num_actions": num_actions,
                 "chain_valid": chain_valid,
                 "constraints_valid": constraints_valid,
+                "proof_type": proof_type,
                 "final_receipt_hash": capsule.get("statement", {}).get("public_inputs", {}).get("final_receipt_hash", ""),
             }
             if session_name:
@@ -405,22 +432,36 @@ def _verify_agent_cap(cap_or_dir: Path, output_json: bool) -> int:
                 output["chain_errors"] = chain_errors
             click.echo(json.dumps(output, indent=2))
         else:
+            GREEN = "\033[92m"
+            RED = "\033[91m"
+            BOLD = "\033[1m"
+            DIM = "\033[2m"
+            RESET = "\033[0m"
+
             if verified:
-                click.echo(f"✓ Capsule verified: {capsule_hash}...")
-                click.echo(f"  Actions:  {num_actions}")
-                click.echo(f"  Chain:    intact ({num_actions}/{num_actions} hashes valid)")
+                click.echo(f"\n{GREEN}{BOLD}  ✓ Capsule verified{RESET}: {capsule_hash}...")
+                click.echo(f"  Actions:      {num_actions}")
+                click.echo(f"  Chain:        intact ({num_actions}/{num_actions} hashes valid)")
                 if session_name:
-                    click.echo(f"  Session:  {session_name}")
+                    click.echo(f"  Session:      {session_name}")
                 if start_time and end_time:
-                    click.echo(f"  Duration: {start_time.strftime('%I:%M %p')} → {end_time.strftime('%I:%M %p')}")
-                click.echo(f"  Proof:    constraints_valid=true")
+                    click.echo(f"  Duration:     {start_time.strftime('%I:%M %p')} → {end_time.strftime('%I:%M %p')}")
+                if constraints_valid:
+                    if proof_type == "fri":
+                        click.echo(f"  Proof:        {GREEN}✓ FRI verified{RESET}")
+                    else:
+                        click.echo(f"  Proof:        {GREEN}✓ constraints verified{RESET}")
+                click.echo()
             else:
-                click.echo(f"✗ Capsule rejected: {capsule_hash}...", err=True)
+                click.echo(f"\n{RED}{BOLD}  ✗ VERIFICATION FAILED{RESET}", err=True)
+                click.echo(f"{RED}  Capsule: {capsule_hash}...{RESET}", err=True)
                 if not constraints_valid:
-                    click.echo("  Error: constraints_valid=false", err=True)
+                    click.echo(f"{RED}  ✗ Proof:  constraints invalid{RESET}", err=True)
                 if not chain_valid:
+                    click.echo(f"{RED}  ✗ Action chain broken:{RESET}", err=True)
                     for err in chain_errors:
-                        click.echo(f"  Error: {err}", err=True)
+                        click.echo(f"{RED}    → {err}{RESET}", err=True)
+                click.echo(f"{RED}  This receipt CANNOT be trusted.{RESET}\n", err=True)
 
         return EXIT_VERIFIED if verified else EXIT_MALFORMED
 
@@ -447,6 +488,23 @@ def _verify_run_cap(cap_or_dir: Path, output_json: bool) -> int:
     try:
         # Handle .cap file
         if cap_or_dir.suffix == ".cap":
+            # Integrity check: detect tampered files
+            integrity_ok, integrity_msg = verify_cap_integrity(cap_or_dir)
+            if not integrity_ok:
+                if output_json:
+                    click.echo(json.dumps({
+                        "status": "TAMPERED",
+                        "error": integrity_msg,
+                    }, indent=2))
+                else:
+                    RED = "\033[91m"
+                    BOLD = "\033[1m"
+                    RESET = "\033[0m"
+                    click.echo(f"\n{RED}{BOLD}  ✗ TAMPERED{RESET}", err=True)
+                    click.echo(f"{RED}  {integrity_msg}{RESET}", err=True)
+                    click.echo(f"{RED}  This receipt has been modified and CANNOT be trusted.{RESET}\n", err=True)
+                return EXIT_MALFORMED
+
             manifest = read_cap_manifest(cap_or_dir)
             temp_dir = tempfile.mkdtemp(prefix="capseal_verify_")
             extract_cap_file(cap_or_dir, Path(temp_dir))
@@ -513,6 +571,37 @@ def _verify_run_cap(cap_or_dir: Path, output_json: bool) -> int:
     finally:
         if temp_dir:
             shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def _check_signature(capsule_path: Path, output_json: bool) -> None:
+    """Check for and report on Ed25519 signature."""
+    if capsule_path.suffix != ".cap":
+        return
+
+    # Resolve symlinks so we find the .sig next to the real file
+    resolved = capsule_path.resolve()
+    sig_path = resolved.with_suffix(".cap.sig")
+    if not sig_path.exists():
+        if not output_json:
+            DIM = "\033[2m"
+            RESET = "\033[0m"
+            click.echo(f"  {DIM}Signature:  not signed (use: capseal sign){RESET}")
+        return
+
+    try:
+        from .sign_cmd import verify_signature
+        valid, message = verify_signature(resolved)
+        if not output_json:
+            GREEN = "\033[92m"
+            RED = "\033[91m"
+            RESET = "\033[0m"
+            if valid:
+                click.echo(f"  {GREEN}Signature:  ✓ {message}{RESET}")
+            else:
+                click.echo(f"  {RED}Signature:  ✗ {message}{RESET}")
+    except Exception as e:
+        if not output_json:
+            click.echo(f"  Signature:  error ({e})")
 
 
 @click.command("verify")
@@ -593,10 +682,12 @@ def verify_command(
     # Route to appropriate verifier
     if is_agent_cap:
         exit_code = _verify_agent_cap(capsule, output_json)
+        _check_signature(capsule, output_json)
         sys.exit(exit_code)
 
     if is_run_cap:
         exit_code = _verify_run_cap(capsule, output_json)
+        _check_signature(capsule, output_json)
         sys.exit(exit_code)
 
     # Check for run directory with receipt

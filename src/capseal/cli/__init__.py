@@ -25,10 +25,14 @@ from .learn_cmd import learn_command
 from .fix_cmd import fix_command
 from .verify import verify_command
 from .report_cmd import report_command
+from .export_receipt_cmd import export_receipt_command
 from .watch_cmd import watch_command
 from .demo_cmd import demo_command
 from .autopilot_cmd import autopilot_command
+from .ci_report_cmd import ci_report_command
 from .doctor_cmd import doctor_command as doctor_top_command
+from .sign_cmd import sign_command
+from .test_cmd import test_command
 from .workflow_cmd import verify_capsule_command
 
 # Advanced command imports
@@ -41,6 +45,7 @@ from .replay_row import replay_row_command
 from .audit import audit_command, audit_fetch_command
 from .sandbox_cmd import sandbox_group
 from .shell import shell_command, run_shell
+from .pty_shell import shell_command as pty_shell_command
 from .fetch import fetch_command
 from .doctor import doctor as doctor_advanced
 from .docs_generator import docs_group
@@ -121,6 +126,107 @@ cli.add_command(watch_command, name="watch")
 cli.add_command(demo_command, name="demo")
 cli.add_command(autopilot_command, name="autopilot")
 cli.add_command(doctor_top_command, name="doctor")
+cli.add_command(export_receipt_command, name="export-receipt")
+cli.add_command(ci_report_command, name="ci-report")
+cli.add_command(sign_command, name="sign")
+cli.add_command(test_command, name="test")
+cli.add_command(pty_shell_command, name="shell")
+
+
+# Config profiles
+@cli.group()
+def config() -> None:
+    """Manage CapSeal configuration profiles.
+
+    \b
+    Examples:
+        capseal config save production
+        capseal config load production
+        capseal config list
+    """
+
+
+@config.command("save")
+@click.argument("name")
+@click.option("--workspace", "-w", default=".", type=click.Path(exists=True))
+def config_save(name: str, workspace: str) -> None:
+    """Save current config as a named profile."""
+    import shutil
+    from pathlib import Path
+
+    ws = Path(workspace).resolve()
+    config_path = ws / ".capseal" / "config.json"
+    profiles_dir = ws / ".capseal" / "profiles"
+    profiles_dir.mkdir(parents=True, exist_ok=True)
+
+    if not config_path.exists():
+        click.echo("No config.json found. Run capseal init first.", err=True)
+        raise SystemExit(1)
+
+    dest = profiles_dir / f"{name}.json"
+    shutil.copy2(config_path, dest)
+    click.echo(f"Saved profile '{name}' -> {dest}")
+
+
+@config.command("load")
+@click.argument("name")
+@click.option("--workspace", "-w", default=".", type=click.Path(exists=True))
+def config_load(name: str, workspace: str) -> None:
+    """Load a named profile as the active config."""
+    import shutil
+    from pathlib import Path
+
+    ws = Path(workspace).resolve()
+    profiles_dir = ws / ".capseal" / "profiles"
+    source = profiles_dir / f"{name}.json"
+    config_path = ws / ".capseal" / "config.json"
+
+    if not source.exists():
+        available = _list_profiles(profiles_dir)
+        click.echo(f"Profile '{name}' not found. Available: {available}", err=True)
+        raise SystemExit(1)
+
+    shutil.copy2(source, config_path)
+    click.echo(f"Loaded profile '{name}'")
+
+
+@config.command("list")
+@click.option("--workspace", "-w", default=".", type=click.Path(exists=True))
+def config_list_cmd(workspace: str) -> None:
+    """List saved profiles."""
+    from pathlib import Path
+
+    ws = Path(workspace).resolve()
+    profiles_dir = ws / ".capseal" / "profiles"
+    if not profiles_dir.exists() or not list(profiles_dir.glob("*.json")):
+        click.echo("No saved profiles.")
+        return
+    for p in sorted(profiles_dir.glob("*.json")):
+        click.echo(f"  {p.stem}")
+
+
+def _list_profiles(profiles_dir) -> str:
+    """List available profile names."""
+    from pathlib import Path
+    profiles_dir = Path(profiles_dir)
+    if not profiles_dir.exists():
+        return "(none)"
+    names = [p.stem for p in profiles_dir.glob("*.json")]
+    return ", ".join(names) if names else "(none)"
+
+
+@cli.command("chain")
+@click.argument("cap_file", type=click.Path(exists=True))
+def chain_command(cap_file: str) -> None:
+    """Visualize the action chain in a .cap receipt.
+
+    \b
+    Example:
+        capseal chain .capseal/runs/latest.cap
+    """
+    from pathlib import Path
+    from .hub import show_action_chain
+    show_action_chain(Path(cap_file))
 
 
 @cli.command("mcp-serve")
@@ -224,7 +330,7 @@ def advanced() -> None:
 
 
 # Shell & Interactive
-advanced.add_command(shell_command, name="shell")
+advanced.add_command(shell_command, name="legacy-shell")
 
 # Tracing & Proofs
 advanced.add_command(trace_command, name="trace")
@@ -298,16 +404,36 @@ advanced.add_command(eval_command, name="eval")
 def main() -> None:
     """CLI entry point.
 
-    If no command is given, launches the interactive shell.
+    If no command is given, launches the interactive hub (or PTY shell
+    if default_command is set to "shell" in .capseal/config.json).
     """
     import sys
 
-    # If no args (or just --help/--version), check if we should launch shell
     if len(sys.argv) == 1:
-        # No arguments - launch interactive shell
-        run_shell()
+        # No arguments — check for default_command config
+        from pathlib import Path
+
+        capseal_dir = Path.cwd() / ".capseal"
+        if capseal_dir.exists():
+            config_path = capseal_dir / "config.json"
+            if config_path.exists():
+                import json
+
+                try:
+                    config = json.loads(config_path.read_text())
+                    if config.get("default_command") == "shell":
+                        from .pty_shell import run_pty_shell
+
+                        run_pty_shell(Path.cwd(), config)
+                        return
+                except (json.JSONDecodeError, OSError):
+                    pass
+
+        # Default: launch the hub TUI
+        from .hub import run_hub
+        run_hub()
     else:
-        # Has arguments - run normal CLI
+        # Has arguments — run normal CLI
         cli(prog_name="capseal")
 
 

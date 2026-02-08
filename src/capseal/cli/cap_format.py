@@ -385,6 +385,40 @@ def create_cap_file(
     return manifest
 
 
+def verify_cap_integrity(cap_path: Path) -> tuple[bool, str]:
+    """Check that a .cap file has not been tampered with.
+
+    Detects trailing data appended after the gzip stream, which tar
+    silently ignores.  Returns (ok, message).
+    """
+    import gzip
+    import io
+
+    raw = cap_path.read_bytes()
+    if not raw:
+        return False, "Empty file"
+
+    buf = io.BytesIO(raw)
+    try:
+        with gzip.GzipFile(fileobj=buf) as gz:
+            while True:
+                chunk = gz.read(1 << 20)
+                if not chunk:
+                    break
+    except Exception as exc:
+        return False, f"Decompression failed: {exc}"
+
+    consumed = buf.tell()
+    remaining = len(raw) - consumed
+    if remaining > 0:
+        return False, (
+            f"File tampered: {remaining} trailing byte(s) after gzip stream "
+            f"(expected {consumed} bytes, got {len(raw)})"
+        )
+
+    return True, "ok"
+
+
 def extract_cap_file(cap_path: Path, output_dir: Path) -> CapManifest:
     """Extract a .cap archive to a directory.
 
@@ -477,6 +511,9 @@ def create_run_cap_file(
 
     # Build manifest
     chain_hash = receipt.get("chain_hash", "")
+    # For MCP sessions that don't have run_receipt.json, use final_receipt_hash
+    if not chain_hash:
+        chain_hash = metadata.get("final_receipt_hash", "")
     run_id = run_dir.name
 
     manifest = CapManifest(

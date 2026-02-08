@@ -101,16 +101,40 @@ def fix_command(
     # Load API keys from .capseal/.env if available
     _load_capseal_env(target_path)
 
-    # Check for API key
-    if not dry_run:
-        if not os.environ.get("OPENAI_API_KEY") and not os.environ.get("ANTHROPIC_API_KEY"):
-            click.echo("Error: No API key found.", err=True)
+    # Check for API key or CLI proxy
+    import shutil as _shutil
+    has_api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
+    cli_binary = None
+
+    if not has_api_key:
+        # Look for CLI binary for subscription mode
+        config_path_early = target_path / ".capseal" / "config.json"
+        cfg_provider = ""
+        if config_path_early.exists():
+            try:
+                _cfg = json.loads(config_path_early.read_text())
+                cfg_provider = _cfg.get("provider", "")
+            except (json.JSONDecodeError, OSError):
+                pass
+
+        cli_map = {"anthropic": "claude", "openai": "codex", "google": "gemini"}
+        preferred = cli_map.get(cfg_provider)
+        if preferred and _shutil.which(preferred):
+            cli_binary = preferred
+        else:
+            for binary in ("claude", "codex", "gemini"):
+                if _shutil.which(binary):
+                    cli_binary = binary
+                    break
+
+        if not dry_run and not cli_binary:
+            click.echo(f"{RED}Error: No API key or provider CLI found.{RESET}", err=True)
             click.echo("", err=True)
-            click.echo("Set one of:", err=True)
-            click.echo("  export OPENAI_API_KEY=sk-...", err=True)
-            click.echo("  export ANTHROPIC_API_KEY=sk-ant-...", err=True)
+            click.echo("Fix requires either:", err=True)
+            click.echo("  • A provider CLI (claude, codex, gemini) — uses your subscription", err=True)
+            click.echo("  • An API key (ANTHROPIC_API_KEY, OPENAI_API_KEY)", err=True)
             click.echo("", err=True)
-            click.echo("Or run 'capseal init' to set up API credentials.", err=True)
+            click.echo("Install your provider's CLI or set an API key, then try again.", err=True)
             raise SystemExit(1)
 
     # target_path already set above for env loading
@@ -361,7 +385,7 @@ def fix_command(
             context_lines = lines[context_start:context_end]
             context = "\n".join(f"{context_start + j + 1}: {line}" for j, line in enumerate(context_lines))
 
-            # Generate patch with LLM
+            # Generate patch with LLM (or CLI proxy)
             patch_content = _generate_patch(
                 file_path=file_path,
                 file_content=file_content,
@@ -369,6 +393,7 @@ def fix_command(
                 finding=finding,
                 provider=provider,
                 model=model,
+                cli_binary=cli_binary,
             )
 
             if patch_content:
@@ -581,10 +606,9 @@ def _generate_patch(
     finding: dict,
     provider: str = "openai",
     model: str = "gpt-4o-mini",
+    cli_binary: str | None = None,
 ) -> str | None:
-    """Generate a patch for a finding using LLM."""
-    import openai
-
+    """Generate a patch for a finding using LLM or CLI proxy."""
     check_id = finding.get("check_id", "unknown")
     message = finding.get("extra", {}).get("message", "")
     start_line = finding.get("start", {}).get("line", 1)
@@ -620,26 +644,47 @@ Example format:
 """
 
     try:
-        client = openai.OpenAI()
-        response = client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.0,
-            max_tokens=1000,
-        )
-        diff = response.choices[0].message.content.strip()
+        if cli_binary:
+            # Subscription mode: use CLI proxy
+            result = subprocess.run(
+                [cli_binary, "--print", "-p", prompt],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            if result.returncode != 0:
+                return None
+            diff = result.stdout.strip()
+        else:
+            # API key mode: use OpenAI-compatible client
+            import openai
+            client = openai.OpenAI()
+            response = client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.0,
+                max_tokens=1000,
+            )
+            diff = response.choices[0].message.content.strip()
+
+        # Strip markdown fences if present
+        if diff.startswith("```"):
+            lines = diff.split("\n")
+            lines = lines[1:]
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+            diff = "\n".join(lines)
 
         # Validate it looks like a diff
         if diff.startswith("---") or diff.startswith("diff "):
             return diff
         elif "---" in diff:
-            # Extract diff portion
             idx = diff.find("---")
             return diff[idx:]
         else:
             return None
 
-    except Exception as e:
+    except Exception:
         return None
 
 

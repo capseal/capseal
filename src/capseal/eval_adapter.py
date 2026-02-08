@@ -34,6 +34,16 @@ from capseal.eval_constraints import (
     derive_constraint_alphas,
 )
 
+# Optional FRI proof upgrade
+try:
+    from bef_zk.fri.prover import fri_prove
+    from bef_zk.fri.verifier import fri_verify
+    from bef_zk.fri.config import FRIConfig
+    from bef_zk.stc.vc import VectorCommitment, VCCommitment
+    HAS_FRI = True
+except ImportError:
+    HAS_FRI = False
+
 
 @dataclass
 class EvalContext:
@@ -99,6 +109,7 @@ class EvalProofArtifacts:
     statement: EvalStatement
     verification_result: bool
     profile_data: dict[str, float]
+    proof_type: str = "constraint_check"
 
 
 def _hash_row(row_index: int, row: list[int]) -> bytes:
@@ -400,6 +411,7 @@ class EvalAdapter:
         proof_data = {
             "air_id": encoding_id,
             "version": "1.0",
+            "proof_type": "constraint_check",
             "statement": statement.to_dict(),
             "commitment": {
                 "row_root": commitment.row_root,
@@ -413,6 +425,16 @@ class EvalAdapter:
             "alphas_seed": alpha_seed.hex(),
             "binding_material": (binding_hash or statement_hash or b"").hex(),
         }
+
+        # Upgrade to full FRI proof when available
+        if HAS_FRI and valid and composition:
+            try:
+                from capseal.agent_adapter import _generate_fri_proof
+                fri_result = _generate_fri_proof(composition, commitment.row_root)
+                proof_data["proof_type"] = "fri"
+                proof_data["fri_proof"] = fri_result
+            except Exception:
+                pass  # Fall back to constraint_check proof
 
         # Add constraint details (for debugging/audit)
         failed_constraints = [
@@ -442,6 +464,7 @@ class EvalAdapter:
             statement=statement,
             verification_result=valid,
             profile_data=profile_data,
+            proof_type=proof_data.get("proof_type", "constraint_check"),
         )
 
     def verify(
@@ -568,6 +591,7 @@ def build_eval_capsule(
         },
         "verification": {
             "constraints_valid": proof_artifacts.verification_result,
+            "proof_type": proof_artifacts.proof_type,
         },
         "profile": proof_artifacts.profile_data,
     }

@@ -56,6 +56,9 @@ def _load_capseal_env(target_path: Path) -> None:
 @click.option("--profile", type=click.Choice(["security", "quality", "bugs", "all", "custom"]),
               default=None, help="Scan profile (default: from config or 'auto')")
 @click.option("--rules", type=click.Path(exists=True), default=None, help="Custom semgrep rules path")
+@click.option("--test-cmd", type=str, default=None, help="Shell command to validate patches (e.g. 'pytest')")
+@click.option("--from-git", is_flag=True, help="Learn from git history (free, instant — no LLM calls)")
+@click.option("--parallel", "-j", type=int, default=1, help="Max concurrent episodes per round (default: 1)")
 def learn_command(
     path: str,
     budget: float,
@@ -68,6 +71,9 @@ def learn_command(
     quiet: bool,
     profile: str | None = None,
     rules: str | None = None,
+    test_cmd: str | None = None,
+    from_git: bool = False,
+    parallel: int = 1,
 ) -> None:
     """Learn which patches fail on your codebase.
 
@@ -93,25 +99,6 @@ def learn_command(
     import subprocess
     import uuid
 
-    # Check for API key - first try environment, then .capseal/.env fallback
-    target_path = Path(path).expanduser().resolve()
-    _load_capseal_env(target_path)
-
-    if not os.environ.get("OPENAI_API_KEY") and not os.environ.get("ANTHROPIC_API_KEY"):
-        click.echo("Error: No API key found.", err=True)
-        click.echo("", err=True)
-        click.echo("Set one of:", err=True)
-        click.echo("  export OPENAI_API_KEY=sk-...", err=True)
-        click.echo("  export ANTHROPIC_API_KEY=sk-ant-...", err=True)
-        click.echo("", err=True)
-        click.echo("Or run 'capseal init' to set up API credentials.", err=True)
-        raise SystemExit(1)
-
-    import numpy as np
-
-    from ..budget import BudgetTracker, estimate_learning_cost, PRICING_PRESETS
-    from ..episode_runner import EpisodeRunner, EpisodeRunnerConfig
-
     # ANSI colors
     CYAN = "\033[96m"
     GREEN = "\033[92m"
@@ -120,6 +107,66 @@ def learn_command(
     DIM = "\033[2m"
     BOLD = "\033[1m"
     RESET = "\033[0m"
+
+    target_path = Path(path).expanduser().resolve()
+
+    # ── Git history learning (no LLM needed) ──────────────────────
+    if from_git:
+        from .git_learner import learn_from_git
+        _run_git_learn(target_path, quiet, CYAN, GREEN, YELLOW, RED, DIM, BOLD, RESET)
+        return
+
+    # Check for API key - first try environment, then .capseal/.env fallback
+    _load_capseal_env(target_path)
+
+    # Detect auth mode and CLI binary for subscription users
+    import shutil as _shutil
+    has_api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
+
+    config_path = target_path / ".capseal" / "config.json"
+    config_json_early = None
+    cli_binary = None
+    if config_path.exists():
+        try:
+            config_json_early = json.loads(config_path.read_text())
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    if not has_api_key:
+        # Try to find a CLI binary for subscription mode
+        provider = (config_json_early or {}).get("provider", "")
+        cli_map = {
+            "anthropic": "claude",
+            "openai": "codex",
+            "google": "gemini",
+        }
+        preferred = cli_map.get(provider)
+        if preferred and _shutil.which(preferred):
+            cli_binary = preferred
+        else:
+            # Try any available CLI
+            for binary in ("claude", "codex", "gemini"):
+                if _shutil.which(binary):
+                    cli_binary = binary
+                    break
+
+        if not cli_binary:
+            click.echo(f"{RED}Error: No API key or provider CLI found.{RESET}", err=True)
+            click.echo("", err=True)
+            click.echo("Training requires either:", err=True)
+            click.echo("  • A provider CLI (claude, codex, gemini) — uses your subscription", err=True)
+            click.echo("  • An API key (ANTHROPIC_API_KEY, OPENAI_API_KEY)", err=True)
+            click.echo("", err=True)
+            click.echo("Install your provider's CLI or set an API key, then try again.", err=True)
+            raise SystemExit(1)
+
+        if not quiet:
+            click.echo(f"  {DIM}Using {cli_binary} CLI (subscription mode){RESET}")
+
+    import numpy as np
+
+    from ..budget import BudgetTracker, estimate_learning_cost, PRICING_PRESETS
+    from ..episode_runner import EpisodeRunner, EpisodeRunnerConfig
 
     # target_path already set above for env loading
 
@@ -186,6 +233,11 @@ def learn_command(
 
         effective_profile = profile or (config_json or {}).get("scan_profile")
 
+        # Resolve test_cmd from config if not set via CLI
+        effective_test_cmd = test_cmd or (config_json or {}).get("test_cmd")
+        if effective_test_cmd and not quiet:
+            click.echo(f"{DIM}  Test command: {effective_test_cmd}{RESET}")
+
         if not quiet:
             profile_label = PROFILE_DISPLAY.get(effective_profile, effective_profile or "auto")
             click.echo(f"{DIM}[1/4] Scanning codebase with Semgrep ({profile_label})...{RESET}")
@@ -233,6 +285,12 @@ def learn_command(
                 grid_idx_to_findings[grid_idx] = []
             grid_idx_to_findings[grid_idx].append(finding)
 
+        # Build profile name map for display
+        grid_idx_to_name = {}
+        for gidx in grid_idx_to_findings:
+            feats = grid_idx_to_features(gidx)
+            grid_idx_to_name[gidx] = _describe_features(feats)
+
         if not quiet:
             click.echo(f"      Mapped to {len(grid_idx_to_findings)} unique risk profiles")
 
@@ -258,6 +316,8 @@ def learn_command(
             pricing_preset=pricing,
             budget_limit=budget,
             log_path=run_path / "episodes.jsonl",
+            test_cmd=effective_test_cmd,
+            cli_binary=cli_binary,
         )
         runner = EpisodeRunner(target_path, runner_config, budget_tracker)
 
@@ -285,127 +345,288 @@ def learn_command(
         total_successes = 0
         total_failures = 0
 
-        for round_num in range(1, rounds + 1):
-            # Check budget
-            if budget_tracker.budget_exhausted:
-                if not quiet:
-                    click.echo(f"  {YELLOW}Budget exhausted - stopping early{RESET}")
-                break
+        # ── Live training display ─────────────────────────────────────
+        profile_stats = {}  # name -> {passes, fails}
+        for gidx in grid_idx_to_findings:
+            pname = grid_idx_to_name.get(gidx, f"grid-{gidx}")
+            if pname not in profile_stats:
+                profile_stats[pname] = {"passes": 0, "fails": 0}
 
-            # Check time limit
-            if time_limit_seconds:
-                elapsed = (datetime.datetime.now() - start_time).total_seconds()
-                if elapsed >= time_limit_seconds:
-                    if not quiet:
-                        click.echo(f"  {YELLOW}Time limit reached - stopping early{RESET}")
-                    break
+        _live_round = [0]
+        _live_latest = [""]
+        _live_stop_reason = [""]
 
-            round_timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            round_id = f"R{round_num:04d}_{round_timestamp}"
-            round_dir = run_path / "rounds" / round_id
-            round_dir.mkdir(parents=True, exist_ok=True)
+        def _build_live_panel():
+            from rich.table import Table as RTable
+            from rich.panel import Panel as RPanel
+            from rich.console import Group as RGroup
+            from rich.text import Text as RText
+            from rich.box import ROUNDED as RBOX
 
-            if not quiet:
-                remaining = budget_tracker.remaining_budget
-                budget_str = f"${remaining:.2f} remaining" if remaining else ""
-                click.echo(f"  {CYAN}Round {round_num}/{rounds}{RESET} {DIM}{budget_str}{RESET}")
+            # Progress bar
+            pct = _live_round[0] / rounds if rounds > 0 else 0
+            bar_w = 30
+            filled = int(pct * bar_w)
+            bar = "━" * filled + "─" * (bar_w - filled)
+            remaining = budget_tracker.remaining_budget
+            header = RText()
+            header.append(f"Round {_live_round[0]}/{rounds} ", style="bold")
+            header.append(bar + " ", style="cyan")
+            header.append(f"${remaining:.2f} remaining", style="dim")
 
-            # Select targets using acquisition function
-            scores = compute_acquisition_score(alpha, beta)
-            K = min(targets_per_round, len(grid_idx_to_findings))
+            # Risk profile table
+            table = RTable(box=RBOX, expand=True, show_header=True, header_style="bold")
+            table.add_column("Risk Profile", style="bold", min_width=18)
+            table.add_column("Pass", justify="center", style="green", min_width=5)
+            table.add_column("Fail", justify="center", style="red", min_width=5)
+            table.add_column("p_fail", justify="center", min_width=7)
+            table.add_column("Status", justify="center", min_width=12)
 
-            # Only select from indices that have findings
-            available_indices = np.array(list(grid_idx_to_findings.keys()))
-            if len(available_indices) == 0:
-                break
-
-            available_scores = scores[available_indices]
-            sorted_indices = np.argsort(-available_scores)[:K]
-            selected = available_indices[sorted_indices]
-
-            # Save plan
-            plan = {
-                "round_id": round_id,
-                "selected": selected.tolist(),
-                "episodes_per_target": 1,
-            }
-            (round_dir / "active_sampling_plan.json").write_text(json.dumps(plan, indent=2))
-
-            # Run episodes
-            results = []
-            round_successes = 0
-            round_failures = 0
-
-            for target_idx, grid_idx in enumerate(selected):
-                grid_idx = int(grid_idx)
-
-                # Check budget before each episode
-                if budget_tracker.budget_exhausted:
-                    break
-
-                finding_list = grid_idx_to_findings.get(grid_idx, [])
-                if not finding_list:
-                    continue
-
-                finding = finding_list[0]  # Take first finding for this grid point
-                episode_id = f"{round_id}_{target_idx:04d}"
-
-                episode_result = runner.run_episode(episode_id, grid_idx, finding)
-
-                results.append({
-                    "round_id": round_id,
-                    "grid_idx": grid_idx,
-                    "episode_idx": 0,
-                    "success": 1 if episode_result.success else 0,
-                    "cost": episode_result.cost,
-                })
-
-                if episode_result.success:
-                    round_successes += 1
-                    alpha[grid_idx] += 1  # Alpha = successes
+            for pname, data in profile_stats.items():
+                total = data["passes"] + data["fails"]
+                if total == 0:
+                    pf_str = "—"
+                    status = "[dim]⏳ waiting[/dim]"
                 else:
-                    round_failures += 1
-                    beta[grid_idx] += 1  # Beta = failures
+                    pf = (data["fails"] + 1) / (total + 2)  # Beta mean with prior
+                    pf_str = f"{pf:.2f}"
+                    if pf > 0.6:
+                        status = "[red]✗ risky[/red]"
+                    elif pf > 0.3:
+                        status = "[yellow]⚠ learning[/yellow]"
+                    else:
+                        status = "[green]✓ low risk[/green]"
+                table.add_row(pname, str(data["passes"]), str(data["fails"]), pf_str, status)
 
-            total_successes += round_successes
-            total_failures += round_failures
+            latest = RText(f"\nLatest: {_live_latest[0]}", style="dim") if _live_latest[0] else RText("")
+            stop = RText(f"\n{_live_stop_reason[0]}", style="yellow") if _live_stop_reason[0] else RText("")
 
-            # Save results
-            import csv
-            results_path = round_dir / "agent_results.csv"
-            with open(results_path, "w", newline="") as f:
-                writer = csv.DictWriter(f, fieldnames=["round_id", "grid_idx", "episode_idx", "success", "cost"])
-                writer.writeheader()
-                writer.writerows(results)
-
-            # Save posteriors
-            np.savez(
-                run_path / "beta_posteriors.npz",
-                alpha=alpha,
-                beta=beta,
-                grid_version="semgrep_scan",
-                run_uuid=run_uuid,
+            return RPanel(
+                RGroup(header, "", table, latest, stop),
+                title="[bold cyan]═══ TRAINING ═══[/bold cyan]",
+                border_style="cyan",
+                expand=False,
             )
 
-            # Compute metrics
-            tube = compute_tube_metrics(alpha, beta)
-            metrics = {
-                "round_id": round_id,
-                "round_num": round_num,
-                "tube": tube,
-                "counts": {"successes": round_successes, "failures": round_failures},
-            }
-            (round_dir / "metrics.json").write_text(json.dumps(metrics, indent=2))
-            all_metrics.append(metrics)
+        # Import Live display
+        from rich.live import Live
+        from rich.console import Console as RConsole
+        _live_console = RConsole()
 
-            # Build round receipt
-            round_config = {"grid_version": "semgrep_scan", "targets_per_round": targets_per_round}
-            receipt = build_round_receipt(round_dir, round_config)
-            (round_dir / "round_receipt.json").write_text(json.dumps(receipt, indent=2))
-            round_receipts.append(receipt)
+        live_ctx = Live(_build_live_panel(), refresh_per_second=4, console=_live_console) if not quiet else None
+        if live_ctx:
+            live_ctx.__enter__()
 
-            if not quiet:
-                click.echo(f"    {GREEN}✓ {round_successes}{RESET} success  {RED}✗ {round_failures}{RESET} fail  cost: ${budget_tracker.total_cost:.2f}")
+        try:
+            for round_num in range(1, rounds + 1):
+                # Check budget
+                if budget_tracker.budget_exhausted:
+                    _live_stop_reason[0] = "Budget exhausted — stopping early"
+                    if quiet:
+                        click.echo(f"  {YELLOW}Budget exhausted - stopping early{RESET}")
+                    break
+
+                # Check time limit
+                if time_limit_seconds:
+                    elapsed = (datetime.datetime.now() - start_time).total_seconds()
+                    if elapsed >= time_limit_seconds:
+                        _live_stop_reason[0] = "Time limit reached — stopping early"
+                        if quiet:
+                            click.echo(f"  {YELLOW}Time limit reached - stopping early{RESET}")
+                        break
+
+                _live_round[0] = round_num
+                if live_ctx:
+                    live_ctx.update(_build_live_panel())
+
+                round_timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                round_id = f"R{round_num:04d}_{round_timestamp}"
+                round_dir = run_path / "rounds" / round_id
+                round_dir.mkdir(parents=True, exist_ok=True)
+
+                if quiet:
+                    remaining = budget_tracker.remaining_budget
+                    budget_str = f"${remaining:.2f} remaining" if remaining else ""
+                    click.echo(f"  {CYAN}Round {round_num}/{rounds}{RESET} {DIM}{budget_str}{RESET}")
+
+                # Select targets using acquisition function
+                scores = compute_acquisition_score(alpha, beta)
+                K = min(targets_per_round, len(grid_idx_to_findings))
+
+                available_indices = np.array(list(grid_idx_to_findings.keys()))
+                if len(available_indices) == 0:
+                    break
+
+                available_scores = scores[available_indices]
+                sorted_indices = np.argsort(-available_scores)[:K]
+                selected = available_indices[sorted_indices]
+
+                # Save plan
+                plan = {
+                    "round_id": round_id,
+                    "selected": selected.tolist(),
+                    "episodes_per_target": 1,
+                }
+                (round_dir / "active_sampling_plan.json").write_text(json.dumps(plan, indent=2))
+
+                # Run episodes (parallel if --parallel > 1)
+                results = []
+                round_successes = 0
+                round_failures = 0
+                _display_lock = __import__("threading").Lock()
+
+                def _run_one(target_idx, grid_idx):
+                    """Run a single episode — safe to call from threads."""
+                    grid_idx = int(grid_idx)
+                    finding_list = grid_idx_to_findings.get(grid_idx, [])
+                    if not finding_list:
+                        return None
+                    finding = finding_list[0]
+                    episode_id = f"{round_id}_{target_idx:04d}"
+                    return (grid_idx, finding, runner.run_episode(episode_id, grid_idx, finding))
+
+                if parallel > 1:
+                    from concurrent.futures import ThreadPoolExecutor, as_completed
+                    episode_futures = []
+                    with ThreadPoolExecutor(max_workers=parallel) as executor:
+                        for target_idx, grid_idx in enumerate(selected):
+                            if budget_tracker.budget_exhausted:
+                                break
+                            episode_futures.append(
+                                executor.submit(_run_one, target_idx, int(grid_idx))
+                            )
+                        for future in as_completed(episode_futures):
+                            try:
+                                result_tuple = future.result(timeout=120)
+                            except Exception:
+                                continue
+                            if result_tuple is None:
+                                continue
+                            gidx, finding, episode_result = result_tuple
+                            results.append({
+                                "round_id": round_id,
+                                "grid_idx": gidx,
+                                "episode_idx": 0,
+                                "success": 1 if episode_result.success else 0,
+                                "cost": episode_result.cost,
+                            })
+                            pname = grid_idx_to_name.get(gidx, f"grid-{gidx}")
+                            with _display_lock:
+                                if episode_result.success:
+                                    round_successes += 1
+                                    beta[gidx] += 1
+                                    profile_stats.setdefault(pname, {"passes": 0, "fails": 0})["passes"] += 1
+                                    icon = "✓"
+                                else:
+                                    round_failures += 1
+                                    alpha[gidx] += 1
+                                    profile_stats.setdefault(pname, {"passes": 0, "fails": 0})["fails"] += 1
+                                    icon = "✗"
+                                check_id = finding.get("check_id", "")
+                                short_check = check_id.split(".")[-1] if check_id else pname
+                                file_name = Path(finding.get("path", "")).name
+                                _live_latest[0] = f"{icon} {short_check} in {file_name}"
+                            if live_ctx:
+                                live_ctx.update(_build_live_panel())
+                else:
+                    # Sequential (default)
+                    for target_idx, grid_idx in enumerate(selected):
+                        grid_idx = int(grid_idx)
+                        if budget_tracker.budget_exhausted:
+                            break
+                        result_tuple = _run_one(target_idx, grid_idx)
+                        if result_tuple is None:
+                            continue
+                        gidx, finding, episode_result = result_tuple
+                        results.append({
+                            "round_id": round_id,
+                            "grid_idx": gidx,
+                            "episode_idx": 0,
+                            "success": 1 if episode_result.success else 0,
+                            "cost": episode_result.cost,
+                        })
+                        pname = grid_idx_to_name.get(gidx, f"grid-{gidx}")
+                        if episode_result.success:
+                            round_successes += 1
+                            beta[gidx] += 1
+                            profile_stats.setdefault(pname, {"passes": 0, "fails": 0})["passes"] += 1
+                            icon = "✓"
+                        else:
+                            round_failures += 1
+                            alpha[gidx] += 1
+                            profile_stats.setdefault(pname, {"passes": 0, "fails": 0})["fails"] += 1
+                            icon = "✗"
+                        check_id = finding.get("check_id", "")
+                        short_check = check_id.split(".")[-1] if check_id else pname
+                        file_name = Path(finding.get("path", "")).name
+                        _live_latest[0] = f"{icon} {short_check} in {file_name}"
+                        if live_ctx:
+                            live_ctx.update(_build_live_panel())
+
+                total_successes += round_successes
+                total_failures += round_failures
+
+                # Append to episode_history.jsonl for instant risk preview
+                history_path = target_path / ".capseal" / "models" / "episode_history.jsonl"
+                history_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(history_path, "a") as hf:
+                    for r in results:
+                        gidx = r["grid_idx"]
+                        finding_list = grid_idx_to_findings.get(gidx, [])
+                        finding = finding_list[0] if finding_list else {}
+                        pname = grid_idx_to_name.get(gidx, f"grid-{gidx}")
+                        hf.write(json.dumps({
+                            "grid_idx": gidx,
+                            "profile_name": pname,
+                            "success": bool(r["success"]),
+                            "cost": r["cost"],
+                            "description": f"{finding.get('check_id', 'unknown')} in {Path(finding.get('path', 'unknown')).name}",
+                            "finding_rule": finding.get("check_id", ""),
+                            "finding_file": finding.get("path", ""),
+                            "round_num": round_num,
+                        }) + "\n")
+
+                # Save results
+                import csv
+                results_path = round_dir / "agent_results.csv"
+                with open(results_path, "w", newline="") as f:
+                    writer = csv.DictWriter(f, fieldnames=["round_id", "grid_idx", "episode_idx", "success", "cost"])
+                    writer.writeheader()
+                    writer.writerows(results)
+
+                # Save posteriors
+                np.savez(
+                    run_path / "beta_posteriors.npz",
+                    alpha=alpha,
+                    beta=beta,
+                    grid_version="semgrep_scan",
+                    run_uuid=run_uuid,
+                    n_episodes=total_successes + total_failures,
+                )
+
+                # Compute metrics
+                tube = compute_tube_metrics(alpha, beta)
+                metrics = {
+                    "round_id": round_id,
+                    "round_num": round_num,
+                    "tube": tube,
+                    "counts": {"successes": round_successes, "failures": round_failures},
+                }
+                (round_dir / "metrics.json").write_text(json.dumps(metrics, indent=2))
+                all_metrics.append(metrics)
+
+                # Build round receipt
+                round_config = {"grid_version": "semgrep_scan", "targets_per_round": targets_per_round}
+                receipt = build_round_receipt(round_dir, round_config)
+                (round_dir / "round_receipt.json").write_text(json.dumps(receipt, indent=2))
+                round_receipts.append(receipt)
+
+                if quiet:
+                    click.echo(f"    {GREEN}✓ {round_successes}{RESET} success  {RED}✗ {round_failures}{RESET} fail  cost: ${budget_tracker.total_cost:.2f}")
+
+        finally:
+            if live_ctx:
+                live_ctx.__exit__(None, None, None)
 
         # Close runner
         runner.close()
@@ -636,6 +857,94 @@ def _describe_features(features: list[int]) -> str:
         key_features = [descriptions[0], descriptions[2]]  # complexity + severity
 
     return " + ".join(key_features[:3])
+
+
+def _run_git_learn(
+    target_path: Path,
+    quiet: bool,
+    CYAN: str, GREEN: str, YELLOW: str, RED: str, DIM: str, BOLD: str, RESET: str,
+) -> None:
+    """Run git-history-based learning (free, instant)."""
+    import json
+    import datetime
+    import numpy as np
+    from .git_learner import learn_from_git
+
+    if not quiet:
+        click.echo(f"\n{CYAN}{'═' * 65}{RESET}")
+        click.echo(f"{CYAN}  LEARNING FROM GIT HISTORY{RESET}")
+        click.echo(f"{CYAN}{'═' * 65}{RESET}")
+        click.echo(f"  Target:   {target_path}")
+        click.echo(f"  Cost:     $0.00 (no LLM calls)")
+        click.echo(f"{CYAN}{'═' * 65}{RESET}\n")
+
+    results = learn_from_git(str(target_path), quiet=quiet)
+
+    if not results:
+        click.echo(f"  {YELLOW}No learnable commits found in git history.{RESET}")
+        click.echo(f"  {DIM}Try 'capseal learn .' for LLM-based training instead.{RESET}")
+        return
+
+    # Convert results to Beta posteriors
+    n_points = 1024
+    alpha = np.ones(n_points, dtype=np.int64)
+    beta = np.ones(n_points, dtype=np.int64)
+
+    total_passes = 0
+    total_fails = 0
+    for profile_name, data in results.items():
+        grid_idx = data.get("grid_idx", 0)
+        if 0 <= grid_idx < n_points:
+            alpha[grid_idx] += data["fails"]  # alpha = failures (p_fail)
+            beta[grid_idx] += data["passes"]  # beta = successes
+        total_passes += data["passes"]
+        total_fails += data["fails"]
+
+    n_episodes = total_passes + total_fails
+
+    # Save posteriors
+    models_dir = target_path / ".capseal" / "models"
+    models_dir.mkdir(parents=True, exist_ok=True)
+    np.savez(
+        models_dir / "beta_posteriors.npz",
+        alpha=alpha,
+        beta=beta,
+        grid_version="semgrep_scan",
+        run_uuid="git-history",
+        n_episodes=n_episodes,
+    )
+
+    # Summary
+    if not quiet:
+        click.echo(f"\n{CYAN}{'═' * 65}{RESET}")
+        click.echo(f"{CYAN}  LEARNING COMPLETE{RESET}")
+        click.echo(f"{CYAN}{'═' * 65}{RESET}")
+        click.echo(f"  Commits analyzed: {n_episodes}")
+        click.echo(f"  Clean commits:   {total_passes}")
+        click.echo(f"  Risky commits:   {total_fails}")
+        click.echo()
+
+        click.echo(f"  {BOLD}Risk profiles learned:{RESET}")
+        for profile_name, data in results.items():
+            total = data["passes"] + data["fails"]
+            if total == 0:
+                continue
+            pf = (data["fails"] + 1) / (total + 2)
+            if pf > 0.6:
+                color = RED
+                label = "risky"
+            elif pf > 0.3:
+                color = YELLOW
+                label = "moderate"
+            else:
+                color = GREEN
+                label = "low risk"
+            click.echo(f"  {color}•{RESET} {profile_name}: {data['passes']} pass, {data['fails']} fail ({label})")
+
+        click.echo()
+        click.echo(f"  Model saved to {models_dir / 'beta_posteriors.npz'}")
+        click.echo(f"  {DIM}Future sessions will use this model for gating.{RESET}")
+        click.echo(f"{CYAN}{'═' * 65}{RESET}\n")
 
 
 __all__ = ["learn_command"]
