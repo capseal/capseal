@@ -9,12 +9,17 @@ git clone <your-capseal-repo-url>
 cd capseal
 pip install -e .
 cd your-project
-capseal autopilot .
-# Autopilot runs in dry-run mode by default — shows what it WOULD fix.
-# Add --apply to write changes. Your code is not modified without explicit consent.
+capseal quickstart
 ```
 
-That's it. CapSeal scans your code, attempts fixes, gates risky changes, and produces a tamper-evident receipt. The risk model improves with each run — the more you use it, the sharper the gating gets.
+That command runs: fast init, git-history learning, a live gate decision with a readable risk label, then seals and verifies a `.cap` receipt.
+
+Then continue with:
+
+```bash
+capseal learn . --rounds 5
+capseal mcp-serve
+```
 
 **Requirements:** Python 3.10+, an LLM API key (Anthropic, OpenAI, or Google), and [Semgrep](https://semgrep.dev) for scanning. CapSeal uses the LLM to generate patches — no API key means no patch generation (scanning and gating still work). Code stays local. Only minimal patch context (the finding + ~20-60 surrounding lines needed to generate a fix) is sent to your chosen LLM provider for patch generation. No code is sent to CapSeal servers — there are no CapSeal servers.
 
@@ -139,6 +144,7 @@ Each `.cap` file contains a manifest (session metadata, timestamps, action count
 
 | Command | Description |
 |---------|-------------|
+| `capseal quickstart` | One-command onboarding: init, learn, gate, seal, verify |
 | `capseal autopilot .` | Full pipeline, zero config |
 | `capseal init` | Interactive setup (pick agents, provider, model) |
 | `capseal scan .` | Find issues with Semgrep |

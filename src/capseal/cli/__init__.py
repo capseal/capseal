@@ -1,6 +1,7 @@
 """CapSeal CLI - Verified AI Code Changes.
 
 Core Commands:
+    quickstart - One-command onboarding demo (init -> learn -> gate -> seal)
     autopilot - Full pipeline, zero config (init → learn → fix → verify)
     init      - Initialize workspace
     scan      - Find issues with Semgrep
@@ -98,6 +99,7 @@ def cli() -> None:
 
     \b
     Zero-config:
+      capseal quickstart .      Fast onboarding flow with sealed demo
       capseal autopilot .        Full pipeline, zero decisions
 
     \b
@@ -270,6 +272,17 @@ def mcp_serve_command(workspace: str | None) -> None:
     """
     from ..mcp_server import run_mcp_server
     run_mcp_server(workspace=workspace)
+
+
+@cli.command("quickstart")
+@click.option("--workspace", "-w", default=".", type=click.Path(exists=True), help="Target repository")
+@click.option("--no-color", is_flag=True, help="Disable ANSI colors")
+def quickstart_command(workspace: str, no_color: bool) -> None:
+    """Get CapSeal running quickly: init -> learn -> gate -> seal -> verify."""
+    from ..quickstart import run_quickstart
+    rc = run_quickstart(workspace=workspace, color=not no_color)
+    if rc != 0:
+        raise SystemExit(rc)
 
 
 @cli.command("export-skill")
