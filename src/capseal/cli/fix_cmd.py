@@ -19,7 +19,11 @@ import sys
 from pathlib import Path
 
 import click
-from capseal.risk_engine import THRESHOLD_APPROVE, evaluate_risk_for_finding
+from capseal.risk_engine import (
+    THRESHOLD_APPROVE,
+    THRESHOLD_DENY,
+    evaluate_risk_for_finding,
+)
 
 
 # ANSI colors
@@ -56,7 +60,12 @@ def _load_capseal_env(target_path: Path) -> None:
 @click.argument("path", type=click.Path(exists=True), default=".")
 @click.option("--dry-run", is_flag=True, help="Show plan and gate decisions without generating patches")
 @click.option("--apply", "apply_patches", is_flag=True, help="Apply verified patches to working tree")
-@click.option("--threshold", type=float, default=0.6, help="Failure probability threshold (default: 0.6)")
+@click.option(
+    "--threshold",
+    type=float,
+    default=THRESHOLD_DENY,
+    help=f"Failure probability threshold (default: {THRESHOLD_DENY})",
+)
 @click.option("--provider", default="openai", help="LLM provider")
 @click.option("--model", default="gpt-4o-mini", help="LLM model")
 @click.option("--max-workers", default=4, type=int, help="Max parallel agents")
