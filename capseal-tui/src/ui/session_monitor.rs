@@ -1,10 +1,10 @@
 use crate::capseal::CapSealState;
-use crate::ui::action_chain_view::ActionChainView;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Widget};
+use std::collections::HashMap;
 
 pub struct SessionMonitor<'a> {
     pub state: &'a CapSealState,
@@ -139,18 +139,121 @@ fn render_latest_gate(state: &CapSealState, area: Rect, buf: &mut Buffer) {
 
 // ── Section 2: Files Touched + Live Stats ───────────────────────────────
 
-fn render_middle(state: &CapSealState, scroll_offset: usize, area: Rect, buf: &mut Buffer) {
+fn render_middle(state: &CapSealState, _scroll_offset: usize, area: Rect, buf: &mut Buffer) {
     let cols = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(65), Constraint::Percentage(35)])
         .split(area);
 
-    ActionChainView {
-        chain: &state.action_chain,
-        scroll_offset,
-    }
-    .render(cols[0], buf);
+    render_files_touched(state, cols[0], buf);
     render_live_stats(state, cols[1], buf);
+}
+
+#[derive(Clone)]
+struct FileRiskEntry {
+    file: String,
+    p_fail: Option<f64>,
+}
+
+fn render_files_touched(state: &CapSealState, area: Rect, buf: &mut Buffer) {
+    let block = Block::default()
+        .title(" Files Touched ")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::DarkGray));
+    let inner = block.inner(area);
+    block.render(area, buf);
+
+    if inner.height == 0 || inner.width < 12 {
+        return;
+    }
+
+    // Deduplicate by file and keep the latest gate decision for each file.
+    let mut latest_by_file: HashMap<String, FileRiskEntry> = HashMap::new();
+    for event in &state.action_chain {
+        if event.action_type != "gate" {
+            continue;
+        }
+        if event.target.trim().is_empty() {
+            continue;
+        }
+        latest_by_file.insert(
+            event.target.clone(),
+            FileRiskEntry {
+                file: event.target.clone(),
+                p_fail: event.p_fail,
+            },
+        );
+    }
+
+    if latest_by_file.is_empty() {
+        Paragraph::new(vec![
+            Line::raw(""),
+            Line::styled("  No gated file actions yet", Style::default().fg(Color::DarkGray)),
+        ])
+        .render(inner, buf);
+        return;
+    }
+
+    let mut entries: Vec<FileRiskEntry> = latest_by_file.into_values().collect();
+    entries.sort_by(|a, b| {
+        let ap = a.p_fail.unwrap_or(-1.0);
+        let bp = b.p_fail.unwrap_or(-1.0);
+        bp.partial_cmp(&ap).unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let mut lines: Vec<Line> = Vec::new();
+    lines.push(Line::styled(
+        format!("  {} unique files", entries.len()),
+        Style::default().fg(Color::DarkGray),
+    ));
+
+    let max_rows = inner.height.saturating_sub(1) as usize;
+    let file_w = (inner.width as usize).saturating_sub(18).max(8);
+
+    for entry in entries.into_iter().take(max_rows.saturating_sub(1)) {
+        let (bar, bar_color, p_text, warn, warn_color) = match entry.p_fail {
+            Some(p_raw) => {
+                let p = p_raw.clamp(0.0, 1.0);
+                let filled = ((p * 10.0).round() as usize).min(10);
+                let bar = format!(
+                    "{}{}",
+                    "\u{2588}".repeat(filled),
+                    "\u{2591}".repeat(10 - filled)
+                );
+                let color = if p < 0.3 {
+                    Color::Green
+                } else if p < 0.6 {
+                    Color::Yellow
+                } else {
+                    Color::Red
+                };
+                let warn = if p >= 0.7 { "\u{26a0}" } else { " " };
+                let warn_color = if p >= 0.7 { Color::Red } else { Color::DarkGray };
+                (bar, color, format!("{:.2}", p), warn, warn_color)
+            }
+            None => (
+                "\u{2591}\u{2591}\u{2591}\u{2591}\u{2591}\u{2591}\u{2591}\u{2591}\u{2591}\u{2591}".to_string(),
+                Color::DarkGray,
+                "--".to_string(),
+                " ",
+                Color::DarkGray,
+            ),
+        };
+
+        lines.push(Line::from(vec![
+            Span::styled(format!("{} ", warn), Style::default().fg(warn_color)),
+            Span::styled(
+                format!("{:<w$}", truncate_str(&entry.file, file_w), w = file_w),
+                Style::default().fg(Color::White),
+            ),
+            Span::raw(" "),
+            Span::styled(bar, Style::default().fg(bar_color)),
+            Span::styled(format!(" {}", p_text), Style::default().fg(Color::DarkGray)),
+        ]));
+    }
+
+    Paragraph::new(lines).render(inner, buf);
 }
 
 fn render_live_stats(state: &CapSealState, area: Rect, buf: &mut Buffer) {

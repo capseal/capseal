@@ -69,3 +69,7 @@ Thumbs.db
 .env.*
 *.key
 *.pem
+.capseal/operator.json
+.capseal/.env
+.capseal/config.json
+*.api_key

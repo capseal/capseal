@@ -35,6 +35,7 @@ struct MenuItem {
 pub struct HubView<'a> {
     pub workspace_name: &'a str,
     pub provider: &'a str,
+    pub agent_name: &'a str,
     pub model_name: &'a str,
     pub initialized: bool,
     pub model_loaded: bool,
@@ -129,6 +130,12 @@ impl<'a> HubView<'a> {
                     enabled: true,
                 },
                 MenuItem {
+                    label: "Run a command",
+                    description: "Open CapSeal shell",
+                    value: "shell",
+                    enabled: true,
+                },
+                MenuItem {
                     label: "Risk report",
                     description: "View learned risk model",
                     value: "report",
@@ -215,6 +222,17 @@ impl<'a> Widget for HubView<'a> {
                         Span::styled(provider_display, white),
                     ]));
                 }
+
+                // Agent
+                let agent_display = if self.agent_name.trim().is_empty() {
+                    "not configured"
+                } else {
+                    self.agent_name
+                };
+                lines.push(Line::from(vec![
+                    Span::styled("    Agent       ", dim),
+                    Span::styled(agent_display, white),
+                ]));
 
                 // Model status
                 let (dot, dot_color, model_text) = if self.model_loaded {

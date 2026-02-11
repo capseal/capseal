@@ -232,18 +232,28 @@ def _show_status_banner(target: Path, config: dict) -> None:
     else:
         model_status = "[dim]✗ not trained yet[/dim] [dim](select 'Train risk model' below)[/dim]"
 
-    # Session count
+    # Session count (align with TUI semantics):
+    # count unique run sessions and show how many are sealed.
     runs_dir = target / ".capseal" / "runs"
-    cap_files = []
+    sessions: dict[str, dict[str, bool]] = {}
     if runs_dir.exists():
-        cap_files = [f for f in runs_dir.glob("*.cap") if not f.is_symlink()]
+        for entry in runs_dir.iterdir():
+            if entry.name in ("latest", "latest.cap"):
+                continue
+            if entry.is_dir():
+                sessions.setdefault(entry.name, {"sealed": False})
+            elif entry.suffix == ".cap" and not entry.is_symlink():
+                key = entry.stem
+                session = sessions.setdefault(key, {"sealed": False})
+                session["sealed"] = True
 
-    session_count = len(cap_files)
+    session_count = len(sessions)
+    sealed_count = sum(1 for s in sessions.values() if s["sealed"])
     last_session = ""
-    if cap_files:
-        newest = max(cap_files, key=lambda f: f.name)
+    if sessions:
+        newest_name = max(sessions.keys())
         try:
-            ts_str = newest.stem.split("-")[0]
+            ts_str = newest_name.split("-")[0]
             dt = datetime.strptime(ts_str, "%Y%m%dT%H%M%S")
             delta = datetime.now() - dt
             if delta.days > 0:
@@ -265,7 +275,7 @@ def _show_status_banner(target: Path, config: dict) -> None:
         lines.append(f"  Agent:      {agent_name}")
     lines.append(f"  Risk model: {model_status}")
     if session_count > 0:
-        sess_str = f"  Sessions:   {session_count}"
+        sess_str = f"  Sessions:   {session_count} ({sealed_count} sealed)"
         if last_session:
             sess_str += f", last: {last_session}"
         lines.append(sess_str)

@@ -29,14 +29,6 @@ struct Cli {
     /// Skip hub menu, launch shell directly
     #[arg(long)]
     shell: bool,
-
-    /// Launch a specific agent immediately
-    #[arg(long)]
-    agent: Option<String>,
-
-    /// Theme name
-    #[arg(long, default_value = "default")]
-    theme: String,
 }
 
 fn main() -> Result<()> {

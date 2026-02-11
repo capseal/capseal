@@ -149,7 +149,7 @@ class EpisodeRunner:
                 shell=True,
                 cwd=str(self.target_path),
                 capture_output=True,
-                timeout=120,
+                timeout=max(30, min(300, self.config.timeout_seconds)),
             )
             return result.returncode == 0
         except sp.TimeoutExpired:
@@ -220,6 +220,17 @@ class EpisodeRunner:
                 result.duration_ms = duration_ms
                 result.retries = retries
 
+                # Retry once on in-band timeout-style failures returned by the
+                # patch engine (for example CLI timeout responses).
+                if (
+                    not result.success
+                    and result.error_type == "timeout"
+                    and attempt < self.config.max_retries
+                ):
+                    retries += 1
+                    time.sleep(1)
+                    continue
+
                 with self._stats_lock:
                     if result.success:
                         self.episodes_success += 1
@@ -234,7 +245,10 @@ class EpisodeRunner:
                 last_error_type = "timeout"
                 with self._stats_lock:
                     self.episodes_timeout += 1
-                # Don't retry timeouts
+                retries += 1
+                if attempt < self.config.max_retries:
+                    time.sleep(1)
+                    continue
                 break
 
             except BudgetExhaustedError as e:
@@ -601,11 +615,12 @@ class EpisodeRunner:
 
         cli = self.config.cli_binary
         try:
+            call_timeout = max(60, self.config.timeout_seconds - 10)
             result = sp.run(
                 [cli, "--print", "-p", prompt],
                 capture_output=True,
                 text=True,
-                timeout=120,
+                timeout=call_timeout,
             )
 
             if result.returncode != 0:

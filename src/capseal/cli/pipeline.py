@@ -325,8 +325,8 @@ def init_pipeline(output: Path, pipeline_id: str, capsules: tuple[Path, ...]):
             "stage_name": stage_name,
             "capsule_path": str(capsule_path),
             "capsule_hash": capsule_hash,
-            "inputs_commitment": "TODO: fill in inputs commitment",
-            "outputs_commitment": "TODO: fill in outputs commitment",
+            "inputs_commitment": "PENDING_INPUTS_COMMITMENT",
+            "outputs_commitment": "PENDING_OUTPUTS_COMMITMENT",
         })
 
     # Create edges between consecutive stages

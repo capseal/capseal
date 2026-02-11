@@ -248,6 +248,8 @@ def mcp_serve_command(workspace: str | None) -> None:
         capseal_gate   - Gate a proposed action (returns approve/deny/flag)
         capseal_record - Record an executed action
         capseal_seal   - Seal the session into a .cap receipt
+        capseal_status - Get current session and project status
+        capseal_context - Get change history for a specific file
 
     \b
     Usage:

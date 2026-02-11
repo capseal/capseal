@@ -1,5 +1,6 @@
 use std::io::Read;
 use std::path::Path;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct SessionSummary {
@@ -18,25 +19,47 @@ pub fn list_sessions(runs_dir: &Path) -> Vec<SessionSummary> {
         return Vec::new();
     }
 
-    let mut sessions = Vec::new();
+    let mut sessions_by_name: HashMap<String, SessionSummary> = HashMap::new();
 
     if let Ok(entries) = std::fs::read_dir(runs_dir) {
         for entry in entries.filter_map(|e| e.ok()) {
             let path = entry.path();
+            let entry_name = entry.file_name().to_string_lossy().to_string();
+
+            if entry_name == "latest" || entry_name == "latest.cap" {
+                continue;
+            }
 
             if path.is_dir() {
                 // Run directory — try to read manifest or metadata
                 if let Some(summary) = read_run_dir(&path) {
-                    sessions.push(summary);
+                    sessions_by_name.entry(summary.name.clone()).or_insert(summary);
                 }
             } else if path.extension().map(|e| e == "cap").unwrap_or(false) {
                 // .cap file — try to read manifest from tar.gz
                 if let Some(summary) = read_cap_file(&path) {
-                    sessions.push(summary);
+                    if let Some(existing) = sessions_by_name.get_mut(&summary.name) {
+                        if existing.agent == "unknown" && summary.agent != "unknown" {
+                            existing.agent = summary.agent.clone();
+                        }
+                        if existing.action_count == 0 && summary.action_count > 0 {
+                            existing.action_count = summary.action_count;
+                        }
+                        if !existing.proof_verified && summary.proof_verified {
+                            existing.proof_verified = true;
+                        }
+                        if existing.proof_type == "none" && summary.proof_type != "none" {
+                            existing.proof_type = summary.proof_type.clone();
+                        }
+                    } else {
+                        sessions_by_name.insert(summary.name.clone(), summary);
+                    }
                 }
             }
         }
     }
+
+    let mut sessions: Vec<SessionSummary> = sessions_by_name.into_values().collect();
 
     // Sort by name (which is typically a timestamp)
     sessions.sort_by(|a, b| b.name.cmp(&a.name));

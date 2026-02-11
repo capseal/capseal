@@ -599,6 +599,9 @@ async def interactive_setup_telegram():
     print("Step 3: Copy the bot token you receive")
     print()
 
+    print("Security note: storing tokens in operator.json is convenient but plaintext.")
+    print("Recommended: store token in env var CAPSEAL_TELEGRAM_BOT_TOKEN.")
+    store_plaintext = input("Store token in ~/.capseal/operator.json? [y/N]: ").strip().lower() in {"y", "yes"}
     bot_token = input("Paste your bot token: ").strip()
     if not bot_token:
         print("No token provided, aborting.")
@@ -638,7 +641,8 @@ async def interactive_setup_telegram():
 
     config.setdefault("channels", {})
     config["channels"]["telegram"] = {
-        "bot_token": bot_token,
+        "bot_token": bot_token if store_plaintext else None,
+        "bot_token_env": None if store_plaintext else "CAPSEAL_TELEGRAM_BOT_TOKEN",
         "chat_id": chat_id,
         "voice_notes": False,
         "decision_buttons": True,
@@ -648,6 +652,9 @@ async def interactive_setup_telegram():
         json.dump(config, f, indent=2)
 
     print(f"\n\u2705 Config saved to {config_path}")
+    if not store_plaintext:
+        print("\nSet this before running the operator:")
+        print("  export CAPSEAL_TELEGRAM_BOT_TOKEN='<your-bot-token>'")
     print(f"\nRun: capseal operator /your/project --test")
 
 

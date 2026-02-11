@@ -11,3 +11,4 @@ pub mod session_complete_view;
 pub mod sessions_view;
 pub mod status_bar;
 pub mod title_bar;
+pub mod verify_view;

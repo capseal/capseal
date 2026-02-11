@@ -1057,13 +1057,13 @@ def test_{safe_name}_no_shell_injection():
     # 2. Properly sanitize input
     # 3. Reject dangerous characters
 
-    # TODO: Import and call the function with malicious_input
+    # NOTE: Import and call the target function with malicious_input
     # Example:
     # from {module_path} import run_command
     # result = run_command(malicious_input)
     # assert "rm" not in result.args  # Verify command wasn't executed
 
-    pass  # Replace with actual test
+    pass  # Replace placeholder with project-specific test call
 ''',
 
     "NO_SQL_INJECTION": '''"""Test that SQL injection is not possible."""
@@ -1077,13 +1077,13 @@ def test_{safe_name}_no_sql_injection():
     malicious_input = "'; DROP TABLE users; --"
 
     # The function under test should use parameterized queries
-    # TODO: Import and call the function with malicious_input
+    # NOTE: Import and call the target function with malicious_input
     # Example:
     # from {module_path} import query_user
     # result = query_user(malicious_input)
     # Verify the query was parameterized, not string-concatenated
 
-    pass  # Replace with actual test
+    pass  # Replace placeholder with project-specific test call
 ''',
 }
 

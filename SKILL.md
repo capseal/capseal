@@ -11,7 +11,7 @@ metadata:
     requires:
       bins: ["capseal", "semgrep"]
     install:
-      - pip install capseal semgrep
+      - pip install semgrep
 ---
 
 # CapSeal — Learned Risk Gating for Code Changes
@@ -26,6 +26,30 @@ approving safe ones. Every decision is sealed into a cryptographic .cap receipt.
 
 This is NOT static rule matching. CapSeal builds a statistical model of what
 works and what breaks on THIS codebase specifically.
+
+## Deep Integration via MCP
+
+For maximum control, CapSeal also exposes an MCP server that any agent framework
+can call directly. The OpenClaw skill is a wrapper; MCP is the universal path.
+
+```json
+{
+  "capseal": {
+    "command": "capseal",
+    "args": ["mcp-serve"],
+    "transport": "stdio"
+  }
+}
+```
+
+MCP tools exposed by the server:
+- `capseal_gate` — gate a proposed action before execution
+- `capseal_record` — record the result of an executed action
+- `capseal_seal` — seal the session into a `.cap` receipt
+- `capseal_status` — recover current session/project state
+- `capseal_context` — file-level history across sessions
+
+Works with Claude Code, Cursor, LangChain, and any MCP-compatible client.
 
 ## CRITICAL RULES
 

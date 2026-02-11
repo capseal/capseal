@@ -1,9 +1,9 @@
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
 /// Layout for active session: 3-zone split
-/// Left 20%: compact control panel
-/// Top-right 50%: session monitor
-/// Bottom-right 50%: terminal
+/// Left 25%: compact control panel
+/// Top-right 60%: session monitor
+/// Bottom-right 40%: terminal
 pub struct SessionLayout {
     pub title_bar: Rect,
     pub control_panel: Rect,
@@ -28,24 +28,24 @@ impl SessionLayout {
         let main_area = outer[1];
         let status_bar = outer[2];
 
-        // Step 2: Horizontal — left 20% | right 80%
+        // Step 2: Horizontal — left 25% | right 75%
         let horizontal = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
-                Constraint::Percentage(20),
-                Constraint::Percentage(80),
+                Constraint::Percentage(25),
+                Constraint::Percentage(75),
             ])
             .split(main_area);
 
         let control_panel = horizontal[0];
         let right_area = horizontal[1];
 
-        // Step 3: Right side vertical — session monitor 50% | terminal 50%
+        // Step 3: Right side vertical — session monitor 60% | terminal 40%
         let right_split = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Percentage(50),
-                Constraint::Percentage(50),
+                Constraint::Percentage(60),
+                Constraint::Percentage(40),
             ])
             .split(right_area);
 

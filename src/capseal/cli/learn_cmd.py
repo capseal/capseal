@@ -59,6 +59,12 @@ def _load_capseal_env(target_path: Path) -> None:
 @click.option("--test-cmd", type=str, default=None, help="Shell command to validate patches (e.g. 'pytest')")
 @click.option("--from-git", is_flag=True, help="Learn from git history (free, instant — no LLM calls)")
 @click.option("--parallel", "-j", type=int, default=1, help="Max concurrent episodes per round (default: 1)")
+@click.option(
+    "--episode-timeout",
+    type=int,
+    default=None,
+    help="Per-episode timeout in seconds (default: provider-aware, configurable via .capseal/config.json -> learning.episode_timeout_seconds)",
+)
 def learn_command(
     path: str,
     budget: float,
@@ -74,6 +80,7 @@ def learn_command(
     test_cmd: str | None = None,
     from_git: bool = False,
     parallel: int = 1,
+    episode_timeout: int | None = None,
 ) -> None:
     """Learn which patches fail on your codebase.
 
@@ -309,9 +316,51 @@ def learn_command(
             storage_path=run_path / "budget.json",
         )
 
+        # Resolve per-episode timeout:
+        # CLI flag > config learning.episode_timeout_seconds > provider defaults.
+        provider_for_timeout = (config_json_early or {}).get("provider", "")
+        if not provider_for_timeout:
+            if os.environ.get("ANTHROPIC_API_KEY"):
+                provider_for_timeout = "anthropic"
+            elif os.environ.get("OPENAI_API_KEY"):
+                provider_for_timeout = "openai"
+            elif os.environ.get("GOOGLE_API_KEY"):
+                provider_for_timeout = "google"
+
+        if not provider_for_timeout and cli_binary:
+            provider_for_timeout = {
+                "claude": "anthropic",
+                "codex": "openai",
+                "gemini": "google",
+            }.get(cli_binary, "")
+
+        config_learning = ((config_json_early or {}).get("learning") or {})
+        config_timeout = config_learning.get("episode_timeout_seconds")
+        provider_timeout_defaults = {
+            "anthropic": 180,
+            "openai": 90,
+            "google": 120,
+        }
+        resolved_episode_timeout = (
+            episode_timeout
+            or config_timeout
+            or provider_timeout_defaults.get(provider_for_timeout, 60)
+        )
+        try:
+            resolved_episode_timeout = int(resolved_episode_timeout)
+        except (TypeError, ValueError):
+            resolved_episode_timeout = 60
+        resolved_episode_timeout = max(30, resolved_episode_timeout)
+
+        if not quiet:
+            click.echo(
+                f"{DIM}  Episode timeout: {resolved_episode_timeout}s"
+                f"{' (' + provider_for_timeout + ')' if provider_for_timeout else ''}{RESET}"
+            )
+
         # Initialize episode runner
         runner_config = EpisodeRunnerConfig(
-            timeout_seconds=60,
+            timeout_seconds=resolved_episode_timeout,
             max_retries=1,
             pricing_preset=pricing,
             budget_limit=budget,
@@ -331,6 +380,7 @@ def learn_command(
             "budget": budget,
             "pricing_preset": pricing,
             "created_at": now.isoformat(),
+            "episode_timeout_seconds": resolved_episode_timeout,
         }
         (run_path / "run_metadata.json").write_text(json.dumps(metadata, indent=2))
 
@@ -519,7 +569,7 @@ def learn_command(
                             )
                         for future in as_completed(episode_futures):
                             try:
-                                result_tuple = future.result(timeout=120)
+                                result_tuple = future.result()
                             except Exception:
                                 continue
                             if result_tuple is None:

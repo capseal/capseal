@@ -747,7 +747,7 @@ def init_intent_command(project_dir: str, purpose: str | None, strict: bool) -> 
 
     intent = {
         "schema": INTENT_SCHEMA_VERSION,
-        "purpose": purpose or profile["readme"].get("first_paragraph", "")[:200] or "TODO: describe project purpose",
+        "purpose": purpose or profile["readme"].get("first_paragraph", "")[:200] or "Describe project purpose",
         "allowed_providers": [],
         "security_invariants": {
             "no_raw_sql": strict,

@@ -74,11 +74,18 @@ def doctor_command(path: str, output_json: bool) -> None:
 
     # 1. Workspace
     has_workspace = capseal_dir.exists()
+    has_config = (capseal_dir / "config.json").exists()
     results["workspace"] = has_workspace
+    results["config"] = has_config
     if not output_json:
-        _check("Config", (capseal_dir / "config.json").exists(),
-               ".capseal/config.json found",
+        _check("Workspace", has_workspace,
+               ".capseal/ found",
                "No .capseal/ workspace (run: capseal init)")
+        if has_workspace:
+            if has_config:
+                _check("Config", True, ".capseal/config.json found")
+            else:
+                _check_warn("Config", "No .capseal/config.json (using defaults/autodetect)")
 
     if not has_workspace:
         if output_json:
@@ -113,33 +120,42 @@ def doctor_command(path: str, output_json: bool) -> None:
         "custom": "CAPSEAL_API_KEY",
     }
 
-    if auth_method == "subscription":
+    if has_config:
+        if auth_method == "subscription":
+            results["provider"] = True
+            if not output_json:
+                _check("Provider", True, f"{provider_display.get(provider, provider)} (subscription)")
+        else:
+            env_var = env_key_map.get(provider, "CAPSEAL_API_KEY")
+            # Check environment, then .capseal/.env
+            has_key = bool(os.environ.get(env_var))
+            if not has_key:
+                env_file = capseal_dir / ".env"
+                if env_file.exists():
+                    for line in env_file.read_text().splitlines():
+                        if line.startswith(f"{env_var}=") and len(line.split("=", 1)[1].strip()) > 0:
+                            has_key = True
+                            break
+            results["provider"] = has_key
+            if not output_json:
+                _check("Provider", has_key,
+                       f"{provider_display.get(provider, provider)} ({env_var} set)",
+                       f"{provider_display.get(provider, provider)} ({env_var} NOT set)")
+    else:
+        # Config-less workspaces are supported by the TUI and CLI defaults.
         results["provider"] = True
         if not output_json:
-            _check("Provider", True, f"{provider_display.get(provider, provider)} (subscription)")
-    else:
-        env_var = env_key_map.get(provider, "CAPSEAL_API_KEY")
-        # Check environment, then .capseal/.env
-        has_key = bool(os.environ.get(env_var))
-        if not has_key:
-            env_file = capseal_dir / ".env"
-            if env_file.exists():
-                for line in env_file.read_text().splitlines():
-                    if line.startswith(f"{env_var}=") and len(line.split("=", 1)[1].strip()) > 0:
-                        has_key = True
-                        break
-        results["provider"] = has_key
-        if not output_json:
-            _check("Provider", has_key,
-                   f"{provider_display.get(provider, provider)} ({env_var} set)",
-                   f"{provider_display.get(provider, provider)} ({env_var} NOT set)")
+            _check_warn("Provider", "Not set in config (using environment/auto-detect)")
 
     # 4. Model
     model = config.get("model", "") or ""
     results["model"] = model
     if not output_json:
-        _check("Model", bool(model), model or "configured",
-               "Not set (run: capseal init)")
+        if has_config:
+            _check("Model", bool(model), model or "configured",
+                   "Not set (run: capseal init)")
+        else:
+            _check_warn("Model", "Not set in config (provider default will be used)")
 
     # 5. Semgrep
     semgrep_path = shutil.which("semgrep")

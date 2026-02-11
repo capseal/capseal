@@ -114,7 +114,7 @@ def scenario_full_session(events_path: Path, delay: float = 2.0):
             "decision": "denied",
             "p_fail": 0.86,
             "observations": ["Security-critical file", "Removes validation", "High historical failure rate"],
-            "diff": "-    if token.expires_at < datetime.now():\n-        raise TokenExpiredError()\n+    # TODO: re-enable expiry check",
+            "diff": "-    if token.expires_at < datetime.now():\n-        raise TokenExpiredError()\n+    # temporary bypass of expiry check",
             "risk_factors": "Critical: removes security validation from auth module",
         }
     })

@@ -56,6 +56,12 @@ export CAPSEAL_TELEGRAM_CHAT_ID="your-chat-id"
 export CAPSEAL_NOTIFY_THRESHOLD="0.5"
 ```
 
+Recommended (preferred key name):
+
+```bash
+export CAPSEAL_TELEGRAM_BOT_TOKEN="your-bot-token"
+```
+
 ### Config File
 
 ```json
@@ -63,7 +69,7 @@ export CAPSEAL_NOTIFY_THRESHOLD="0.5"
   "notify_threshold": 0.5,
   "channels": {
     "telegram": {
-      "bot_token": "...",
+      "bot_token_env": "CAPSEAL_TELEGRAM_BOT_TOKEN",
       "chat_id": "...",
       "voice_notes": false,
       "decision_buttons": true
@@ -71,6 +77,9 @@ export CAPSEAL_NOTIFY_THRESHOLD="0.5"
   }
 }
 ```
+
+`bot_token` is still supported for local-only setups, but storing plaintext secrets
+in `operator.json` is discouraged.
 
 ## Telegram Commands
 

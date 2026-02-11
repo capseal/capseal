@@ -26,6 +26,7 @@ use crate::ui::workspace_picker::WorkspacePicker;
 use crate::ui::risk_map_view::RiskMapView;
 use crate::ui::session_complete_view::{SessionCompleteInfo, SessionCompleteView};
 use crate::ui::sessions_view::SessionsView;
+use crate::ui::verify_view::{VerifyInfo, VerifyView};
 use crate::ui::status_bar::StatusBar;
 use crate::ui::title_bar::TitleBar;
 use crate::workspace::PickerState;
@@ -79,6 +80,8 @@ pub struct App {
 
     // Overlay state
     show_help: bool,
+    show_verify_overlay: bool,
+    verify_info: Option<VerifyInfo>,
     show_session_complete: bool,
     session_complete_info: Option<SessionCompleteInfo>,
     session_start_time: Option<Instant>,
@@ -146,6 +149,8 @@ impl App {
                     .unwrap_or_else(|| "shell".to_string())
             },
             show_help: false,
+            show_verify_overlay: false,
+            verify_info: None,
             show_session_complete: false,
             session_complete_info: None,
             session_start_time: None,
@@ -358,6 +363,113 @@ impl App {
         self.pending_write_delay = None;
     }
 
+    fn find_latest_cap_file(&self) -> Option<PathBuf> {
+        let runs_dir = self.config.capseal_dir().join("runs");
+        if !runs_dir.exists() {
+            return None;
+        }
+
+        let latest_link = runs_dir.join("latest.cap");
+        if latest_link.exists() {
+            return Some(latest_link.canonicalize().unwrap_or(latest_link));
+        }
+
+        let mut caps: Vec<PathBuf> = std::fs::read_dir(&runs_dir)
+            .ok()?
+            .filter_map(|e| e.ok().map(|x| x.path()))
+            .filter(|p| {
+                p.extension().map(|e| e == "cap").unwrap_or(false)
+                    && p.file_name()
+                        .map(|n| n.to_string_lossy() != "latest.cap")
+                        .unwrap_or(true)
+            })
+            .collect();
+        caps.sort();
+        caps.pop()
+    }
+
+    fn refresh_verify_overlay(&mut self) {
+        let mut info = VerifyInfo::default();
+        let cap_path = match self.find_latest_cap_file() {
+            Some(path) => path,
+            None => {
+                info.status = "ERROR".to_string();
+                info.error = Some("No .cap receipts found in .capseal/runs".to_string());
+                self.verify_info = Some(info);
+                return;
+            }
+        };
+
+        info.cap_path = cap_path.display().to_string();
+
+        let cap_arg = cap_path.to_string_lossy().to_string();
+        match std::process::Command::new("capseal")
+            .args(["verify", &cap_arg, "--json"])
+            .output()
+        {
+            Ok(output) => {
+                let parsed = serde_json::from_slice::<serde_json::Value>(&output.stdout);
+                match parsed {
+                    Ok(v) => {
+                        info.status = v
+                            .get("status")
+                            .and_then(|s| s.as_str())
+                            .unwrap_or("ERROR")
+                            .to_string();
+                        info.chain_hash = v
+                            .get("chain_hash")
+                            .or_else(|| v.get("capsule_hash"))
+                            .and_then(|h| h.as_str())
+                            .unwrap_or("")
+                            .to_string();
+
+                        if let Some(n) = v.get("num_actions").and_then(|n| n.as_u64()) {
+                            info.count_label = "Actions".to_string();
+                            info.count_value = n.to_string();
+                        } else if let Some(n) = v.get("rounds_verified").and_then(|n| n.as_u64())
+                        {
+                            info.count_label = "Rounds".to_string();
+                            info.count_value = n.to_string();
+                        } else if let Some(n) =
+                            v.get("statements_verified").and_then(|n| n.as_u64())
+                        {
+                            info.count_label = "Statements".to_string();
+                            info.count_value = n.to_string();
+                        }
+
+                        if let Some(err) = v.get("error").and_then(|e| e.as_str()) {
+                            info.error = Some(err.to_string());
+                        }
+                    }
+                    Err(_) => {
+                        info.status = "ERROR".to_string();
+                        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                        info.error = Some(if stderr.is_empty() {
+                            "Failed to parse verify output".to_string()
+                        } else {
+                            stderr
+                        });
+                    }
+                }
+
+                if !output.status.success() && info.error.is_none() {
+                    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                    if !stderr.is_empty() {
+                        info.error = Some(stderr);
+                    } else if info.status == "REJECTED" {
+                        info.error = Some("Receipt verification failed".to_string());
+                    }
+                }
+            }
+            Err(e) => {
+                info.status = "ERROR".to_string();
+                info.error = Some(format!("Failed to run capseal verify: {}", e));
+            }
+        }
+
+        self.verify_info = Some(info);
+    }
+
     fn draw(&mut self, frame: &mut ratatui::Frame) {
         let area = frame.area();
         self.last_height = area.height;
@@ -516,6 +628,7 @@ impl App {
             let hub = HubView {
                 workspace_name: &ws_name,
                 provider: &self.config.provider,
+                agent_name: &self.config.default_agent,
                 model_name: &self.config.model,
                 initialized: self.config.initialized,
                 model_loaded: self.capseal_state.model_loaded,
@@ -575,6 +688,22 @@ impl App {
             );
         }
 
+        // Verify overlay
+        if self.show_verify_overlay {
+            let overlay_w = 76.min(area.width.saturating_sub(4));
+            let overlay_h = 14.min(area.height.saturating_sub(4));
+            let overlay_area = ratatui::layout::Rect::new(
+                area.x + (area.width.saturating_sub(overlay_w)) / 2,
+                area.y + (area.height.saturating_sub(overlay_h)) / 2,
+                overlay_w,
+                overlay_h,
+            );
+            ratatui::widgets::Clear.render(overlay_area, frame.buffer_mut());
+            if let Some(ref info) = self.verify_info {
+                frame.render_widget(VerifyView { info }, overlay_area);
+            }
+        }
+
         // Session Complete overlay
         if self.show_session_complete {
             if let Some(ref info) = self.session_complete_info {
@@ -614,12 +743,14 @@ impl App {
                     ("F1", "Help"),
                     ("F2", "Sessions"),
                     ("F3", "Risk Map"),
+                    ("F5", "Verify"),
                     ("F10", "Quit"),
                 ],
                 Focus::ControlPanel => vec![
                     ("Ctrl+H", "Terminal"),
                     ("s/v/r/c", "Actions"),
                     ("F1", "Help"),
+                    ("F5", "Verify"),
                     ("F10", "Quit"),
                 ],
             }
@@ -627,6 +758,7 @@ impl App {
             vec![
                 ("\u{2191}\u{2193}", "Navigate"),
                 ("Enter", "Select"),
+                ("F5", "Verify"),
                 ("q", "Quit"),
             ]
         }
@@ -644,12 +776,30 @@ impl App {
             return Ok(Action::Continue);
         }
 
+        // F5 opens verify overlay in any mode
+        if key.code == KeyCode::F(5) {
+            self.refresh_verify_overlay();
+            self.show_verify_overlay = true;
+            return Ok(Action::Continue);
+        }
+
         // If help is showing, Esc closes it
         if self.show_help {
             if key.code == KeyCode::Esc {
                 self.show_help = false;
             }
             return Ok(Action::Continue);
+        }
+
+        // Verify overlay: Esc/Enter/q closes, F5 refreshes.
+        if self.show_verify_overlay {
+            match key.code {
+                KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') => {
+                    self.show_verify_overlay = false;
+                    return Ok(Action::Continue);
+                }
+                _ => return Ok(Action::Continue),
+            }
         }
 
         // Agent picker overlay
@@ -790,6 +940,7 @@ impl App {
         HubView {
             workspace_name: Box::leak(ws_name.into_boxed_str()),
             provider: Box::leak(self.config.provider.clone().into_boxed_str()),
+            agent_name: Box::leak(self.config.default_agent.clone().into_boxed_str()),
             model_name: Box::leak(self.config.model.clone().into_boxed_str()),
             initialized: self.capseal_state.initialized,
             model_loaded: self.capseal_state.model_loaded,
@@ -1016,6 +1167,10 @@ impl App {
             }
             "sessions" => {
                 self.mode = AppMode::Sessions;
+            }
+            "shell" => {
+                let (cols, rows) = self.terminal_spawn_size();
+                self.spawn_terminal_with_cmd(cols, rows, "capseal shell")?;
             }
             "report" => {
                 self.mode = AppMode::RiskMap;

@@ -5,7 +5,9 @@ CapSeal is a trust layer for AI coding agents. It learns which code changes fail
 ## Quick Start (30 seconds)
 
 ```bash
-pip install capseal
+git clone <your-capseal-repo-url>
+cd capseal
+pip install -e .
 cd your-project
 capseal autopilot .
 # Autopilot runs in dry-run mode by default — shows what it WOULD fix.
@@ -40,7 +42,10 @@ Chain:   intact (5/5 hashes valid)
 ## Protect Your AI Agents (2 minutes)
 
 ```bash
-pip install capseal
+# If you installed from source above, skip this block.
+git clone <your-capseal-repo-url>
+cd capseal
+pip install -e .
 cd your-project
 capseal init
 ```
@@ -78,14 +83,21 @@ Supported agents:
 - That the risk model is perfect on the first run (it improves with more data)
 - Signer identity (receipts prove what happened, not who did it — signing is on the roadmap)
 
-## Four Ways to Use CapSeal
+## Three Ways to Use CapSeal
 
 | Mode | Command | Who it's for |
-|------|---------|-------------|
-| Autopilot | `capseal autopilot .` | Developers who want one-command guardrails |
-| Step by step | `init → learn → fix → verify` | Developers who want full control |
-| Agent wrapper | `capseal init` (select agents) | Anyone using AI coding agents |
-| CI/CD | `capseal autopilot . --ci` | Automated pipelines |
+|------|---------|--------------|
+| Standalone CLI | `capseal fix .` | Developers using CapSeal directly in their own repo |
+| MCP Server | `capseal mcp-serve` | Any MCP client (Claude Code, Cursor, LangChain, custom agents) |
+| OpenClaw Skill | Install from ClawHub | OpenClaw users who want CapSeal as a skill |
+
+The MCP server is the universal integration path:
+
+```json
+{"capseal": {"command": "capseal", "args": ["mcp-serve"], "transport": "stdio"}}
+```
+
+Use the CLI when running CapSeal directly yourself. Use the OpenClaw skill if you are already in that ecosystem.
 
 ## Agent Wrapper Flow
 

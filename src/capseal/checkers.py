@@ -1336,6 +1336,15 @@ def get_semgrep_version() -> str:
         return "unknown"
 
 
+def get_hypothesis_version() -> str:
+    """Get installed hypothesis version for cache keying."""
+    try:
+        from importlib.metadata import version
+        return version("hypothesis")
+    except Exception:
+        return "unknown"
+
+
 def get_env_key() -> str:
     """Generate environment fingerprint."""
     import sys
@@ -1378,7 +1387,7 @@ def register_default_checkers():
         property_test_checker,
         CheckerInfo(
             checker_id="hypothesis",
-            checker_version="6.0.0",  # TODO: detect actual version
+            checker_version=get_hypothesis_version(),
             env_key=env_key,
         )
     )
