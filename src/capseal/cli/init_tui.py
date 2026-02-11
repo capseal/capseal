@@ -10,6 +10,9 @@ import sys
 import time
 from pathlib import Path
 
+from .tui_compat import suppress_cpr, is_inside_tui, emit_tui_event
+suppress_cpr()
+
 from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
@@ -20,6 +23,163 @@ import questionary
 from questionary import Style
 
 console = Console()
+
+
+# ── Default models per provider ──────────────────────────────────────────────
+
+DEFAULT_MODELS = {
+    "anthropic": "claude-sonnet-4-20250514",
+    "openai": "chatgpt-5.2",
+    "google": "gemini-3-pro",
+    "custom": "",
+}
+
+
+# ── Simple TUI helpers ──────────────────────────────────────────────────────
+
+def _simple_choice(prompt: str, choices: list[str], default: str = "") -> str:
+    """print()/input() replacement for questionary.select()."""
+    while True:
+        raw = input(prompt).strip().lower()
+        if not raw and default:
+            return default
+        if raw in choices:
+            return raw
+        print(f"  Choose from: {', '.join(choices)}")
+
+
+def run_init_tui_simple(target_dir: str = "."):
+    """Compact init flow for use inside the Rust TUI embedded terminal.
+
+    Uses only print()/input() — no Rich panels, no questionary, no banner.
+    """
+    target = Path(target_dir).resolve()
+    capseal_dir = target / ".capseal"
+
+    print(f"\n  CapSeal — initialize workspace")
+    print(f"  Target: {target}\n")
+
+    # Reinitialize check
+    if capseal_dir.exists():
+        ans = input("  Already initialized. Reinitialize? [y/N]: ").strip().lower()
+        if ans != "y":
+            print("  Aborted.")
+            return
+
+    # Provider
+    provider = _simple_choice(
+        "  Provider? [anthropic/openai/google/custom]: ",
+        ["anthropic", "openai", "google", "custom"],
+        default="anthropic",
+    )
+
+    # Auth method
+    auth_method = "api_key"
+    api_key = ""
+    env_key_map = {
+        "anthropic": "ANTHROPIC_API_KEY",
+        "openai": "OPENAI_API_KEY",
+        "google": "GOOGLE_API_KEY",
+        "custom": "CAPSEAL_API_KEY",
+    }
+    env_var = env_key_map[provider]
+
+    if provider != "custom":
+        auth_method = _simple_choice(
+            "  Auth? [api-key/subscription]: ",
+            ["api-key", "subscription"],
+            default="subscription",
+        )
+        if auth_method == "api-key":
+            auth_method = "api_key"
+
+    if auth_method == "api_key":
+        existing_key = os.environ.get(env_var, "")
+        if existing_key:
+            use_it = input(f"  Found {env_var} in env. Use it? [Y/n]: ").strip().lower()
+            if use_it != "n":
+                api_key = existing_key
+            else:
+                api_key = input(f"  {env_var}: ").strip()
+        else:
+            api_key = input(f"  {env_var}: ").strip()
+
+    # Model
+    default_model = DEFAULT_MODELS.get(provider, "")
+    if default_model:
+        model = input(f"  Model? [{default_model}]: ").strip() or default_model
+    else:
+        model = input("  Model name: ").strip()
+
+    # Focus
+    focus = _simple_choice(
+        "  Focus? [everything/security/quality/bugs]: ",
+        ["everything", "security", "quality", "bugs"],
+        default="everything",
+    )
+    scan_profile = "all" if focus == "everything" else focus
+
+    # Test command
+    test_cmd = input("  Test command? (blank for none): ").strip()
+
+    # ── Create workspace ──────────────────────────────────────────────────
+    print()
+    for d in [capseal_dir, capseal_dir / "models", capseal_dir / "runs", capseal_dir / "policies"]:
+        d.mkdir(parents=True, exist_ok=True)
+
+    config = {
+        "version": "0.2.0",
+        "provider": provider,
+        "model": model,
+        "auth_method": auth_method,
+        "api_key_env": env_var if auth_method == "api_key" else None,
+        "plan": "free",
+        "scan_profile": scan_profile,
+        "agents": ["cli-only"],
+        "integrations": {},
+        "gate": {
+            "threshold": 0.6,
+            "uncertainty_threshold": 0.15,
+        },
+        "test_cmd": test_cmd if test_cmd else None,
+        "learn": {
+            "default_rounds": 5,
+            "default_budget": 5.0,
+        },
+    }
+
+    config_path = capseal_dir / "config.json"
+    with open(config_path, "w") as f:
+        json.dump(config, f, indent=2)
+
+    if auth_method == "api_key" and api_key:
+        env_path = capseal_dir / ".env"
+        with open(env_path, "w") as f:
+            f.write(f"{env_var}={api_key}\n")
+        env_path.chmod(0o600)
+        os.environ[env_var] = api_key
+
+    policy = {
+        "name": "default",
+        "gate_threshold": 0.6,
+        "uncertainty_threshold": 0.15,
+        "auto_apply": False,
+        "require_verification": True,
+    }
+    policy_path = capseal_dir / "policies" / "default.json"
+    with open(policy_path, "w") as f:
+        json.dump(policy, f, indent=2)
+
+    print(f"  Workspace initialized.")
+    print(f"  Config:  .capseal/config.json")
+    print(f"  Provider: {provider}  Model: {model}")
+    print(f"  Focus: {scan_profile}  Auth: {auth_method}")
+    if test_cmd:
+        print(f"  Test cmd: {test_cmd}")
+    print()
+
+    emit_tui_event("init_complete", f"provider={provider} model={model}")
+
 
 # ── Styling ──────────────────────────────────────────────────────────────────
 
@@ -107,6 +267,9 @@ def animate_dots(msg: str, duration: float = 0.8):
 # ── Main onboarding flow ────────────────────────────────────────────────────
 
 def run_init_tui(target_dir: str = "."):
+    if is_inside_tui():
+        return run_init_tui_simple(target_dir)
+
     target = Path(target_dir).resolve()
     capseal_dir = target / ".capseal"
 

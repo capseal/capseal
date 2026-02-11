@@ -56,12 +56,54 @@ _session_cache_count: int = 0  # Number of .cap files at last cache build
 _gate_decisions: dict[str, dict] = {}
 
 
-def _emit_event(event_type: str, summary: str) -> None:
+def _read_intervention(gate_key: str) -> dict | None:
+    """Read and consume a matching intervention from intervention.json."""
+    global _workspace
+    workspace = Path(_workspace) if _workspace else Path.cwd()
+    intervention_path = workspace / ".capseal" / "intervention.json"
+
+    if not intervention_path.exists():
+        return None
+
+    try:
+        with open(intervention_path) as f:
+            queue = json.load(f)
+
+        if not isinstance(queue, list) or not queue:
+            return None
+
+        # Find matching intervention (by target file or first in queue)
+        match = None
+        remaining = []
+        for item in queue:
+            if match is None:
+                target = item.get("target")
+                if target is None or target == gate_key:
+                    match = item
+                    continue
+            remaining.append(item)
+
+        # Write remaining back (or delete file if empty)
+        if remaining:
+            with open(intervention_path, "w") as f:
+                json.dump(remaining, f, indent=2)
+        else:
+            intervention_path.unlink(missing_ok=True)
+
+        return match
+
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def _emit_event(event_type: str, summary: str, data: dict | None = None) -> None:
     """Append event to .capseal/events.jsonl for live status consumers."""
     global _workspace
     workspace = Path(_workspace) if _workspace else Path.cwd()
     events_path = workspace / ".capseal" / "events.jsonl"
     event = {"type": event_type, "timestamp": _time.time(), "summary": summary}
+    if data:
+        event["data"] = data
     try:
         events_path.parent.mkdir(parents=True, exist_ok=True)
         with open(events_path, "a") as f:
@@ -145,6 +187,15 @@ def _get_runtime():
         output_dir=run_dir,
         gate_posteriors=posteriors_path if posteriors_path.exists() else None,
     )
+
+    # Emit session_start event for operator/TUI
+    agent_name = os.environ.get("CAPSEAL_AGENT", "unknown")
+    _emit_event("session_start", f"Session started: {agent_name}", data={
+        "session_id": run_dir.name,
+        "agent": agent_name,
+        "workspace": str(workspace),
+        "model": os.environ.get("CAPSEAL_MODEL", "unknown"),
+    })
 
     return _runtime
 
@@ -675,6 +726,21 @@ async def _handle_gate(args: dict[str, Any]) -> list[TextContent]:
         }
         _gate_decisions[gate_key] = {"decision": "pass", "q": 0.0, "confidence": 0.0}
 
+    # Check for operator intervention (approve/deny override from Telegram etc.)
+    intervention = _read_intervention(gate_key)
+    if intervention:
+        action = intervention.get("action", "")
+        if action in ("approve", "override_approve") and result["decision"] != "approve":
+            result["decision"] = "approve"
+            result["reason"] = "Operator override: approved"
+            _gate_decisions[gate_key]["decision"] = "pass"
+            print(f"[capseal] Operator override: approved {gate_key}", file=sys.stderr)
+        elif action in ("deny", "override_deny") and result["decision"] != "deny":
+            result["decision"] = "deny"
+            result["reason"] = "Operator override: denied"
+            _gate_decisions[gate_key]["decision"] = "skip"
+            print(f"[capseal] Operator override: denied {gate_key}", file=sys.stderr)
+
     # Format response
     decision = result["decision"]
     q = result["predicted_failure"]
@@ -714,7 +780,15 @@ async def _handle_gate(args: dict[str, Any]) -> list[TextContent]:
     else:
         lines.append("Ask the user for explicit permission before proceeding.")
 
-    _emit_event("gate", f"{decision}: {description[:60]} (p_fail={q:.2f})")
+    _emit_event("gate", f"{decision}: {description[:60]} (p_fail={q:.2f})", data={
+        "decision": decision,
+        "p_fail": round(q, 4),
+        "files": files_affected,
+        "action_type": action_type,
+        "description": description,
+        "diff": diff_text[:500] if diff_text else None,
+        "reason": reason,
+    })
 
     return [TextContent(type="text", text="\n".join(lines))]
 
@@ -737,6 +811,7 @@ async def _handle_record(args: dict[str, Any]) -> list[TextContent]:
     gate_key = files_affected[0] if files_affected else "_default"
     gate_decision = None
     gate_score = None
+    receipt_hash = None
     gate_info = _gate_decisions.pop(gate_key, None)
     if gate_info:
         gate_decision = gate_info.get("decision")  # pass/skip/human_review
@@ -789,7 +864,13 @@ async def _handle_record(args: dict[str, Any]) -> list[TextContent]:
             f"Error:     {e}",
         ]
 
-    _emit_event("record", f"{action_type}: {description[:60]}")
+    record_data = {
+        "action_type": action_type,
+        "files": files_affected,
+    }
+    if receipt_hash:
+        record_data["receipt_hash"] = receipt_hash
+    _emit_event("record", f"{action_type}: {description[:60]} sha:{(receipt_hash or '')[:16]}", data=record_data)
 
     return [TextContent(type="text", text="\n".join(lines))]
 
@@ -859,7 +940,12 @@ async def _handle_seal(args: dict[str, Any]) -> list[TextContent]:
         chain_hash = capsule.get("final_receipt_hash", "")[:16] + "..."
         cap_rel = f".capseal/runs/{cap_path.name}"
 
-        _emit_event("seal", f"Sealed {actions_sealed} actions")
+        _emit_event("seal", f"Sealed {actions_sealed} actions", data={
+            "session_id": _runtime_path.name if _runtime_path else None,
+            "total_actions": actions_sealed,
+            "chain_intact": True,
+            "receipt_hash": capsule.get("final_receipt_hash", "")[:32],
+        })
 
         _runtime = None
         _runtime_path = None

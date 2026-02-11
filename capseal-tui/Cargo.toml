@@ -1,0 +1,47 @@
+[package]
+name = "capseal-tui"
+version = "0.4.0"
+edition = "2021"
+description = "Terminal interface for CapSeal - AI agent trust layer"
+license = "MIT"
+repository = "https://github.com/capseal/capseal"
+
+[[bin]]
+name = "capseal-tui"
+path = "src/main.rs"
+
+[dependencies]
+# TUI
+ratatui = "0.29"
+crossterm = "0.28"
+
+# PTY
+portable-pty = "0.8"
+
+# VT parsing
+vt100 = "0.15"
+
+# File watching
+notify = "7"
+
+# Data
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+flate2 = "1"
+tar = "0.4"
+zip = "2"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Misc
+chrono = "0.4"
+dirs = "5"
+toml = "0.8"
+anyhow = "1"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+strip = true

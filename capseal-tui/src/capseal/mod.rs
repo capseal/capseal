@@ -1,0 +1,100 @@
+pub mod events;
+pub mod models;
+pub mod sessions;
+pub mod watcher;
+
+use serde::Deserialize;
+
+/// Aggregated CapSeal state updated by file watcher
+pub struct CapSealState {
+    pub initialized: bool,
+
+    // Risk model
+    pub model_loaded: bool,
+    pub episode_count: u32,
+    pub profile_count: u32,
+    pub model_updated: Option<String>,
+    pub risk_scores: Vec<(String, f64)>,
+
+    // Training state
+    pub training_in_progress: bool,
+    pub training_round: u32,
+    pub training_total_rounds: u32,
+    pub training_profiles: Vec<(String, f64)>,
+
+    // Current session
+    pub session_active: bool,
+    pub action_count: u32,
+    pub denied_count: u32,
+    pub chain_intact: bool,
+    pub latest_event: Option<CapSealEvent>,
+    pub action_chain: Vec<ActionEntry>,
+    pub session_start: Option<std::time::Instant>,
+
+    // PTY injection from operator (pty_input.txt)
+    pub pending_pty_injection: Option<Vec<u8>>,
+
+    // Operator status
+    pub operator_online: bool,
+    pub operator_channels: u32,
+
+    // History
+    pub sessions: Vec<sessions::SessionSummary>,
+}
+
+impl CapSealState {
+    pub fn new(workspace: &std::path::Path) -> Self {
+        let initialized = workspace.join(".capseal").exists();
+        Self {
+            initialized,
+            model_loaded: false,
+            episode_count: 0,
+            profile_count: 0,
+            model_updated: None,
+            risk_scores: Vec::new(),
+            training_in_progress: false,
+            training_round: 0,
+            training_total_rounds: 0,
+            training_profiles: Vec::new(),
+            session_active: false,
+            action_count: 0,
+            denied_count: 0,
+            chain_intact: true,
+            latest_event: None,
+            action_chain: Vec::new(),
+            session_start: None,
+            pending_pty_injection: None,
+            operator_online: false,
+            operator_channels: 0,
+            sessions: Vec::new(),
+        }
+    }
+
+    pub fn session_duration_secs(&self) -> u64 {
+        self.session_start.map(|s| s.elapsed().as_secs()).unwrap_or(0)
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CapSealEvent {
+    #[serde(rename = "type")]
+    pub event_type: String,
+    pub timestamp: f64,
+    pub summary: String,
+    #[serde(default)]
+    pub data: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct ActionEntry {
+    pub action_type: String,
+    pub target: String,
+    pub decision: String,
+    pub p_fail: Option<f64>,
+    pub observations: Option<u32>,
+    pub receipt_hash: Option<String>,
+    pub timestamp: String,
+    pub diff: Option<String>,
+    pub risk_factors: Option<String>,
+}

@@ -33,6 +33,7 @@ from .ci_report_cmd import ci_report_command
 from .doctor_cmd import doctor_command as doctor_top_command
 from .sign_cmd import sign_command
 from .test_cmd import test_command
+from .operator_cmd import operator_command
 from .workflow_cmd import verify_capsule_command
 
 # Advanced command imports
@@ -131,6 +132,7 @@ cli.add_command(ci_report_command, name="ci-report")
 cli.add_command(sign_command, name="sign")
 cli.add_command(test_command, name="test")
 cli.add_command(pty_shell_command, name="shell")
+cli.add_command(operator_command, name="operator")
 
 
 # Config profiles
@@ -404,15 +406,25 @@ advanced.add_command(eval_command, name="eval")
 def main() -> None:
     """CLI entry point.
 
-    If no command is given, launches the interactive hub (or PTY shell
-    if default_command is set to "shell" in .capseal/config.json).
+    If no command is given:
+    1. If capseal-tui binary is on PATH, delegates to it (Rust TUI)
+    2. Else if default_command is "shell", launches PTY shell
+    3. Else launches the Python hub TUI
     """
     import sys
 
     if len(sys.argv) == 1:
-        # No arguments — check for default_command config
         from pathlib import Path
+        import shutil
 
+        # Check for Rust TUI binary
+        tui_bin = shutil.which("capseal-tui")
+        if tui_bin:
+            import os
+            os.execvp("capseal-tui", ["capseal-tui", "-w", str(Path.cwd())])
+            return  # unreachable after execvp
+
+        # No TUI binary — check for default_command config
         capseal_dir = Path.cwd() / ".capseal"
         if capseal_dir.exists():
             config_path = capseal_dir / "config.json"

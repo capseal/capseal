@@ -52,17 +52,25 @@ def doctor_command(path: str, output_json: bool) -> None:
         capseal doctor
         capseal doctor /path/to/project
     """
+    from .tui_compat import is_inside_tui
+
     target = Path(path).expanduser().resolve()
     capseal_dir = target / ".capseal"
     results = {}
 
     if not output_json:
-        click.echo()
-        click.echo(f"{CYAN}{'═' * 55}{RESET}")
-        click.echo(f"{CYAN}  CAPSEAL DOCTOR{RESET}")
-        click.echo(f"{CYAN}{'═' * 55}{RESET}")
-        click.echo(f"  Workspace:      {target}")
-        click.echo()
+        if is_inside_tui():
+            # Compact output for embedded TUI terminal
+            click.echo()
+            click.echo(f"{CYAN}CAPSEAL DOCTOR{RESET}")
+            click.echo()
+        else:
+            click.echo()
+            click.echo(f"{CYAN}{'═' * 55}{RESET}")
+            click.echo(f"{CYAN}  CAPSEAL DOCTOR{RESET}")
+            click.echo(f"{CYAN}{'═' * 55}{RESET}")
+            click.echo(f"  Workspace:      {target}")
+            click.echo()
 
     # 1. Workspace
     has_workspace = capseal_dir.exists()

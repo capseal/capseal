@@ -10,6 +10,9 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from .tui_compat import suppress_cpr
+suppress_cpr()
+
 import questionary
 from rich.panel import Panel
 from rich.table import Table

@@ -411,11 +411,18 @@ def learn_command(
         # Import Live display
         from rich.live import Live
         from rich.console import Console as RConsole
+        from .tui_compat import is_inside_tui, emit_tui_event
+
+        _in_tui = is_inside_tui()
         _live_console = RConsole()
 
-        live_ctx = Live(_build_live_panel(), refresh_per_second=4, console=_live_console) if not quiet else None
+        # Skip Rich Live panels when inside the Rust TUI — sidebar handles progress
+        use_live = not quiet and not _in_tui
+        live_ctx = Live(_build_live_panel(), refresh_per_second=4, console=_live_console) if use_live else None
         if live_ctx:
             live_ctx.__enter__()
+
+        emit_tui_event("train_start", f"round 0/{rounds}")
 
         try:
             for round_num in range(1, rounds + 1):
@@ -436,6 +443,17 @@ def learn_command(
                         break
 
                 _live_round[0] = round_num
+
+                # Build per-profile summary for enriched events
+                _profile_parts = []
+                for _pn, _pd in profile_stats.items():
+                    _pt = _pd["passes"] + _pd["fails"]
+                    if _pt > 0:
+                        _pf = (_pd["fails"] + 1) / (_pt + 2)
+                        _profile_parts.append(f"{_pn}={_pf:.2f}")
+                _profile_str = " ".join(_profile_parts)
+                emit_tui_event("train_progress", f"round {round_num}/{rounds} {_profile_str}")
+
                 if live_ctx:
                     live_ctx.update(_build_live_panel())
 
@@ -444,7 +462,11 @@ def learn_command(
                 round_dir = run_path / "rounds" / round_id
                 round_dir.mkdir(parents=True, exist_ok=True)
 
-                if quiet:
+                if _in_tui and not quiet:
+                    # Compact plain-text output for TUI embedded terminal
+                    parts = " | ".join(f"{_pn}: p={(_pd['fails']+1)/(_pd['passes']+_pd['fails']+2):.2f}" for _pn, _pd in profile_stats.items() if _pd["passes"] + _pd["fails"] > 0)
+                    click.echo(f"  [{round_num}/{rounds}] {parts}" if parts else f"  [{round_num}/{rounds}] starting...")
+                elif quiet:
                     remaining = budget_tracker.remaining_budget
                     budget_str = f"${remaining:.2f} remaining" if remaining else ""
                     click.echo(f"  {CYAN}Round {round_num}/{rounds}{RESET} {DIM}{budget_str}{RESET}")
@@ -627,6 +649,8 @@ def learn_command(
         finally:
             if live_ctx:
                 live_ctx.__exit__(None, None, None)
+            total_episodes = total_successes + total_failures
+            emit_tui_event("train_complete", f"{_live_round[0]} rounds, {total_episodes} episodes")
 
         # Close runner
         runner.close()
