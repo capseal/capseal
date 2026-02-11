@@ -86,6 +86,10 @@ fn render_latest_gate(state: &CapSealState, area: Rect, buf: &mut Buffer) {
         }
         Some(gate) => {
             let (icon, color, label) = decision_style(&gate.decision);
+            let risk_label = gate
+                .label
+                .as_deref()
+                .unwrap_or("unclassified");
 
             let mut lines = vec![Line::from(vec![
                 Span::styled(
@@ -93,8 +97,12 @@ fn render_latest_gate(state: &CapSealState, area: Rect, buf: &mut Buffer) {
                     Style::default().fg(color).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
-                    truncate_str(&gate.target, 30),
+                    truncate_str(&gate.target, 24),
                     Style::default().fg(Color::White),
+                ),
+                Span::styled(
+                    format!("  {}", truncate_str(risk_label, 26)),
+                    Style::default().fg(Color::Cyan),
                 ),
                 Span::styled(
                     format!("  p_fail: {:.2}", gate.p_fail.unwrap_or(0.0)),
@@ -153,6 +161,7 @@ fn render_middle(state: &CapSealState, _scroll_offset: usize, area: Rect, buf: &
 struct FileRiskEntry {
     file: String,
     p_fail: Option<f64>,
+    label: Option<String>,
 }
 
 fn render_files_touched(state: &CapSealState, area: Rect, buf: &mut Buffer) {
@@ -182,6 +191,7 @@ fn render_files_touched(state: &CapSealState, area: Rect, buf: &mut Buffer) {
             FileRiskEntry {
                 file: event.target.clone(),
                 p_fail: event.p_fail,
+                label: event.label.clone(),
             },
         );
     }
@@ -251,6 +261,14 @@ fn render_files_touched(state: &CapSealState, area: Rect, buf: &mut Buffer) {
             Span::styled(bar, Style::default().fg(bar_color)),
             Span::styled(format!(" {}", p_text), Style::default().fg(Color::DarkGray)),
         ]));
+        if let Some(label) = entry.label {
+            if !label.is_empty() {
+                lines.push(Line::styled(
+                    format!("    {}", truncate_str(&label, inner.width as usize - 6)),
+                    Style::default().fg(Color::DarkGray),
+                ));
+            }
+        }
     }
 
     Paragraph::new(lines).render(inner, buf);
@@ -392,7 +410,11 @@ fn render_event_log(state: &CapSealState, scroll_offset: usize, area: Rect, buf:
         let time: String = event.timestamp.chars().take(5).collect();
 
         let detail = if let Some(p) = event.p_fail {
-            format!("p={:.2}  {}", p, event.decision)
+            if let Some(ref label) = event.label {
+                format!("p={:.2}  {}", p, truncate_str(label, 22))
+            } else {
+                format!("p={:.2}  {}", p, event.decision)
+            }
         } else if let Some(ref hash) = event.receipt_hash {
             let h: String = hash.chars().take(8).collect();
             format!("sha:{}\u{2026}", h)

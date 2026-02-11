@@ -92,6 +92,7 @@ pub struct ActionEntry {
     pub target: String,
     pub decision: String,
     pub p_fail: Option<f64>,
+    pub label: Option<String>,
     pub observations: Option<u32>,
     pub receipt_hash: Option<String>,
     pub timestamp: String,

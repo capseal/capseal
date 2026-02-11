@@ -148,6 +148,7 @@ def _build_report(target: Path) -> dict:
         discretize_features,
         features_to_grid_idx,
     )
+    from capseal.risk_labels import generate_label
     from capseal.shared.scoring import lookup_posterior_at_idx
 
     # Group findings by file (use relative paths for display)
@@ -179,6 +180,23 @@ def _build_report(target: Path) -> dict:
         raw_features = extract_patch_features(diff_preview, [{"severity": severity}])
         levels = discretize_features(raw_features)
         grid_idx = features_to_grid_idx(levels)
+        sev = str(severity).lower()
+        if sev in {"error", "high"}:
+            security_signal = 1.0
+        elif sev in {"warning", "medium"}:
+            security_signal = 0.66
+        elif sev in {"low"}:
+            security_signal = 0.33
+        else:
+            security_signal = 0.0
+        label = generate_label({
+            "lines_changed": int(raw_features.get("lines_changed", 0) or 0),
+            "files_touched": int(raw_features.get("files_touched", 0) or 0),
+            "modules_crossed": max(0, int(raw_features.get("files_touched", 0) or 0) - 1),
+            "security": security_signal,
+            "change_type": "fix",
+            "test_coverage_delta": int(raw_features.get("test_coverage_delta", 0) or 0),
+        })
 
         p_fail = 0.50  # default uninformative prior
         if alpha is not None and beta is not None:
@@ -193,6 +211,7 @@ def _build_report(target: Path) -> dict:
             "line": start_line,
             "message": finding.get("extra", {}).get("message", ""),
             "suggestion": _suggest(check_id),
+            "label": label,
         })
 
     # ── Build per-file hotspots ───────────────────────────────────────────
@@ -221,6 +240,7 @@ def _build_report(target: Path) -> dict:
             "p_fail": round(avg_p_fail, 2),
             "max_p_fail": round(max_p_fail, 2),
             "recommendation": recommendation,
+            "label": riskiest.get("label", "unclassified"),
         }
         if riskiest["suggestion"]:
             hotspot["detail_check"] = riskiest["check_id"].split(".")[-1] if "." in riskiest["check_id"] else riskiest["check_id"]
@@ -416,6 +436,7 @@ def _print_rich_report(data: dict) -> None:
         table.add_column("File", style="white", min_width=20)
         table.add_column("Findings", justify="right", min_width=8)
         table.add_column("p_fail", justify="right", min_width=8)
+        table.add_column("Label", min_width=24)
         table.add_column("Recommendation", min_width=25)
 
         for h in hotspots:
@@ -434,6 +455,7 @@ def _print_rich_report(data: dict) -> None:
                 h["file"],
                 str(h["findings"]),
                 f"[{pf_style}]{pf:.2f}[/{pf_style}]",
+                h.get("label", "unclassified"),
                 f"[{rec_style}]{h['recommendation']}[/{rec_style}]",
             )
 
@@ -521,7 +543,10 @@ def _print_text_report(data: dict) -> None:
     lines.append("RISK HOTSPOTS")
     for h in data["hotspots"]:
         rec = h["recommendation"].upper() if h["max_p_fail"] > 0.6 else h["recommendation"]
-        lines.append(f"  {h['file']:<30} — {h['findings']} findings, p_fail={h['p_fail']:.2f} ({rec})")
+        lines.append(
+            f"  {h['file']:<30} — {h['findings']} findings, p_fail={h['p_fail']:.2f} "
+            f"[{h.get('label', 'unclassified')}] ({rec})"
+        )
         if h.get("suggestion") and h.get("max_p_fail", 0) > 0.5:
             lines.append(f"    └─ {h.get('detail_check', '')} — refactors fail {h['detail_p_fail']*100:.0f}% of the time")
             lines.append(f"       Suggestion: {h['suggestion']}")

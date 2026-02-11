@@ -83,6 +83,7 @@ fn process_event(event: &CapSealEvent, state: &mut CapSealState) {
             // Overlay structured data if available (richer than summary parsing)
             let mut diff = None;
             let mut risk_factors = None;
+            let mut label = None;
 
             if let Some(ref data) = event.data {
                 if let Some(d) = data.get("decision").and_then(|v| v.as_str()) {
@@ -98,6 +99,7 @@ fn process_event(event: &CapSealEvent, state: &mut CapSealState) {
                 }
                 diff = data.get("diff").and_then(|v| v.as_str()).map(|s| s.to_string());
                 risk_factors = data.get("reason").and_then(|v| v.as_str()).map(|s| s.to_string());
+                label = data.get("label").and_then(|v| v.as_str()).map(|s| s.to_string());
             }
 
             if decision == "skip" || decision == "deny" {
@@ -109,6 +111,7 @@ fn process_event(event: &CapSealEvent, state: &mut CapSealState) {
                 target,
                 decision,
                 p_fail,
+                label,
                 observations,
                 receipt_hash: None,
                 timestamp: ts,
@@ -205,6 +208,7 @@ fn process_event(event: &CapSealEvent, state: &mut CapSealState) {
                 target: prompt_text,
                 decision: "pending".to_string(),
                 p_fail: None,
+                label: None,
                 observations: None,
                 receipt_hash: None,
                 timestamp: ts,
@@ -228,6 +232,7 @@ fn process_event(event: &CapSealEvent, state: &mut CapSealState) {
                 target: prompt_text,
                 decision: "waiting".to_string(),
                 p_fail: None,
+                label: None,
                 observations: None,
                 receipt_hash: None,
                 timestamp: ts,

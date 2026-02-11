@@ -68,6 +68,7 @@ class MessageComposer:
         decision = data.get("decision", "unknown")
         files = data.get("files", [])
         p_fail = data.get("p_fail")
+        label = (data.get("label") or "").strip()
         diff = data.get("diff", "")
         risk_factors = data.get("risk_factors", "")
         action_type = data.get("action_type", "edit")
@@ -86,21 +87,21 @@ class MessageComposer:
         if decision == "denied":
             return self._compose_denial(
                 file_short, file_str, p_str, p_pct, p_voice,
-                diff, risk_factors, data, context, score
+                diff, risk_factors, label, data, context, score
             )
         elif decision == "approved" and p_fail is not None and p_fail >= 0.5:
             return self._compose_risky_approval(
                 file_short, file_str, p_str, p_pct, p_voice,
-                diff, risk_factors, data, context, score
+                diff, risk_factors, label, data, context, score
             )
         else:
             return self._compose_routine_approval(
                 file_short, file_str, p_str, p_pct, p_voice,
-                data, context, score
+                label, data, context, score
             )
 
     def _compose_denial(self, file_short, file_str, p_str, p_pct,
-                        p_voice, diff, risk_factors, data, context, score):
+                        p_voice, diff, risk_factors, label, data, context, score):
         # Check for consecutive denial streak
         files = data.get("files", [])
         streak_info = ""
@@ -124,10 +125,11 @@ class MessageComposer:
             risk_line = f"\n📊 Risk: {risk_factors}"
             risk_voice = f"The risk is: {risk_factors}. "
 
-        short = f"🛑 Blocked: {file_short}{p_str}"
+        headline = label or file_short
+        short = f"🛑 Denied: {headline}{p_str}"
 
         full = (
-            f"🛑 <b>DENIED</b> — {_esc(file_str)}\n"
+            f"🛑 <b>DENIED</b> — {_esc(headline)}\n"
             f"Risk: {p_pct}"
             f"{streak_info}"
             f"{risk_line}"
@@ -153,7 +155,7 @@ class MessageComposer:
                        voice_text=voice, buttons=buttons)
 
     def _compose_risky_approval(self, file_short, file_str, p_str, p_pct,
-                                p_voice, diff, risk_factors, data, context, score):
+                                p_voice, diff, risk_factors, label, data, context, score):
         diff_preview = ""
         if diff:
             lines = diff.strip().split("\n")[:4]
@@ -165,10 +167,11 @@ class MessageComposer:
             risk_line = f"\n📊 Risk: {risk_factors}"
             risk_voice = f"{risk_factors}. "
 
-        short = f"⚠️ Approved (risky): {file_short}{p_str}"
+        headline = label or file_short
+        short = f"⚠️ Approved (risky): {headline}{p_str}"
 
         full = (
-            f"⚠️ <b>APPROVED (HIGH RISK)</b> — {_esc(file_str)}\n"
+            f"⚠️ <b>APPROVED (HIGH RISK)</b> — {_esc(headline)}\n"
             f"Risk: {p_pct} — above normal threshold"
             f"{risk_line}"
             f"{diff_preview}"
@@ -184,9 +187,10 @@ class MessageComposer:
         return Message(short_text=short, full_text=full, voice_text=voice)
 
     def _compose_routine_approval(self, file_short, file_str, p_str, p_pct,
-                                  p_voice, data, context, score):
-        short = f"✅ Approved: {file_short}{p_str}"
-        full = f"✅ Approved — {file_str} (risk: {p_pct})"
+                                  p_voice, label, data, context, score):
+        headline = label or file_short
+        short = f"✅ Approved: {headline}{p_str}"
+        full = f"✅ Approved — {headline} (risk: {p_pct})"
         voice = f"Approved an edit to {file_short}. Low risk."
 
         return Message(short_text=short, full_text=full, voice_text=voice)
