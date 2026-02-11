@@ -43,6 +43,15 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent, Prompt, PromptMessage, PromptArgument
 
+from .mcp_responses import (
+    format_context_response,
+    format_gate_response,
+    format_record_response,
+    format_seal_response,
+    format_status_response,
+)
+from .risk_engine import evaluate_action_risk, to_internal_decision
+
 # Global runtime instance (initialized on first use)
 _runtime = None
 _runtime_path = None
@@ -670,61 +679,24 @@ async def _handle_gate(args: dict[str, Any]) -> list[TextContent]:
     # Key for linking this gate to its record
     gate_key = files_affected[0] if files_affected else "_default"
 
-    # Build findings from files_affected for feature extraction
-    findings = []
-    for f in files_affected:
-        findings.append({
-            "path": f,
-            "extra": {"severity": "warning"},
-        })
+    workspace = Path(_workspace) if _workspace else Path.cwd()
+    risk = evaluate_action_risk(
+        action_type=action_type,
+        description=description,
+        files_affected=files_affected,
+        diff_text=diff_text,
+        workspace=workspace,
+    )
 
-    try:
-        # Call the gate
-        gate_result = runtime.gate(diff_text=diff_text, findings=findings)
-
-        # Map internal decision to simpler output
-        decision_map = {
-            "pass": "approve",
-            "skip": "deny",
-            "human_review": "flag",
-        }
-
-        decision = gate_result.get("decision", "pass")
-        mapped_decision = decision_map.get(decision, decision)
-
-        grid_idx = gate_result.get("grid_idx", 0)
-        similar = _get_similar_patches(grid_idx)
-
-        result = {
-            "decision": mapped_decision,
-            "predicted_failure": gate_result.get("q", 0.0),
-            "confidence": 1.0 - gate_result.get("uncertainty", 0.0),
-            "reason": gate_result.get("reason", ""),
-            "grid_idx": grid_idx,
-            "similar_patches": similar,
-        }
-
-        # Store for status reporting and for linking to the matching record
-        runtime._last_gate_result = {"decision": mapped_decision, "q": gate_result.get("q", 0.0)}
-
-        _gate_decisions[gate_key] = {
-            "decision": decision,  # internal form: pass/skip/human_review
-            "q": gate_result.get("q", 0.0),
-            "confidence": 1.0 - gate_result.get("uncertainty", 0.0),
-        }
-
-    except Exception as e:
-        # If gating fails (no model, etc.), approve by default
-        # Still try to find similar patches for risk preview
-        similar = _get_similar_patches(0)
-        result = {
-            "decision": "approve",
-            "predicted_failure": 0.0,
-            "confidence": 0.0,
-            "reason": f"No risk model available: {e}",
-            "similar_patches": similar,
-        }
-        _gate_decisions[gate_key] = {"decision": "pass", "q": 0.0, "confidence": 0.0}
+    session_id = _runtime_path.name if _runtime_path else "unknown"
+    result = format_gate_response(
+        risk,
+        session_id=session_id,
+        action_type=action_type,
+        description=description,
+        files_affected=files_affected,
+    )
+    result["similar_patches"] = _get_similar_patches(risk.grid_cell)
 
     # Check for operator intervention (approve/deny override from Telegram etc.)
     intervention = _read_intervention(gate_key)
@@ -733,64 +705,45 @@ async def _handle_gate(args: dict[str, Any]) -> list[TextContent]:
         if action in ("approve", "override_approve") and result["decision"] != "approve":
             result["decision"] = "approve"
             result["reason"] = "Operator override: approved"
-            _gate_decisions[gate_key]["decision"] = "pass"
             print(f"[capseal] Operator override: approved {gate_key}", file=sys.stderr)
         elif action in ("deny", "override_deny") and result["decision"] != "deny":
             result["decision"] = "deny"
             result["reason"] = "Operator override: denied"
-            _gate_decisions[gate_key]["decision"] = "skip"
             print(f"[capseal] Operator override: denied {gate_key}", file=sys.stderr)
+        decision_text = {
+            "approve": "APPROVED",
+            "deny": "DENIED",
+            "flag": "FLAGGED",
+        }.get(result["decision"], str(result["decision"]).upper())
+        result["human_summary"] = (
+            f"CAPSEAL GATE: {decision_text} | p_fail={result.get('p_fail', 0.0):.2f} | "
+            f"{result.get('label', 'unclassified')}"
+        )
 
-    # Format response
-    decision = result["decision"]
-    q = result["predicted_failure"]
-    reason = result.get("reason", "")
-    files_str = ", ".join(files_affected) if files_affected else "—"
+    # Store for status reporting and for linking to the matching record
+    internal = to_internal_decision(result["decision"])
+    runtime._last_gate_result = {"decision": result["decision"], "q": result.get("p_fail", 0.0)}
+    _gate_decisions[gate_key] = {
+        "decision": internal,  # internal form: pass/skip/human_review
+        "q": result.get("p_fail", 0.0),
+        "confidence": result.get("confidence", 0.0),
+        "label": result.get("label", ""),
+        "grid_cell": result.get("grid_cell", 0),
+    }
 
-    if decision == "approve":
-        decision_line = "✓ APPROVED"
-    elif decision == "deny":
-        decision_line = "✗ DENIED"
-    else:
-        decision_line = "⚠ FLAGGED — ask user before proceeding"
-
-    lines = [
-        "═══ CAPSEAL GATE ═══",
-        f"Action:    {action_type} → {files_str}",
-        f"Decision:  {decision_line}",
-        f"Risk:      p_fail={q:.2f}",
-    ]
-    if reason:
-        lines.append(f"Reason:    {reason}")
-
-    # Similar past patches (from training history)
-    similar = result.get("similar_patches", [])
-    if similar:
-        lines.append("")
-        lines.append("Similar past patches:")
-        for sp in similar:
-            icon = "✓" if sp["success"] else "✗"
-            lines.append(f"  {icon} {sp['description']} (round {sp['round']})")
-
-    lines.append("")
-    if decision == "approve":
-        lines.append("Proceed with this change.")
-    elif decision == "deny":
-        lines.append("Do NOT proceed. Inform the user this change was blocked.")
-    else:
-        lines.append("Ask the user for explicit permission before proceeding.")
-
-    _emit_event("gate", f"{decision}: {description[:60]} (p_fail={q:.2f})", data={
-        "decision": decision,
-        "p_fail": round(q, 4),
+    _emit_event("gate", f"{result['decision']}: {description[:60]} (p_fail={result['p_fail']:.2f})", data={
+        "decision": result["decision"],
+        "p_fail": round(result.get("p_fail", 0.0), 4),
         "files": files_affected,
         "action_type": action_type,
         "description": description,
         "diff": diff_text[:500] if diff_text else None,
-        "reason": reason,
+        "reason": result.get("reason"),
+        "label": result.get("label"),
+        "features": result.get("features"),
     })
 
-    return [TextContent(type="text", text="\n".join(lines))]
+    return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
 
 async def _handle_record(args: dict[str, Any]) -> list[TextContent]:
@@ -816,6 +769,11 @@ async def _handle_record(args: dict[str, Any]) -> list[TextContent]:
     if gate_info:
         gate_decision = gate_info.get("decision")  # pass/skip/human_review
         gate_score = gate_info.get("q")
+    gate_label = gate_info.get("label") if gate_info else None
+    gate_cell = gate_info.get("grid_cell") if gate_info else None
+
+    session_id = _runtime_path.name if _runtime_path else "unknown"
+    response: dict[str, Any]
 
     try:
         inputs = {
@@ -842,27 +800,31 @@ async def _handle_record(args: dict[str, Any]) -> list[TextContent]:
                 "description": description,
                 "tool_name": tool_name,
                 "files_affected": files_affected,
+                "risk_label": gate_label,
+                "grid_cell": gate_cell,
             },
         )
 
         count = len(runtime.actions)
-        files_str = ", ".join(files_affected) if files_affected else "—"
-        chain_note = f"→ links to previous ({count} total)" if count > 1 else f"first action in chain"
-
-        lines = [
-            "═══ CAPSEAL RECORD ═══",
-            f"Action:    {action_type} → {files_str}",
-            f"Receipt:   {receipt_hash[:16]}...",
-            f"Chain:     {chain_note}",
-            f"Status:    ✓ recorded",
-        ]
+        response = format_record_response(
+            recorded=True,
+            session_id=session_id,
+            action_type=action_type,
+            files_affected=files_affected,
+            action_id=runtime.actions[-1].action_id if runtime.actions else None,
+            receipt_hash=receipt_hash,
+            receipt_chain_length=count,
+        )
 
     except Exception as e:
-        lines = [
-            "═══ CAPSEAL RECORD ═══",
-            f"Status:    ✗ failed",
-            f"Error:     {e}",
-        ]
+        response = format_record_response(
+            recorded=False,
+            session_id=session_id,
+            action_type=action_type,
+            files_affected=files_affected,
+            receipt_chain_length=len(runtime.actions),
+            error=str(e),
+        )
 
     record_data = {
         "action_type": action_type,
@@ -872,7 +834,7 @@ async def _handle_record(args: dict[str, Any]) -> list[TextContent]:
         record_data["receipt_hash"] = receipt_hash
     _emit_event("record", f"{action_type}: {description[:60]} sha:{(receipt_hash or '')[:16]}", data=record_data)
 
-    return [TextContent(type="text", text="\n".join(lines))]
+    return [TextContent(type="text", text=json.dumps(response, indent=2))]
 
 
 async def _handle_seal(args: dict[str, Any]) -> list[TextContent]:
@@ -881,6 +843,7 @@ async def _handle_seal(args: dict[str, Any]) -> list[TextContent]:
 
     runtime = _get_runtime()
     session_name = args.get("session_name", "mcp-session")
+    response: dict[str, Any]
 
     try:
         capsule = runtime.finalize(prove=True)
@@ -937,7 +900,7 @@ async def _handle_seal(args: dict[str, Any]) -> list[TextContent]:
         latest_link.symlink_to(_runtime_path.name)
 
         actions_sealed = len(runtime.actions)
-        chain_hash = capsule.get("final_receipt_hash", "")[:16] + "..."
+        chain_hash_full = capsule.get("final_receipt_hash", "")
         cap_rel = f".capseal/runs/{cap_path.name}"
 
         _emit_event("seal", f"Sealed {actions_sealed} actions", data={
@@ -947,41 +910,37 @@ async def _handle_seal(args: dict[str, Any]) -> list[TextContent]:
             "receipt_hash": capsule.get("final_receipt_hash", "")[:32],
         })
 
+        session_id = _runtime_path.name if _runtime_path else None
         _runtime = None
         _runtime_path = None
 
-        lines = [
-            "═══ CAPSEAL SEALED ═══",
-            f"Session:   {session_name}",
-            f"Actions:   {actions_sealed} recorded",
-            f"Receipt:   {cap_rel}",
-            f"Chain:     ✓ intact ({actions_sealed}/{actions_sealed} hashes valid)",
-        ]
-        if proof_generated:
-            hash_preview = capsule_hash[:16] + "..." if capsule_hash else ""
-            if proof_type == "fri":
-                lines.append(f"Proof:     ✓ FRI verified ({hash_preview})")
-            else:
-                lines.append(f"Proof:     ✓ constraints verified ({hash_preview})")
-        else:
-            lines.append("Proof:     ✗ generation failed")
-        if model_updated:
-            lines.append(f"Model:     ✓ posteriors updated ({model_episodes} total episodes)")
-        lines.extend([
-            "",
-            f"Verify anytime: capseal verify .capseal/runs/latest.cap",
-        ])
+        response = format_seal_response(
+            sealed=True,
+            session_id=session_id,
+            session_name=session_name,
+            cap_file=cap_rel,
+            chain_hash=chain_hash_full,
+            actions_count=actions_sealed,
+            proof_generated=proof_generated,
+            proof_verified=proof_verified,
+            model_updated=model_updated,
+            model_episodes=model_episodes,
+        )
+        response["proof_type"] = proof_type
+        response["capsule_hash"] = capsule_hash
+        response["verify_command"] = "capseal verify .capseal/runs/latest.cap"
 
     except Exception as e:
         _runtime = None
         _runtime_path = None
-        lines = [
-            "═══ CAPSEAL SEALED ═══",
-            f"Status:    ✗ seal failed",
-            f"Error:     {e}",
-        ]
+        response = format_seal_response(
+            sealed=False,
+            session_id=None,
+            session_name=session_name,
+            error=str(e),
+        )
 
-    return [TextContent(type="text", text="\n".join(lines))]
+    return [TextContent(type="text", text=json.dumps(response, indent=2))]
 
 
 async def _handle_status(args: dict[str, Any]) -> list[TextContent]:
@@ -991,58 +950,41 @@ async def _handle_status(args: dict[str, Any]) -> list[TextContent]:
     workspace = Path(_workspace) if _workspace else Path.cwd()
     history = _get_session_history()
     stats = history.get("project_stats", {})
+    recent = history.get("recent_sessions", [])
 
-    lines = ["═══ CAPSEAL STATUS ═══"]
-
-    # Session state
     if _runtime is None:
-        lines.append("Session:     not active (call capseal_gate before your first change)")
-        lines.append(f"Workspace:   {workspace}")
-        posteriors_loaded = False
+        session_active = False
+        session_id = None
+        actions_count = 0
+        denials_count = 0
+        uptime_seconds = 0
+        model_loaded = (workspace / ".capseal" / "models" / "beta_posteriors.npz").exists()
     else:
         runtime = _runtime
-        count = len(runtime.actions)
-        posteriors_loaded = runtime.gate_posteriors is not None if hasattr(runtime, 'gate_posteriors') else False
-        lines.append(f"Session:     active ({count} action{'s' if count != 1 else ''} recorded)")
-        lines.append(f"Workspace:   {workspace}")
+        session_active = True
+        session_id = _runtime_path.name if _runtime_path else None
+        actions_count = len(runtime.actions)
+        denials_count = sum(
+            1
+            for action in runtime.actions
+            if action.gate_decision in ("skip", "deny")
+        )
+        uptime_seconds = int(_time.time() - getattr(runtime, "_start_time", _time.time()))
+        model_loaded = runtime.gate_posteriors is not None if hasattr(runtime, "gate_posteriors") else False
 
-    # Risk model
-    posteriors = workspace / ".capseal" / "models" / "beta_posteriors.npz"
-    if posteriors.exists():
-        lines.append("Risk model:  trained")
-    else:
-        lines.append("Risk model:  not trained (will approve all changes)")
-
-    lines.append(f"Gate policy: block > 60% predicted failure")
-
-    # Recent sessions
-    recent = history.get("recent_sessions", [])
-    if recent:
-        lines.append("")
-        lines.append("Recent sessions:")
-        for sess in recent[:5]:
-            date = sess.get("date", "")[:10]
-            agent = sess.get("agent", "unknown")
-            actions = sess.get("actions", 0)
-            approved = sess.get("approved", 0)
-            denied = sess.get("denied", 0)
-            gate_str = f"{approved} approved"
-            if denied:
-                gate_str += f", {denied} denied"
-            lines.append(f"  • {date} — {agent} — {actions} actions ({gate_str})")
-    else:
-        lines.append("")
-        lines.append("No previous sessions. This is the first one.")
-
-    # Project stats
-    total = stats.get("total_sessions", 0)
-    total_actions = stats.get("total_actions", 0)
-    total_denied = stats.get("total_denied", 0)
-    if total > 0:
-        lines.append("")
-        lines.append(f"Project totals: {total} sessions, {total_actions} actions, {total_denied} denied")
-
-    return [TextContent(type="text", text="\n".join(lines))]
+    response = format_status_response(
+        session_id=session_id,
+        session_active=session_active,
+        workspace=str(workspace),
+        actions_count=actions_count,
+        gates_count=actions_count,
+        denials_count=denials_count,
+        model_loaded=model_loaded,
+        uptime_seconds=uptime_seconds,
+        recent_sessions=recent[:10],
+        project_stats=stats,
+    )
+    return [TextContent(type="text", text=json.dumps(response, indent=2))]
 
 
 async def _handle_context(args: dict[str, Any]) -> list[TextContent]:
@@ -1053,18 +995,22 @@ async def _handle_context(args: dict[str, Any]) -> list[TextContent]:
     target_file = args.get("file", "")
 
     if not target_file:
-        return [TextContent(type="text", text="Error: file parameter is required")]
+        return [TextContent(type="text", text=json.dumps({
+            "error": "file parameter is required",
+            "schema_version": "1.0",
+        }))]
 
     target_file = target_file.lstrip("./")
 
     runs_dir = workspace / ".capseal" / "runs"
     if not runs_dir.exists():
-        lines = [
-            "═══ CAPSEAL CONTEXT ═══",
-            f"File: {target_file}",
-            "Changes: none — no sessions recorded yet",
-        ]
-        return [TextContent(type="text", text="\n".join(lines))]
+        response = format_context_response(
+            file_path=target_file,
+            total_changes=0,
+            total_sessions=0,
+            sessions=[],
+        )
+        return [TextContent(type="text", text=json.dumps(response, indent=2))]
 
     # Scan all sessions for changes to this file
     cap_files = sorted(
@@ -1120,25 +1066,23 @@ async def _handle_context(args: dict[str, Any]) -> list[TextContent]:
 
     total_changes = sum(len(v) for v in sessions_with_changes.values())
     total_sessions = len(sessions_with_changes)
+    sessions: list[dict[str, Any]] = []
+    for sess_key, changes in sessions_with_changes.items():
+        meta = session_meta.get(sess_key, {})
+        sessions.append({
+            "session_id": sess_key,
+            "date": meta.get("date", ""),
+            "agent": meta.get("agent", "unknown"),
+            "changes": changes,
+        })
 
-    lines = [
-        "═══ CAPSEAL CONTEXT ═══",
-        f"File: {target_file}",
-        f"Changes: {total_changes} across {total_sessions} session{'s' if total_sessions != 1 else ''}",
-    ]
-
-    if sessions_with_changes:
-        lines.append("")
-        for sess_key, changes in sessions_with_changes.items():
-            meta = session_meta[sess_key]
-            lines.append(f"  Session {meta['date']} ({meta['agent']}):")
-            for change in changes:
-                lines.append(f"    • {change}")
-    else:
-        lines.append("")
-        lines.append("No previous changes to this file.")
-
-    return [TextContent(type="text", text="\n".join(lines))]
+    response = format_context_response(
+        file_path=target_file,
+        total_changes=total_changes,
+        total_sessions=total_sessions,
+        sessions=sessions,
+    )
+    return [TextContent(type="text", text=json.dumps(response, indent=2))]
 
 
 async def run_server():
