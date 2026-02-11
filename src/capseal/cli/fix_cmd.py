@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 import click
-import numpy as np
+from capseal.risk_engine import THRESHOLD_APPROVE, evaluate_risk_for_finding
 
 
 # ANSI colors
@@ -218,21 +218,10 @@ def fix_command(
     if not output_json:
         click.echo("[2/5] Gating findings...")
 
-    posteriors = None
-    has_model = False
-    if model_path.exists():
-        try:
-            data = np.load(model_path)
-            alpha = data["alpha"]
-            beta = data["beta"]
-            failure_prob = beta / (alpha + beta)
-            posteriors = {"alpha": alpha, "beta": beta, "failure_prob": failure_prob}
-            has_model = True
-            if not output_json:
-                click.echo(f"      Loaded model from {model_path.relative_to(target_path)}")
-        except Exception as e:
-            if not output_json:
-                click.echo(f"      {YELLOW}Warning:{RESET} Could not load model: {e}")
+    has_model = model_path.exists()
+    if has_model:
+        if not output_json:
+            click.echo(f"      Loaded model from {model_path.relative_to(target_path)}")
     else:
         if not output_json:
             click.echo(f"      {YELLOW}No learned model found.{RESET}")
@@ -244,30 +233,26 @@ def fix_command(
     gated = []
     flagged = []
 
-    from capseal.shared.features import extract_patch_features, discretize_features, features_to_grid_idx
-
     for finding in findings:
-        check_id = finding.get("check_id", "unknown")
-        file_path = finding.get("path", "")
-        line = finding.get("start", {}).get("line", 0)
+        risk = evaluate_risk_for_finding(
+            finding,
+            workspace=target_path,
+            approve_threshold=THRESHOLD_APPROVE,
+            deny_threshold=threshold,
+        )
+        finding["_failure_prob"] = float(risk.p_fail)
+        finding["_grid_idx"] = risk.grid_cell
+        finding["_label"] = risk.label
+        finding["_confidence"] = float(risk.confidence)
 
-        # Compute grid index
-        grid_idx = _compute_grid_idx(finding)
+        if risk.model_loaded:
+            has_model = True
 
-        if posteriors:
-            prob = posteriors["failure_prob"][grid_idx] if grid_idx < len(posteriors["failure_prob"]) else 0.5
-            finding["_failure_prob"] = float(prob)
-            finding["_grid_idx"] = grid_idx
-
-            if prob > threshold:
-                gated.append(finding)
-            elif prob > 0.3:
-                flagged.append(finding)
-            else:
-                approved.append(finding)
+        if risk.decision == "deny":
+            gated.append(finding)
+        elif risk.decision == "flag":
+            flagged.append(finding)
         else:
-            finding["_failure_prob"] = None
-            finding["_grid_idx"] = grid_idx
             approved.append(finding)
 
     if not output_json:
@@ -283,9 +268,36 @@ def fix_command(
             "flagged": len(flagged),
             "gated": len(gated),
         },
-        "approved": [{"check_id": f.get("check_id"), "path": f.get("path"), "line": f.get("start", {}).get("line")} for f in approved],
-        "flagged": [{"check_id": f.get("check_id"), "path": f.get("path"), "line": f.get("start", {}).get("line")} for f in flagged],
-        "gated": [{"check_id": f.get("check_id"), "path": f.get("path"), "line": f.get("start", {}).get("line"), "failure_prob": f.get("_failure_prob")} for f in gated],
+        "approved": [
+            {
+                "check_id": f.get("check_id"),
+                "path": f.get("path"),
+                "line": f.get("start", {}).get("line"),
+                "failure_prob": f.get("_failure_prob"),
+                "label": f.get("_label"),
+            }
+            for f in approved
+        ],
+        "flagged": [
+            {
+                "check_id": f.get("check_id"),
+                "path": f.get("path"),
+                "line": f.get("start", {}).get("line"),
+                "failure_prob": f.get("_failure_prob"),
+                "label": f.get("_label"),
+            }
+            for f in flagged
+        ],
+        "gated": [
+            {
+                "check_id": f.get("check_id"),
+                "path": f.get("path"),
+                "line": f.get("start", {}).get("line"),
+                "failure_prob": f.get("_failure_prob"),
+                "label": f.get("_label"),
+            }
+            for f in gated
+        ],
     }
     (run_dir / "gate_result.json").write_text(json.dumps(gate_result, indent=2))
 
@@ -305,15 +317,34 @@ def fix_command(
                     click.echo(f"    ✗ {f.get('check_id', 'unknown').split('.')[-1]}")
                     click.echo(f"      {f.get('path')}:{f.get('start', {}).get('line', 0)}")
                     click.echo(f"      Predicted failure: {prob:.0%}")
+                    if f.get("_label"):
+                        click.echo(f"      Label: {f.get('_label')}")
                 if len(gated) > 5:
                     click.echo(f"    ... and {len(gated) - 5} more")
+                click.echo()
+
+            if flagged:
+                click.echo(f"  {YELLOW}Flagged (review):{RESET}")
+                for f in flagged[:5]:
+                    prob = f.get("_failure_prob", 0)
+                    click.echo(f"    ! {f.get('check_id', 'unknown').split('.')[-1]}")
+                    click.echo(f"      {f.get('path')}:{f.get('start', {}).get('line', 0)}")
+                    click.echo(f"      Predicted failure: {prob:.0%}")
+                    if f.get("_label"):
+                        click.echo(f"      Label: {f.get('_label')}")
+                if len(flagged) > 5:
+                    click.echo(f"    ... and {len(flagged) - 5} more")
                 click.echo()
 
             if approved:
                 click.echo(f"  {GREEN}Approved (will fix):{RESET}")
                 for f in approved[:5]:
+                    prob = f.get("_failure_prob", 0)
                     click.echo(f"    ✓ {f.get('check_id', 'unknown').split('.')[-1]}")
                     click.echo(f"      {f.get('path')}:{f.get('start', {}).get('line', 0)}")
+                    click.echo(f"      Predicted failure: {prob:.0%}")
+                    if f.get("_label"):
+                        click.echo(f"      Label: {f.get('_label')}")
                 if len(approved) > 5:
                     click.echo(f"    ... and {len(approved) - 5} more")
                 click.echo()
@@ -573,31 +604,6 @@ def fix_command(
         click.echo()
         click.echo(f"  {GREEN}Sealed:{RESET} {cap_path.relative_to(target_path)}")
         click.echo("═" * 65)
-
-
-def _compute_grid_idx(finding: dict) -> int:
-    """Compute grid index for a finding using shared feature extraction.
-
-    Uses the same encoding as the learning system for consistency.
-    """
-    from capseal.shared.features import extract_patch_features, discretize_features, features_to_grid_idx
-
-    file_path = finding.get("path", "")
-    severity = finding.get("extra", {}).get("severity", "warning")
-    start_line = finding.get("start", {}).get("line", 1)
-    end_line = finding.get("end", {}).get("line", start_line + 5)
-
-    # Create a synthetic diff preview (same as learn_cmd)
-    diff_preview = f"diff --git a/{file_path} b/{file_path}\n"
-    diff_preview += f"+++ b/{file_path}\n"
-    lines_changed = max(5, end_line - start_line + 1)
-    diff_preview += f"@@ -{start_line},{lines_changed} @@\n"
-
-    # Extract features using shared module
-    raw_features = extract_patch_features(diff_preview, [{"severity": severity}])
-    levels = discretize_features(raw_features)
-    return features_to_grid_idx(levels)
-
 
 def _generate_patch(
     file_path: str,

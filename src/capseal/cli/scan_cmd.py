@@ -13,12 +13,10 @@ import sys
 from pathlib import Path
 
 import click
-import numpy as np
-
-from capseal.shared.features import (
-    extract_patch_features,
-    discretize_features,
-    features_to_grid_idx,
+from capseal.risk_engine import (
+    THRESHOLD_APPROVE,
+    evaluate_risk,
+    evaluate_risk_for_finding,
 )
 
 
@@ -27,10 +25,19 @@ from capseal.shared.features import (
 @click.option("--gate", is_flag=True, help="Gate findings based on learned model")
 @click.option("--json", "output_json", is_flag=True, help="Output JSON instead of human-readable")
 @click.option("--threshold", type=float, default=0.6, help="Failure probability threshold for gating (default: 0.6)")
+@click.option("--diff", "diff_path", type=click.Path(exists=True), default=None, help="Evaluate a unified diff file directly")
 @click.option("--profile", type=click.Choice(["security", "quality", "bugs", "all", "custom"]),
               default=None, help="Scan profile (default: from config or 'auto')")
 @click.option("--rules", type=click.Path(exists=True), default=None, help="Custom semgrep rules path (use with --profile custom)")
-def scan_command(path: str, gate: bool, output_json: bool, threshold: float, profile: str | None, rules: str | None) -> None:
+def scan_command(
+    path: str,
+    gate: bool,
+    output_json: bool,
+    threshold: float,
+    diff_path: str | None,
+    profile: str | None,
+    rules: str | None,
+) -> None:
     """Scan codebase for issues using Semgrep.
 
     \b
@@ -45,7 +52,41 @@ def scan_command(path: str, gate: bool, output_json: bool, threshold: float, pro
 
     target_path = Path(path).resolve()
     capseal_dir = target_path / ".capseal"
-    model_path = capseal_dir / "models" / "beta_posteriors.npz"
+
+    # Direct diff scoring mode (used by integrations and consistency checks)
+    if diff_path:
+        diff_text = Path(diff_path).read_text()
+        risk = evaluate_risk(
+            diff_text,
+            workspace=target_path,
+            approve_threshold=THRESHOLD_APPROVE,
+            deny_threshold=threshold,
+        )
+        payload = {
+            "decision": risk.decision,
+            "p_fail": round(risk.p_fail, 6),
+            "confidence": round(risk.confidence, 6),
+            "uncertainty": round(risk.uncertainty, 6),
+            "grid_cell": risk.grid_cell,
+            "label": risk.label,
+            "features": risk.features,
+            "model_loaded": risk.model_loaded,
+            "thresholds": {
+                "approve_below": THRESHOLD_APPROVE,
+                "deny_at_or_above": threshold,
+            },
+        }
+        if output_json:
+            click.echo(json.dumps(payload, indent=2))
+        else:
+            click.echo("CAPSEAL DIFF RISK")
+            click.echo(f"  Decision:    {risk.decision}")
+            click.echo(f"  p_fail:      {risk.p_fail:.2f}")
+            click.echo(f"  Label:       {risk.label}")
+            click.echo(f"  Grid cell:   {risk.grid_cell}")
+            click.echo(f"  Confidence:  {risk.confidence:.2f}")
+            click.echo(f"  Model:       {'trained' if risk.model_loaded else 'untrained'}")
+        return
 
     # Load config for default profile
     config_json = None
@@ -89,29 +130,11 @@ def scan_command(path: str, gate: bool, output_json: bool, threshold: float, pro
             click.echo("No findings detected.")
         return
 
-    # Step 2: Load model if gating
-    model = None
-    if gate:
-        if model_path.exists():
-            try:
-                data = np.load(model_path)
-                alpha = data["alpha"]
-                beta = data["beta"]
-                # Compute failure probabilities
-                failure_prob = beta / (alpha + beta)
-                model = {"alpha": alpha, "beta": beta, "failure_prob": failure_prob}
-            except Exception as e:
-                if not output_json:
-                    click.echo(f"Warning: Could not load model: {e}", err=True)
-        else:
-            if not output_json:
-                click.echo("No learned model found. Run 'capseal learn .' first to enable gating.")
-                click.echo("Showing all findings without gating.\n")
-
-    # Step 3: Classify findings
+    # Step 2: Classify findings
     approved = []
     gated = []
     flagged = []
+    model_loaded = False
 
     for finding in findings:
         check_id = finding.get("check_id", "unknown")
@@ -119,41 +142,36 @@ def scan_command(path: str, gate: bool, output_json: bool, threshold: float, pro
         line = finding.get("start", {}).get("line", 0)
         message = finding.get("extra", {}).get("message", "")
 
-        # Compute grid index for this finding (simplified feature extraction)
-        grid_idx = _compute_grid_idx(finding)
-
         # Determine risk
-        if model and gate:
-            prob = model["failure_prob"][grid_idx] if grid_idx < len(model["failure_prob"]) else 0.5
-            if prob > threshold:
-                risk = "HIGH"
+        if gate:
+            risk = evaluate_risk_for_finding(
+                finding,
+                workspace=target_path,
+                approve_threshold=THRESHOLD_APPROVE,
+                deny_threshold=threshold,
+            )
+            model_loaded = model_loaded or risk.model_loaded
+            finding_entry = {
+                "check_id": check_id,
+                "path": file_path,
+                "line": line,
+                "message": message,
+                "failure_prob": float(risk.p_fail),
+                "grid_idx": risk.grid_cell,
+                "label": risk.label,
+                "confidence": float(risk.confidence),
+            }
+            if risk.decision == "deny":
                 gated.append({
-                    "check_id": check_id,
-                    "path": file_path,
-                    "line": line,
-                    "message": message,
-                    "failure_prob": float(prob),
-                    "grid_idx": grid_idx,
+                    **finding_entry,
                 })
-            elif prob > 0.3:
-                risk = "MEDIUM"
+            elif risk.decision == "flag":
                 flagged.append({
-                    "check_id": check_id,
-                    "path": file_path,
-                    "line": line,
-                    "message": message,
-                    "failure_prob": float(prob),
-                    "grid_idx": grid_idx,
+                    **finding_entry,
                 })
             else:
-                risk = "LOW"
                 approved.append({
-                    "check_id": check_id,
-                    "path": file_path,
-                    "line": line,
-                    "message": message,
-                    "failure_prob": float(prob),
-                    "grid_idx": grid_idx,
+                    **finding_entry,
                 })
         else:
             # No model - just list findings
@@ -164,6 +182,10 @@ def scan_command(path: str, gate: bool, output_json: bool, threshold: float, pro
                 "message": message,
             })
 
+    if gate and not model_loaded and not output_json:
+        click.echo("No learned model found. Run 'capseal learn .' first for personalized gating.")
+        click.echo("Proceeding with allow-by-default decisions.\n")
+
     # Step 4: Output
     if output_json:
         click.echo(json.dumps({
@@ -172,7 +194,7 @@ def scan_command(path: str, gate: bool, output_json: bool, threshold: float, pro
             "gated": gated,
             "flagged": flagged,
             "gate_enabled": gate,
-            "model_loaded": model is not None,
+            "model_loaded": model_loaded,
         }, indent=2))
     else:
         click.echo(f"\n{'═' * 60}")
@@ -181,7 +203,7 @@ def scan_command(path: str, gate: bool, output_json: bool, threshold: float, pro
         click.echo(f"  Target: {target_path}")
         click.echo(f"  Findings: {len(findings)}")
 
-        if gate and model:
+        if gate:
             click.echo(f"\n  Gate Results (threshold: {threshold:.0%} failure rate):")
             click.echo(f"    ✓ Approved:  {len(approved)}")
             click.echo(f"    ⚠ Flagged:   {len(flagged)}")
@@ -193,12 +215,28 @@ def scan_command(path: str, gate: bool, output_json: bool, threshold: float, pro
                     click.echo(f"    • {g['check_id']}")
                     click.echo(f"      {g['path']}:{g['line']}")
                     click.echo(f"      Predicted failure: {g['failure_prob']:.0%}")
+                    if g.get("label"):
+                        click.echo(f"      Label: {g['label']}")
+
+            if flagged:
+                click.echo(f"\n  Flagged (review suggested):")
+                for f in flagged[:5]:
+                    click.echo(f"    • {f['check_id']}")
+                    click.echo(f"      {f['path']}:{f['line']}")
+                    click.echo(f"      Predicted failure: {f['failure_prob']:.0%}")
+                    if f.get("label"):
+                        click.echo(f"      Label: {f['label']}")
+                if len(flagged) > 5:
+                    click.echo(f"    ... and {len(flagged) - 5} more")
 
             if approved:
                 click.echo(f"\n  Approved (low-risk, proceed with patches):")
                 for a in approved[:5]:  # Show first 5
                     click.echo(f"    • {a['check_id']}")
                     click.echo(f"      {a['path']}:{a['line']}")
+                    click.echo(f"      Predicted failure: {a['failure_prob']:.0%}")
+                    if a.get("label"):
+                        click.echo(f"      Label: {a['label']}")
                 if len(approved) > 5:
                     click.echo(f"    ... and {len(approved) - 5} more")
         else:
@@ -218,7 +256,7 @@ def scan_command(path: str, gate: bool, output_json: bool, threshold: float, pro
         click.echo(f"{'═' * 60}\n")
 
     # Step 5: Persist gate results if gating was used
-    if gate and model:
+    if gate:
         import hashlib
         import time
         from datetime import datetime, timezone
@@ -231,7 +269,8 @@ def scan_command(path: str, gate: bool, output_json: bool, threshold: float, pro
             "timestamp": timestamp,
             "target": str(target_path),
             "threshold": threshold,
-            "model_path": str(model_path),
+            "model_path": str(capseal_dir / "models" / "beta_posteriors.npz"),
+            "model_loaded": model_loaded,
             "summary": {
                 "total": len(findings),
                 "approved": len(approved),
@@ -240,15 +279,15 @@ def scan_command(path: str, gate: bool, output_json: bool, threshold: float, pro
             },
             "decisions": [
                 {"finding": g["check_id"], "path": g["path"], "line": g["line"],
-                 "decision": "gate", "failure_prob": g["failure_prob"]}
+                 "decision": "gate", "failure_prob": g["failure_prob"], "label": g.get("label")}
                 for g in gated
             ] + [
                 {"finding": f["check_id"], "path": f["path"], "line": f["line"],
-                 "decision": "flag", "failure_prob": f["failure_prob"]}
+                 "decision": "flag", "failure_prob": f["failure_prob"], "label": f.get("label")}
                 for f in flagged
             ] + [
                 {"finding": a["check_id"], "path": a["path"], "line": a["line"],
-                 "decision": "approve", "failure_prob": a.get("failure_prob", 0)}
+                 "decision": "approve", "failure_prob": a.get("failure_prob", 0), "label": a.get("label")}
                 for a in approved
             ],
         }
@@ -308,28 +347,6 @@ def scan_command(path: str, gate: bool, output_json: bool, threshold: float, pro
 
         if not output_json:
             click.echo(f"  Sealed: {cap_path.relative_to(target_path)}")
-
-
-def _compute_grid_idx(finding: dict) -> int:
-    """Compute grid index for a finding using shared feature extraction.
-
-    Uses the same encoding as the learning system for consistency.
-    """
-    file_path = finding.get("path", "")
-    severity = finding.get("extra", {}).get("severity", "warning")
-    start_line = finding.get("start", {}).get("line", 1)
-    end_line = finding.get("end", {}).get("line", start_line + 5)
-
-    # Create a synthetic diff preview (same as learn_cmd)
-    diff_preview = f"diff --git a/{file_path} b/{file_path}\n"
-    diff_preview += f"+++ b/{file_path}\n"
-    lines_changed = max(5, end_line - start_line + 1)
-    diff_preview += f"@@ -{start_line},{lines_changed} @@\n"
-
-    # Extract features using shared module
-    raw_features = extract_patch_features(diff_preview, [{"severity": severity}])
-    levels = discretize_features(raw_features)
-    return features_to_grid_idx(levels)
 
 
 __all__ = ["scan_command"]
