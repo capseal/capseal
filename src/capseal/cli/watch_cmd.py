@@ -47,6 +47,7 @@ def _get_changed_files() -> list[str]:
 
 def _compute_risk_score(file_path: str, diff_lines: int) -> float:
     """Compute risk score for a file change."""
+    # TODO: Replace with canonical risk_engine -- see upgrade-spec #2.
     import random
 
     # Seed based on file path for determinism
