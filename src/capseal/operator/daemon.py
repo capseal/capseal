@@ -325,7 +325,7 @@ class OperatorDaemon:
             return
         payload = cleaned
         if announce:
-            payload = f"Announce to the user exactly: {cleaned}"
+            payload = f"Announce to the user exactly, word-for-word, then stop: {cleaned}"
         async with self._voice_speak_lock:
             with contextlib.suppress(Exception):
                 await self.voice_call.speak(payload)
@@ -357,7 +357,7 @@ class OperatorDaemon:
         await self._broadcast(Message(
             short_text="\U0001f7e2 CapSeal Operator online. Watching for events.",
             full_text="\U0001f7e2 CapSeal Operator Agent is online and monitoring your workspace.",
-            voice_text="CapSeal Ops online. Watching your session. I'll stay quiet unless something interesting happens.",
+            voice_text="",
         ), score=0.5)
 
         # If events.jsonl already exists, seek to end (unless replay mode)

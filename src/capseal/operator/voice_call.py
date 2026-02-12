@@ -127,6 +127,10 @@ class VoiceCallManager:
         self.connected = False
         self.audio_frames_received = 0
         self.audio_bytes_received = 0
+        self._debug_downlink_frames = int(config.get("debug_downlink_frames", 0) or 0)
+        self._debug_downlink_logged = 0
+        self._debug_uplink_frames = int(config.get("debug_uplink_frames", 0) or 0)
+        self._debug_uplink_logged = 0
         self._on_transcript: Optional[Callable[[str], Awaitable[None]]] = None
         self._text_buffer: str = ""
         self.playback_enabled = bool(config.get("playback_enabled", True))
@@ -177,7 +181,16 @@ class VoiceCallManager:
         self.silence_guard_text = str(
             config.get(
                 "silence_guard_text",
-                "Do not initiate conversation. If you hear silence or background noise, stay silent.",
+                (
+                    "You are CapSeal Ops, a security operations monitor.\n"
+                    "RULES:\n"
+                    "- Do not initiate conversation.\n"
+                    "- During silence or background noise, stay silent. Do not fill pauses.\n"
+                    "- Never generate greetings, pleasantries, or filler.\n"
+                    "- When you hear an announcement instruction (\"Announce to the user exactly\"),\n"
+                    "  repeat the words after the colon verbatim and then stop.\n"
+                    "- Stay focused on the live session.\n"
+                ),
             )
         ).strip()
 
@@ -217,6 +230,8 @@ class VoiceCallManager:
         # Ensure we never leak multiple open sockets. Moshi holds a global lock per
         # connection, so leaked/duplicate websockets can block new handshakes.
         if self.ws is not None:
+            with contextlib.suppress(Exception):
+                await self.stop_mic_uplink()
             with contextlib.suppress(Exception):
                 await self.ws.close()
             self.ws = None
@@ -270,6 +285,8 @@ class VoiceCallManager:
             return True
         except Exception as e:
             print(f"[voice_call] connection failed: {e!r}")
+            with contextlib.suppress(Exception):
+                await self.stop_mic_uplink()
             if self.ws is not None:
                 with contextlib.suppress(Exception):
                     await self.ws.close()
@@ -494,6 +511,17 @@ class VoiceCallManager:
             self.audio_frames_received += 1
             self.audio_bytes_received += len(payload)
             self._downlink_last_audio_ts = time.time()
+            if self._debug_downlink_frames and self._debug_downlink_logged < self._debug_downlink_frames:
+                self._debug_downlink_logged += 1
+                sig = payload[:4]
+                sig_ascii = ""
+                if sig and all(32 <= b < 127 for b in sig):
+                    sig_ascii = sig.decode("ascii", errors="ignore")
+                print(
+                    "[voice_call] downlink "
+                    f"{self._debug_downlink_logged}/{self._debug_downlink_frames} "
+                    f"len={len(payload)} sig={sig_ascii or sig!r} first16={payload[:16].hex()}"
+                )
             self._write_playback(payload)
             if self.playback_enabled and self.audio_frames_received % 10 == 0:
                 print(
@@ -759,14 +787,6 @@ class VoiceCallManager:
         frame_bytes = samples_per_frame * bytes_per_sample
         threshold = self._vad_threshold()
         hangover_frames = max(0, int(self.mic_vad_hangover_ms / max(1, self.mic_frame_duration_ms)))
-        silence_tail_frames = max(
-            0,
-            int(
-                int(self.config.get("mic_silence_tail_ms", 600))
-                / max(1, self.mic_frame_duration_ms)
-            ),
-        )
-        tail_remaining = 0
         flush_every_frames = max(1, int(self.config.get("mic_flush_every_frames", 3)))
         frames_since_flush = 0
         loop = asyncio.get_running_loop()
@@ -813,21 +833,16 @@ class VoiceCallManager:
                         rms = self._pcm_rms_16le(frame)
                         if rms >= threshold:
                             self._vad_open_frames = hangover_frames
-                            tail_remaining = silence_tail_frames
                             gated = frame
                         else:
                             if getattr(self, "_vad_open_frames", 0) > 0:
                                 self._vad_open_frames -= 1
                                 gated = frame
                             else:
-                                # No speech. Send a small tail of silence so the model
-                                # can detect end-of-utterance, then stop sending entirely
-                                # (prevents "chatty on silence" behavior).
-                                if tail_remaining > 0:
-                                    tail_remaining -= 1
-                                    gated = b"\x00" * frame_bytes
-                                else:
-                                    gated = b""
+                                # Silence suppression: replace low-energy mic frames with clean zero PCM.
+                                # This keeps timing stable while preventing ambient noise from being
+                                # interpreted as speech.
+                                gated = b"\x00" * frame_bytes
                     else:
                         gated = frame
 
@@ -856,8 +871,22 @@ class VoiceCallManager:
                         break
                     await asyncio.sleep(0.005)
                     continue
+                ws = self.ws
+                if ws is None:
+                    break
+                if self._debug_uplink_frames and self._debug_uplink_logged < self._debug_uplink_frames:
+                    self._debug_uplink_logged += 1
+                    sig = chunk[:4]
+                    sig_ascii = ""
+                    if sig and all(32 <= b < 127 for b in sig):
+                        sig_ascii = sig.decode("ascii", errors="ignore")
+                    print(
+                        "[voice_call] uplink "
+                        f"{self._debug_uplink_logged}/{self._debug_uplink_frames} "
+                        f"len={len(chunk)} sig={sig_ascii or sig!r} first16={chunk[:16].hex()}"
+                    )
                 async with self._send_lock:
-                    await self.ws.send(b"\x01" + chunk)
+                    await ws.send(b"\x01" + chunk)
         except asyncio.CancelledError:
             raise
         except Exception as e:

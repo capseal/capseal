@@ -99,7 +99,9 @@ def test_broadcast_speaks_live_call_for_forced_gate_voice(tmp_path: Path) -> Non
     event = {"type": "gate", "data": {"decision": "deny"}}
     asyncio.run(daemon._broadcast(msg, score=0.80, event=event))
 
-    assert dummy_call.spoken == ["Announce to the user exactly: i blocked a risky edit"]
+    assert len(dummy_call.spoken) == 1
+    assert dummy_call.spoken[0].lower().startswith("announce to the user exactly")
+    assert dummy_call.spoken[0].endswith("i blocked a risky edit")
 
 
 def test_auto_stop_sets_voice_pod_stopped(tmp_path: Path) -> None:
