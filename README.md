@@ -13,6 +13,7 @@ capseal quickstart
 ```
 
 That command runs: fast init, git-history learning, a live gate decision with a readable risk label, then seals and verifies a `.cap` receipt.
+If the repo has too little history, quickstart bootstraps a small demo profile into your local model so the gate and MCP paths stay consistent.
 
 Then continue with:
 
@@ -155,3 +156,7 @@ Each `.cap` file contains a manifest (session metadata, timestamps, action count
 | `capseal verify <file.cap>` | Verify sealed receipt |
 | `capseal doctor` | Check everything is wired up correctly |
 | `capseal mcp-serve` | Start MCP server for agent integration |
+
+## Ops Runbook
+
+- Voice operator pipeline spec: `docs/voice-operator-pipeline.md`
