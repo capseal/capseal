@@ -32,16 +32,6 @@ class _DummyVoiceCall:
         return
 
 
-class _DummyNarrator:
-    def __init__(self) -> None:
-        self.available = True
-        self.spoken: list[str] = []
-
-    async def speak(self, text: str) -> bool:
-        self.spoken.append(text)
-        return True
-
-
 def _base_config() -> dict:
     cfg = copy.deepcopy(DEFAULT_CONFIG)
     cfg["notify_threshold"] = 0.95  # higher than denied score to test force path
@@ -99,8 +89,6 @@ def test_broadcast_speaks_live_call_for_forced_gate_voice(tmp_path: Path) -> Non
     daemon._voice_active = True  # Voice toggle is off by default; tests should opt in.
     dummy_call = _DummyVoiceCall()
     daemon.voice_call = dummy_call  # type: ignore[assignment]
-    dummy_narrator = _DummyNarrator()
-    daemon.narrator = dummy_narrator  # type: ignore[assignment]
     daemon.voice = None
 
     msg = Message(
@@ -111,7 +99,7 @@ def test_broadcast_speaks_live_call_for_forced_gate_voice(tmp_path: Path) -> Non
     event = {"type": "gate", "data": {"decision": "deny"}}
     asyncio.run(daemon._broadcast(msg, score=0.80, event=event))
 
-    assert dummy_narrator.spoken == ["i blocked a risky edit"]
+    assert dummy_call.spoken == ["Announce to the user exactly: i blocked a risky edit"]
 
 
 def test_auto_stop_sets_voice_pod_stopped(tmp_path: Path) -> None:

@@ -78,6 +78,10 @@ class InterventionChannel:
 
     async def _write_intervention(self, data: dict):
         """Write intervention command to the intervention file."""
+        # Canonical on-disk format is a queue/list of commands:
+        #   [{"action": "...", ...}, ...]
+        # Reader compatibility in mcp_server accepts either list or single dict.
+        # We always write the canonical list format here.
         # Read existing interventions (queue)
         queue = []
         if self.intervention_path.exists():

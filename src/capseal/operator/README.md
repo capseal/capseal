@@ -7,17 +7,23 @@ Your agent works. You walk away. Your phone tells you what's happening.
 ## Quick Start
 
 ```bash
-# 1. Set up Telegram bot
-python daemon.py --setup telegram
+# 1. Provision config (workspace-local)
+capseal operator . --provision --voice --voice-provider openai
 
-# 2. Test it
-python daemon.py --workspace /your/project --test
+# 2. Add Telegram setup (interactive)
+capseal operator --setup telegram
 
-# 3. Run the operator (Terminal 1)
-python daemon.py --workspace /your/project
+# 3. Verify readiness before launch
+capseal operator . --verify
 
-# 4. Simulate events to test (Terminal 2)
-python simulate.py --workspace /your/project --scenario full_session
+# 4. Test it
+capseal operator . --test
+
+# 5. Run the operator (Terminal 1)
+capseal operator .
+
+# 6. Simulate events to test (Terminal 2)
+python -m capseal.operator.simulate --workspace . --scenario full_session
 ```
 
 ## How It Works
@@ -67,6 +73,14 @@ export CAPSEAL_TELEGRAM_BOT_TOKEN="your-bot-token"
 ```json
 {
   "notify_threshold": 0.5,
+  "voice": {
+    "enabled": true,
+    "provider": "openai",
+    "live_call": false,
+    "speak_gate_events": true,
+    "speak_gate_decisions": ["deny", "flag"],
+    "speak_min_score": 0.55
+  },
   "channels": {
     "telegram": {
       "bot_token_env": "CAPSEAL_TELEGRAM_BOT_TOKEN",
@@ -141,8 +155,8 @@ capseal-operator/
 ## Roadmap
 
 - [x] Phase 1-3: Telegram text + significance filter + message composer
-- [ ] Phase 4: Intervention channel (Telegram approve/deny buttons wired to MCP)
-- [ ] Phase 5: PersonaPlex voice notes
-- [ ] Phase 6: Live full-duplex voice channel
-- [ ] Phase 7: WhatsApp + iMessage channels
-- [ ] Phase 8: LLM-powered natural language command parsing
+- [x] Phase 4: Intervention channel (Telegram approve/deny buttons wired to MCP)
+- [x] Phase 5: Voice notes (OpenAI / PersonaPlex TTS)
+- [x] Phase 6: Live full-duplex voice channel
+- [x] Phase 7: WhatsApp + iMessage channels
+- [x] Phase 8: LLM-powered natural language command parsing

@@ -27,7 +27,6 @@ from .significance import SignificanceFilter
 from .composer import MessageComposer, Message
 from .config import load_config, DEFAULT_CONFIG
 from .intervention import InterventionChannel
-from .narration import LocalNarrator
 
 
 @dataclass
@@ -117,6 +116,8 @@ class OperatorDaemon:
         self.pty_events_path = workspace / ".capseal" / "pty_events.jsonl"
         self.home_pty_events_path = Path.home() / ".capseal" / "pty_events.jsonl"
         self.status_path = workspace / ".capseal" / "operator_status.json"
+        # Also write a global status file so any TUI can detect a running operator in another repo.
+        self.home_status_path = Path.home() / ".capseal" / "operator_status.json"
         self.voice_control_path = workspace / ".capseal" / "voice_control.json"
         self.config = config
         self.context = SessionContext()
@@ -137,7 +138,7 @@ class OperatorDaemon:
         self._seen_timestamps = set()
         self.last_event_time = time.time()
         self._voice_active = False
-        self._narration_lock = asyncio.Lock()
+        self._voice_speak_lock = asyncio.Lock()
 
         self.intervention = InterventionChannel(workspace)
         self._init_channels(config)
@@ -152,13 +153,6 @@ class OperatorDaemon:
                 print(f"[operator] Voice synthesis enabled ({voice_cfg.get('provider', 'openai')})")
             except Exception as e:
                 print(f"[operator] Voice init failed: {e}")
-
-        # Deterministic event narration (no Moshi round-trip).
-        self.narrator = LocalNarrator(voice_cfg.get("narration", {}))
-        if self.narrator.available:
-            print(f"[operator] Local narration enabled ({self.narrator.cfg.backend})")
-        else:
-            print("[operator] Local narration unavailable (install espeak)")
 
         # Live voice call (Phase 6)
         self.voice_call = None
@@ -267,54 +261,39 @@ class OperatorDaemon:
             if self.voice_call:
                 with contextlib.suppress(Exception):
                     await self.voice_call.set_active(True)
-            await self._narrate("CapSeal Ops online. Monitoring your session.")
+            await self._voice_speak("CapSeal Ops online. Monitoring your session.", announce=True)
             print("[operator] Voice toggle: active")
             return
 
         # Turning OFF: announce once, then mute.
         if self._voice_active:
-            await self._narrate("CapSeal Ops going silent.")
+            await self._voice_speak("CapSeal Ops going silent.", announce=True)
         self._voice_active = False
         if self.voice_call:
             with contextlib.suppress(Exception):
                 await self.voice_call.set_active(False)
         print("[operator] Voice toggle: silent")
 
-    async def _narrate(self, text: str) -> None:
-        """Speak deterministic narration locally.
+    async def _voice_speak(self, text: str, *, announce: bool) -> None:
+        """Speak via PersonaPlex/Moshi.
 
-        This intentionally bypasses Moshi (speech-to-speech). For event narration
-        we want exact wording, not a model response.
-
-        If the live call mic uplink is active, pause it while narrating so Moshi
-        doesn't respond to the narration played over speakers.
+        Moshi is speech-to-speech. We inject a short audio prompt (from local tools)
+        and let Moshi produce the voiced output. For announcements, wrap with a
+        directive to reduce conversational filler.
         """
         if not self._voice_active:
             return
-        if not self.narrator.available:
+        if not self.voice_call or not self.voice_call.connected:
             return
         cleaned = (text or "").strip()
         if not cleaned:
             return
-
-        async with self._narration_lock:
-            mic_was_running = False
-            if self.voice_call and self.voice_call.connected:
-                mic_was_running = bool(getattr(self.voice_call, "_mic_uplink_running", False))
-                if mic_was_running:
-                    with contextlib.suppress(Exception):
-                        await self.voice_call.stop_mic_uplink()
-            try:
-                await self.narrator.speak(cleaned)
-            finally:
-                if (
-                    mic_was_running
-                    and self.voice_call
-                    and self.voice_call.connected
-                    and self._voice_active
-                ):
-                    with contextlib.suppress(Exception):
-                        await self.voice_call.start_mic_uplink()
+        payload = cleaned
+        if announce:
+            payload = f"Announce to the user exactly: {cleaned}"
+        async with self._voice_speak_lock:
+            with contextlib.suppress(Exception):
+                await self.voice_call.speak(payload)
 
     async def run(self):
         """Main event loop."""
@@ -567,9 +546,9 @@ class OperatorDaemon:
         if wants_voice and self.voice and message.voice_text:
             audio = await self.voice.synthesize(message.voice_text)
 
-        # Deterministic local narration (no Moshi round-trip).
-        if wants_voice and self._voice_active and message.voice_text:
-            await self._narrate(message.voice_text)
+        # Live voice call narration via PersonaPlex/Moshi.
+        if wants_voice and self._voice_active and message.voice_text and self.voice_call and self.voice_call.connected:
+            await self._voice_speak(message.voice_text, announce=True)
             delivered = True
 
         for channel in self.channels:
@@ -751,7 +730,7 @@ class OperatorDaemon:
             except Exception:
                 pass
 
-        await self._narrate(ack)
+        await self._voice_speak(ack, announce=False)
 
     async def _apply_voice_command(self, command: str) -> str | None:
         """Apply a slash command parsed from voice transcript."""
@@ -827,7 +806,7 @@ class OperatorDaemon:
                         with contextlib.suppress(Exception):
                             await self.voice_call.set_active(self._voice_active)
                         if self._voice_active:
-                            await self._narrate("CapSeal Ops reconnected.")
+                            await self._voice_speak("CapSeal Ops reconnected.", announce=True)
             except Exception as e:
                 print(f"[operator] voice maintenance error: {e}")
 
@@ -835,7 +814,7 @@ class OperatorDaemon:
         if not self.voice_call:
             return
         if self.voice_call.connected:
-            await self._narrate("Going offline due to inactivity.")
+            await self._voice_speak("Going offline due to inactivity.", announce=True)
             await asyncio.sleep(0.2)
         await self.voice_call.disconnect()
         self._voice_pod_stopped = True
@@ -874,7 +853,7 @@ class OperatorDaemon:
             if not self._voice_listen_task or self._voice_listen_task.done():
                 self._voice_listen_task = asyncio.create_task(self.voice_call.listen_loop())
             if self._voice_active:
-                await self._narrate("CapSeal Ops back online. Monitoring your session.")
+                await self._voice_speak("CapSeal Ops back online. Monitoring your session.", announce=True)
 
     @staticmethod
     def _channel_type_name(channel) -> str:
@@ -900,6 +879,7 @@ class OperatorDaemon:
 
         status = {
             "online": not offline,
+            "workspace": str(self.workspace),
             "channels": len(self.channels),
             "channel_types": [self._channel_type_name(ch) for ch in self.channels],
             "session_id": self.context.session_id,
@@ -913,11 +893,12 @@ class OperatorDaemon:
         }
 
         try:
-            self.status_path.parent.mkdir(parents=True, exist_ok=True)
-            tmp_path = self.status_path.with_suffix(".tmp")
-            with open(tmp_path, "w") as f:
-                json.dump(status, f)
-            tmp_path.rename(self.status_path)
+            for path in (self.status_path, self.home_status_path):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                tmp_path = path.with_suffix(".tmp")
+                with open(tmp_path, "w") as f:
+                    json.dump(status, f)
+                tmp_path.rename(path)
         except OSError:
             pass
 

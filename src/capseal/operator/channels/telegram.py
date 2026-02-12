@@ -19,6 +19,7 @@ Setup:
 
 import json
 import asyncio
+import html
 from typing import Optional
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
@@ -68,9 +69,10 @@ class TelegramChannel:
 
     async def send_text(self, text: str, buttons: Optional[list] = None):
         """Send a text message, optionally with inline keyboard buttons."""
+        safe_text = html.escape(text or "")
         data = {
             "chat_id": self.chat_id,
-            "text": text,
+            "text": safe_text,
             "parse_mode": "HTML",
             "disable_web_page_preview": True,
         }
@@ -114,7 +116,7 @@ class TelegramChannel:
         ).encode() + audio_bytes + (
             f"\r\n--{boundary}\r\n"
             f'Content-Disposition: form-data; name="caption"\r\n\r\n'
-            f"{caption}\r\n"
+            f"{html.escape(caption or '')}\r\n"
             f"--{boundary}--\r\n"
         ).encode()
 
@@ -190,6 +192,7 @@ class TelegramChannel:
                 "approve": "/approve",
                 "deny": "/deny",
                 "diff": "/diff",
+                "pause": "/pause",
                 "resume": "/resume",
                 "end": "/end",
                 "investigate": "/investigate",

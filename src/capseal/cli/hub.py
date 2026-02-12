@@ -199,6 +199,15 @@ def _ensure_workspace(target: Path) -> dict:
 
 # ── Status banner ────────────────────────────────────────────────────────────
 
+def _cap_session_key(cap_path: Path) -> str:
+    """Return canonical session key for a .cap file.
+
+    Session identity is based on run-id / file stem, not manifest session_name.
+    This keeps counts stable when session_name is customized.
+    """
+    return cap_path.stem
+
+
 def _show_status_banner(target: Path, config: dict) -> None:
     """Print the hub header with workspace status."""
     console.print(BANNER)
@@ -243,7 +252,7 @@ def _show_status_banner(target: Path, config: dict) -> None:
             if entry.is_dir():
                 sessions.setdefault(entry.name, {"sealed": False})
             elif entry.suffix == ".cap" and not entry.is_symlink():
-                key = entry.stem
+                key = _cap_session_key(entry)
                 session = sessions.setdefault(key, {"sealed": False})
                 session["sealed"] = True
 

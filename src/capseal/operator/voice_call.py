@@ -260,7 +260,8 @@ class VoiceCallManager:
         """Speak text on the live call.
 
         For Moshi binary protocol, this converts text to Opus bytes locally
-        (`espeak` + `ffmpeg`) and streams them as kind=0x01 audio frames.
+        (`espeak` + `ffmpeg`) and injects them into the *existing* mic uplink
+        encoder so the server receives a single continuous OGG/Opus byte stream.
         """
         if not self.connected or not self.ws:
             return
@@ -269,43 +270,29 @@ class VoiceCallManager:
             return
 
         try:
-            # Critical: prevent interleaving two independent OGG streams.
-            # If mic uplink is running, pause it while injecting TTS prompt.
-            mic_was_running = bool(self._mic_uplink_running)
-            if mic_was_running:
-                await self.stop_mic_uplink()
-            self._speak_uplink_active = True
-
             if self.protocol == "json_stream":
                 async with self._send_lock:
                     await self.ws.send(json.dumps({"type": "speak", "text": text}))
                 return
 
-            opus = await asyncio.to_thread(self._text_to_opus_ogg, text[:800])
-            if not opus:
-                print("[voice_call] skipped speak: failed to synthesize opus input")
+            # Ensure the uplink pipeline is running so the server sees one continuous stream.
+            if not self._mic_uplink_running:
+                await self.start_mic_uplink()
+
+            pcm = await asyncio.to_thread(self._text_to_pcm_s16le, text[:800])
+            if not pcm:
+                print("[voice_call] skipped speak: failed to synthesize pcm input")
                 return
 
-            # Stream in pages/chunks so server decoder can consume incrementally.
-            chunk_size = self.uplink_chunk_bytes
-            for idx in range(0, len(opus), chunk_size):
-                chunk = opus[idx: idx + chunk_size]
-                async with self._send_lock:
-                    await self.ws.send(b"\x01" + chunk)
-                await asyncio.sleep(self.uplink_sleep_seconds)
-            print(f"[voice_call] sent audio prompt ({len(opus)} bytes)")
+            # Prevent mic frames from being written to the encoder while we inject the prompt.
+            self._speak_uplink_active = True
+            await self._inject_pcm_to_encoder(pcm)
+            print(f"[voice_call] injected prompt pcm ({len(pcm)} bytes)")
         except Exception as e:
             print(f"[voice_call] speak error: {e}")
             self.connected = False
         finally:
             self._speak_uplink_active = False
-            if (
-                mic_was_running
-                and self.connected
-                and self.protocol == "moshi_binary"
-                and self.mic_enabled
-            ):
-                await self.start_mic_uplink()
 
     def _text_to_opus_ogg(self, text: str) -> bytes:
         """Offline text -> OGG/Opus using local tools.
@@ -359,6 +346,95 @@ class VoiceCallManager:
         if ffmpeg_cp.returncode != 0:
             return b""
         return ffmpeg_cp.stdout or b""
+
+    def _text_to_pcm_s16le(self, text: str) -> bytes:
+        """Offline text -> s16le PCM (mono) at mic_sample_rate.
+
+        We inject PCM into the existing encoder stdin to keep a single OGG/Opus stream.
+        """
+        espeak = shutil.which("espeak")
+        ffmpeg = shutil.which("ffmpeg")
+        if not espeak or not ffmpeg:
+            return b""
+
+        espeak_cp = subprocess.run(
+            [espeak, "--stdout", "--stdin"],
+            input=text.encode("utf-8", errors="ignore"),
+            capture_output=True,
+            check=False,
+        )
+        if espeak_cp.returncode != 0 or not espeak_cp.stdout:
+            return b""
+
+        ffmpeg_cp = subprocess.run(
+            [
+                ffmpeg,
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "wav",
+                "-i",
+                "pipe:0",
+                "-ac",
+                "1",
+                "-ar",
+                str(self.mic_sample_rate),
+                "-f",
+                "s16le",
+                "pipe:1",
+            ],
+            input=espeak_cp.stdout,
+            capture_output=True,
+            check=False,
+        )
+        if ffmpeg_cp.returncode != 0:
+            return b""
+        return ffmpeg_cp.stdout or b""
+
+    async def _inject_pcm_to_encoder(self, pcm: bytes) -> None:
+        """Write PCM bytes into the encoder stdin with roughly real-time pacing."""
+        enc = self._mic_encode_proc
+        if not enc or not enc.stdin:
+            return
+
+        bytes_per_sample = 2
+        samples_per_frame = int(self.mic_sample_rate * (self.mic_frame_duration_ms / 1000.0))
+        frame_bytes = max(1, samples_per_frame * bytes_per_sample)
+        flush_every_frames = max(1, int(self.config.get("mic_flush_every_frames", 3)))
+        frames_since_flush = 0
+        loop = asyncio.get_running_loop()
+
+        # Pad to full frames so timing stays consistent.
+        if len(pcm) % frame_bytes:
+            pcm = pcm + (b"\x00" * (frame_bytes - (len(pcm) % frame_bytes)))
+
+        for off in range(0, len(pcm), frame_bytes):
+            if not (self.connected and self._mic_uplink_running):
+                break
+            chunk = pcm[off : off + frame_bytes]
+            await loop.run_in_executor(None, enc.stdin.write, chunk)
+            frames_since_flush += 1
+            if frames_since_flush >= flush_every_frames:
+                frames_since_flush = 0
+                await loop.run_in_executor(None, enc.stdin.flush)
+            await asyncio.sleep(self.mic_frame_duration_ms / 1000.0)
+
+        # Small silence tail so the model can detect end-of-utterance.
+        tail_frames = max(
+            1,
+            int(int(self.config.get("mic_silence_tail_ms", 200)) / max(1, self.mic_frame_duration_ms)),
+        )
+        tail_frames = min(tail_frames, 12)
+        for _ in range(tail_frames):
+            if not (self.connected and self._mic_uplink_running):
+                break
+            await loop.run_in_executor(None, enc.stdin.write, b"\x00" * frame_bytes)
+            frames_since_flush += 1
+            if frames_since_flush >= flush_every_frames:
+                frames_since_flush = 0
+                await loop.run_in_executor(None, enc.stdin.flush)
+            await asyncio.sleep(self.mic_frame_duration_ms / 1000.0)
 
     async def listen_loop(self) -> None:
         """Background receive loop for transcripts/audio markers."""
@@ -675,6 +751,13 @@ class VoiceCallManager:
 
         try:
             while self.connected and self._mic_uplink_running:
+                # If we're injecting a prompt, drain mic bytes but don't write to the encoder.
+                # This avoids mixing two PCM sources into a single OGG stream.
+                if self._speak_uplink_active:
+                    _ = await loop.run_in_executor(None, cap.stdout.read, 4096)
+                    await asyncio.sleep(self.mic_frame_duration_ms / 1000.0)
+                    continue
+
                 # Duck mic while downlink audio is flowing to avoid feedback loops.
                 if self.mic_duck_downlink and (time.time() - self._downlink_last_audio_ts) < (
                     self.mic_duck_hold_ms / 1000.0
@@ -698,6 +781,8 @@ class VoiceCallManager:
                     continue
                 buf.extend(chunk)
                 while len(buf) >= frame_bytes and self.connected and self._mic_uplink_running:
+                    if self._speak_uplink_active:
+                        break
                     frame = bytes(buf[:frame_bytes])
                     del buf[:frame_bytes]
 

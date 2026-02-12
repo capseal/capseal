@@ -12,6 +12,7 @@ import asyncio
 import json
 import os
 import re
+from dataclasses import dataclass
 from typing import Optional, Tuple
 
 # Each entry: (pattern, action_name)
@@ -29,7 +30,7 @@ PATTERNS: list[Tuple[re.Pattern, str]] = [
     (re.compile(r"\b(pause|hold|wait|hang on)\b", re.I), "pause"),
     (re.compile(r"\b(resume|continue|unpause|carry on)\b", re.I), "resume"),
     # Status / Info
-    (re.compile(r"\b(status|what's happening|how's it going|update me)\b", re.I), "status"),
+    (re.compile(r"\b(status|what's happening|what's going on|how's it going|update me)\b", re.I), "status"),
     (re.compile(r"\b(trust|trust score|how trusted)\b", re.I), "trust"),
     (re.compile(r"\b(files?|what files|which files)\b", re.I), "files"),
     # Session control
@@ -44,6 +45,13 @@ INSTRUCT_PATTERNS = [
 ]
 
 FILE_PATTERN = re.compile(r'[\w./\-]+\.\w{1,10}')
+
+
+@dataclass
+class ParsedCommand:
+    action: str
+    target: Optional[str] = None
+    instruction: Optional[str] = None
 
 
 def parse_keyword(text: str) -> Optional[dict]:
@@ -80,6 +88,20 @@ def _dict_to_command(result: dict) -> str:
         return f"/{action} {target}"
     else:
         return f"/{action}"
+
+
+def _slash_to_parsed(command: str) -> Optional[ParsedCommand]:
+    text = (command or "").strip()
+    if not text.startswith("/"):
+        return None
+    parts = text[1:].split(maxsplit=1)
+    action = parts[0].strip().lower() if parts else ""
+    arg = parts[1].strip() if len(parts) > 1 else None
+    if not action:
+        return None
+    if action == "instruct":
+        return ParsedCommand(action=action, instruction=arg or "")
+    return ParsedCommand(action=action, target=arg)
 
 
 async def parse_llm(text: str) -> Optional[str]:
@@ -158,3 +180,23 @@ async def parse(text: str, llm_fallback: bool = True) -> Optional[str]:
         return None
 
     return await parse_llm(text)
+
+
+def parse_command(text: str) -> Optional[ParsedCommand]:
+    """Compatibility helper used by integration docs/tests."""
+    result = parse_keyword(text)
+    if not result:
+        return None
+    return ParsedCommand(
+        action=result.get("action", ""),
+        target=result.get("target"),
+        instruction=result.get("instruction"),
+    )
+
+
+async def parse_command_async(text: str, llm_fallback: bool = True) -> Optional[ParsedCommand]:
+    """Async command parser with optional LLM fallback."""
+    result = await parse(text, llm_fallback=llm_fallback)
+    if not result:
+        return None
+    return _slash_to_parsed(result)

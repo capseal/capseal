@@ -849,6 +849,7 @@ def _parse_time(time_str: str) -> int:
 
 def _analyze_posteriors(alpha: "np.ndarray", beta: "np.ndarray") -> list[str]:
     """Analyze posteriors to generate human-readable insights."""
+    from capseal.risk_engine import beta_mean_failure_probability
     from capseal.shared.features import grid_idx_to_features
 
     insights = []
@@ -863,7 +864,7 @@ def _analyze_posteriors(alpha: "np.ndarray", beta: "np.ndarray") -> list[str]:
         if total <= 2:  # Just prior, no data
             continue
 
-        p_fail = alpha[idx] / total
+        p_fail = beta_mean_failure_probability(alpha[idx], beta[idx])
 
         if p_fail > 0.5 and total > 3:
             high_risk.append((idx, p_fail, total))
@@ -937,6 +938,9 @@ def _run_git_learn(
     target_path: Path,
     quiet: bool,
     CYAN: str, GREEN: str, YELLOW: str, RED: str, DIM: str, BOLD: str, RESET: str,
+    max_commits: int | None = None,
+    max_duration_seconds: float | None = None,
+    semgrep_timeout_seconds: int | None = None,
 ) -> None:
     """Run git-history-based learning (free, instant)."""
     import json
@@ -952,11 +956,19 @@ def _run_git_learn(
         click.echo(f"  Cost:     $0.00 (no LLM calls)")
         click.echo(f"{CYAN}{'═' * 65}{RESET}\n")
 
-    results = learn_from_git(str(target_path), quiet=quiet)
+    kwargs = {"quiet": quiet}
+    if max_commits is not None:
+        kwargs["max_commits"] = max_commits
+    if max_duration_seconds is not None:
+        kwargs["max_duration_seconds"] = max_duration_seconds
+    if semgrep_timeout_seconds is not None:
+        kwargs["semgrep_timeout_seconds"] = semgrep_timeout_seconds
+    results = learn_from_git(str(target_path), **kwargs)
 
     if not results:
-        click.echo(f"  {YELLOW}No learnable commits found in git history.{RESET}")
-        click.echo(f"  {DIM}Try 'capseal learn .' for LLM-based training instead.{RESET}")
+        if not quiet:
+            click.echo(f"  {YELLOW}No learnable commits found in git history.{RESET}")
+            click.echo(f"  {DIM}Try 'capseal learn .' for LLM-based training instead.{RESET}")
         return
 
     # Convert results to Beta posteriors

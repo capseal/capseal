@@ -45,11 +45,13 @@ from mcp.types import Tool, TextContent, Prompt, PromptMessage, PromptArgument
 
 from .mcp_responses import (
     format_context_response,
+    format_error_response,
     format_gate_response,
     format_record_response,
     format_seal_response,
     format_status_response,
 )
+from .agent_protocol import ACTION_TYPES as PROTOCOL_ACTION_TYPES
 from .risk_engine import evaluate_action_risk, to_internal_decision
 
 # Global runtime instance (initialized on first use)
@@ -64,6 +66,31 @@ _session_cache_count: int = 0  # Number of .cap files at last cache build
 # Pending gate decisions — keyed by first file in files_affected
 _gate_decisions: dict[str, dict] = {}
 
+# Canonicalize common external action taxonomies to AgentProtocol values.
+ACTION_TYPE_ALIASES: dict[str, str] = {
+    "edit": "code_edit",
+    "edit_file": "code_edit",
+    "refactor": "code_edit",
+    "run_command": "command",
+    "execute_command": "command",
+    "install_package": "command",
+    "read_file": "file_read",
+    "create_file": "file_write",
+    "write_file": "file_write",
+    "delete_file": "file_delete",
+}
+
+
+def _normalize_action_type(raw: str | None) -> str:
+    """Normalize external action types to AgentProtocol-compatible values."""
+    value = str(raw or "").strip().lower()
+    if not value:
+        return "unknown"
+    mapped = ACTION_TYPE_ALIASES.get(value, value)
+    if mapped in PROTOCOL_ACTION_TYPES:
+        return mapped
+    return "unknown"
+
 
 def _read_intervention(gate_key: str) -> dict | None:
     """Read and consume a matching intervention from intervention.json."""
@@ -77,6 +104,12 @@ def _read_intervention(gate_key: str) -> dict | None:
     try:
         with open(intervention_path) as f:
             queue = json.load(f)
+
+        # Backward-compatible reader:
+        # - canonical format: [{"action":"deny", ...}]
+        # - accepted legacy format: {"action":"deny", ...}
+        if isinstance(queue, dict):
+            queue = [queue]
 
         if not isinstance(queue, list) or not queue:
             return None
@@ -661,9 +694,13 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
     elif name == "capseal_context":
         return await _handle_context(arguments)
     else:
-        return [TextContent(type="text", text=json.dumps({
-            "error": f"Unknown tool: {name}",
-        }))]
+        return [TextContent(type="text", text=json.dumps(
+            format_error_response(
+                tool=name,
+                error=f"Unknown tool: {name}",
+                session_id=_runtime_path.name if _runtime_path else None,
+            )
+        ))]
 
 
 async def _handle_gate(args: dict[str, Any]) -> list[TextContent]:
@@ -671,10 +708,22 @@ async def _handle_gate(args: dict[str, Any]) -> list[TextContent]:
     global _gate_decisions
     runtime = _get_runtime()
 
-    action_type = args.get("action_type", "unknown")
+    raw_action_type = args.get("action_type", "unknown")
+    action_type = _normalize_action_type(raw_action_type)
     description = args.get("description", "")
     files_affected = args.get("files_affected", [])
     diff_text = args.get("diff_text", "")
+
+    if not description and not files_affected and not diff_text:
+        session_id = _runtime_path.name if _runtime_path else "unknown"
+        return [TextContent(type="text", text=json.dumps(
+            format_error_response(
+                tool="capseal_gate",
+                error="provide at least one of: description, files_affected, diff_text",
+                session_id=session_id,
+            ),
+            indent=2,
+        ))]
 
     # Key for linking this gate to its record
     gate_key = files_affected[0] if files_affected else "_default"
@@ -733,7 +782,7 @@ async def _handle_gate(args: dict[str, Any]) -> list[TextContent]:
 
     _emit_event("gate", f"{result['decision']}: {description[:60]} (p_fail={result['p_fail']:.2f})", data={
         "decision": result["decision"],
-        "p_fail": round(result.get("p_fail", 0.0), 4),
+        "p_fail": round(result.get("p_fail", 0.0), 6),
         "files": files_affected,
         "action_type": action_type,
         "description": description,
@@ -751,7 +800,8 @@ async def _handle_record(args: dict[str, Any]) -> list[TextContent]:
     global _gate_decisions
     runtime = _get_runtime()
 
-    action_type = args.get("action_type", "unknown")
+    raw_action_type = args.get("action_type", "unknown")
+    action_type = _normalize_action_type(raw_action_type)
     description = args.get("description", "")
     tool_name = args.get("tool_name", "unknown")
     success = args.get("success", True)
@@ -759,6 +809,17 @@ async def _handle_record(args: dict[str, Any]) -> list[TextContent]:
     duration_ms = args.get("duration_ms", 0)
     output = args.get("output", "")
     error = args.get("error")
+
+    if not description:
+        session_id = _runtime_path.name if _runtime_path else "unknown"
+        return [TextContent(type="text", text=json.dumps(
+            format_error_response(
+                tool="capseal_record",
+                error="description is required",
+                session_id=session_id,
+            ),
+            indent=2,
+        ))]
 
     # Consume the matching gate decision (keyed by first file)
     gate_key = files_affected[0] if files_affected else "_default"
@@ -814,6 +875,8 @@ async def _handle_record(args: dict[str, Any]) -> list[TextContent]:
             action_id=runtime.actions[-1].action_id if runtime.actions else None,
             receipt_hash=receipt_hash,
             receipt_chain_length=count,
+            gate_label=gate_label,
+            gate_p_fail=gate_score,
         )
 
     except Exception as e:
@@ -823,6 +886,8 @@ async def _handle_record(args: dict[str, Any]) -> list[TextContent]:
             action_type=action_type,
             files_affected=files_affected,
             receipt_chain_length=len(runtime.actions),
+            gate_label=gate_label,
+            gate_p_fail=gate_score,
             error=str(e),
         )
 
@@ -844,8 +909,20 @@ async def _handle_seal(args: dict[str, Any]) -> list[TextContent]:
     runtime = _get_runtime()
     session_name = args.get("session_name", "mcp-session")
     response: dict[str, Any]
+    session_id = _runtime_path.name if _runtime_path else None
 
     try:
+        actions_sealed = len(runtime.actions)
+        if actions_sealed == 0:
+            response = format_seal_response(
+                sealed=False,
+                session_id=session_id,
+                session_name=session_name,
+                actions_count=0,
+                error="cannot seal empty session; record at least one action first",
+            )
+            return [TextContent(type="text", text=json.dumps(response, indent=2))]
+
         capsule = runtime.finalize(prove=True)
 
         from .cli.cap_format import create_run_cap_file
@@ -899,7 +976,6 @@ async def _handle_seal(args: dict[str, Any]) -> list[TextContent]:
             latest_link.unlink()
         latest_link.symlink_to(_runtime_path.name)
 
-        actions_sealed = len(runtime.actions)
         chain_hash_full = capsule.get("final_receipt_hash", "")
         cap_rel = f".capseal/runs/{cap_path.name}"
 
@@ -910,7 +986,6 @@ async def _handle_seal(args: dict[str, Any]) -> list[TextContent]:
             "receipt_hash": capsule.get("final_receipt_hash", "")[:32],
         })
 
-        session_id = _runtime_path.name if _runtime_path else None
         _runtime = None
         _runtime_path = None
 
@@ -935,7 +1010,7 @@ async def _handle_seal(args: dict[str, Any]) -> list[TextContent]:
         _runtime_path = None
         response = format_seal_response(
             sealed=False,
-            session_id=None,
+            session_id=session_id,
             session_name=session_name,
             error=str(e),
         )
@@ -945,7 +1020,7 @@ async def _handle_seal(args: dict[str, Any]) -> list[TextContent]:
 
 async def _handle_status(args: dict[str, Any]) -> list[TextContent]:
     """Handle capseal_status tool call."""
-    global _runtime, _runtime_path, _workspace
+    global _runtime, _runtime_path, _workspace, _gate_decisions
 
     workspace = Path(_workspace) if _workspace else Path.cwd()
     history = _get_session_history()
@@ -956,6 +1031,7 @@ async def _handle_status(args: dict[str, Any]) -> list[TextContent]:
         session_active = False
         session_id = None
         actions_count = 0
+        gates_count = 0
         denials_count = 0
         uptime_seconds = 0
         model_loaded = (workspace / ".capseal" / "models" / "beta_posteriors.npz").exists()
@@ -964,6 +1040,7 @@ async def _handle_status(args: dict[str, Any]) -> list[TextContent]:
         session_active = True
         session_id = _runtime_path.name if _runtime_path else None
         actions_count = len(runtime.actions)
+        gates_count = actions_count + len(_gate_decisions)
         denials_count = sum(
             1
             for action in runtime.actions
@@ -977,7 +1054,7 @@ async def _handle_status(args: dict[str, Any]) -> list[TextContent]:
         session_active=session_active,
         workspace=str(workspace),
         actions_count=actions_count,
-        gates_count=actions_count,
+        gates_count=gates_count,
         denials_count=denials_count,
         model_loaded=model_loaded,
         uptime_seconds=uptime_seconds,
@@ -993,12 +1070,17 @@ async def _handle_context(args: dict[str, Any]) -> list[TextContent]:
 
     workspace = Path(_workspace) if _workspace else Path.cwd()
     target_file = args.get("file", "")
+    session_id = _runtime_path.name if _runtime_path else None
 
     if not target_file:
-        return [TextContent(type="text", text=json.dumps({
-            "error": "file parameter is required",
-            "schema_version": "1.0",
-        }))]
+        return [TextContent(type="text", text=json.dumps(
+            format_error_response(
+                tool="capseal_context",
+                error="file parameter is required",
+                session_id=session_id,
+            ),
+            indent=2,
+        ))]
 
     target_file = target_file.lstrip("./")
 
@@ -1009,6 +1091,7 @@ async def _handle_context(args: dict[str, Any]) -> list[TextContent]:
             total_changes=0,
             total_sessions=0,
             sessions=[],
+            session_id=session_id,
         )
         return [TextContent(type="text", text=json.dumps(response, indent=2))]
 
@@ -1052,11 +1135,14 @@ async def _handle_context(args: dict[str, Any]) -> list[TextContent]:
             desc = metadata.get("description", action.get("action_type", "unknown"))
             gate_decision = action.get("gate_decision")
             gate_score = action.get("gate_score")
+            risk_label = metadata.get("risk_label") or metadata.get("label")
 
             decision_map = {"pass": "approved", "skip": "denied", "human_review": "flagged"}
             gate_str = decision_map.get(gate_decision, "ungated")
             if gate_score is not None:
                 gate_str += f", p_fail={gate_score:.2f}"
+            if risk_label:
+                gate_str += f", label={risk_label}"
 
             key = cap_file.stem
             if key not in sessions_with_changes:
@@ -1081,6 +1167,7 @@ async def _handle_context(args: dict[str, Any]) -> list[TextContent]:
         total_changes=total_changes,
         total_sessions=total_sessions,
         sessions=sessions,
+        session_id=session_id,
     )
     return [TextContent(type="text", text=json.dumps(response, indent=2))]
 

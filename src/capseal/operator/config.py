@@ -26,6 +26,20 @@ DEFAULT_CONFIG = {
         "voice_preset": "NATM1",
         "live_call": False,
         "personaplex_ws_url": "wss://api.personaplex.io/v1/stream",
+        "protocol": "auto",  # auto-detect (moshi_binary or json_stream)
+        "speak_gate_events": True,
+        "speak_gate_decisions": ["deny", "flag"],
+        "speak_min_score": 0.55,
+        # Keep narration on by default, but require explicit opt-in for live command parsing.
+        "listen_commands": False,
+        # Full-duplex conversation mode (mic uplink -> PersonaPlex).
+        "freeform": False,
+        "mic_enabled": False,
+        "mic_backend": "auto",  # auto, pulse, alsa
+        "mic_input": "default",
+        "reconnect_interval_seconds": 30,
+        "auto_stop_idle_seconds": 1800,
+        "resume_wait_seconds": 45,
     },
     "channels": {
         "telegram": {
@@ -179,6 +193,47 @@ def _apply_env_overrides(config: dict) -> None:
     voice_provider = os.environ.get("CAPSEAL_VOICE_PROVIDER")
     if voice_provider:
         config.setdefault("voice", {})["provider"] = voice_provider
+
+    voice_live_call = os.environ.get("CAPSEAL_VOICE_LIVE_CALL")
+    if voice_live_call is not None:
+        config.setdefault("voice", {})["live_call"] = _to_bool(voice_live_call)
+
+    voice_speak_gates = os.environ.get("CAPSEAL_VOICE_SPEAK_GATES")
+    if voice_speak_gates is not None:
+        config.setdefault("voice", {})["speak_gate_events"] = _to_bool(voice_speak_gates)
+
+    voice_speak_decisions = os.environ.get("CAPSEAL_VOICE_SPEAK_DECISIONS")
+    if voice_speak_decisions:
+        values = [x.strip().lower() for x in voice_speak_decisions.split(",") if x.strip()]
+        if values:
+            config.setdefault("voice", {})["speak_gate_decisions"] = values
+
+    voice_speak_min_score = os.environ.get("CAPSEAL_VOICE_SPEAK_MIN_SCORE")
+    if voice_speak_min_score:
+        try:
+            config.setdefault("voice", {})["speak_min_score"] = float(voice_speak_min_score)
+        except ValueError:
+            print(f"[config] Warning: invalid CAPSEAL_VOICE_SPEAK_MIN_SCORE={voice_speak_min_score!r}")
+
+    voice_listen_commands = os.environ.get("CAPSEAL_VOICE_LISTEN_COMMANDS")
+    if voice_listen_commands is not None:
+        config.setdefault("voice", {})["listen_commands"] = _to_bool(voice_listen_commands)
+
+    voice_freeform = os.environ.get("CAPSEAL_VOICE_FREEFORM")
+    if voice_freeform is not None:
+        config.setdefault("voice", {})["freeform"] = _to_bool(voice_freeform)
+
+    voice_mic_enabled = os.environ.get("CAPSEAL_VOICE_MIC_ENABLED")
+    if voice_mic_enabled is not None:
+        config.setdefault("voice", {})["mic_enabled"] = _to_bool(voice_mic_enabled)
+
+    voice_mic_backend = os.environ.get("CAPSEAL_VOICE_MIC_BACKEND")
+    if voice_mic_backend:
+        config.setdefault("voice", {})["mic_backend"] = voice_mic_backend.strip().lower()
+
+    voice_mic_input = os.environ.get("CAPSEAL_VOICE_MIC_INPUT")
+    if voice_mic_input:
+        config.setdefault("voice", {})["mic_input"] = voice_mic_input.strip()
 
 
 def _warn_on_plaintext_secrets(loaded_config: Optional[dict], source_path: Optional[Path]) -> None:

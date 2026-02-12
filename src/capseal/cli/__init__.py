@@ -18,6 +18,7 @@ Advanced commands available via: capseal advanced <command>
 from __future__ import annotations
 
 import click
+from capseal.risk_engine import THRESHOLD_DENY
 
 # Core command imports
 from .init_cmd import init_command
@@ -35,6 +36,7 @@ from .doctor_cmd import doctor_command as doctor_top_command
 from .sign_cmd import sign_command
 from .test_cmd import test_command
 from .operator_cmd import operator_command
+from .ops_cmd import ops_group
 from .workflow_cmd import verify_capsule_command
 
 # Advanced command imports
@@ -122,6 +124,7 @@ def cli() -> None:
 cli.add_command(init_command, name="init")
 cli.add_command(scan_command, name="scan")
 cli.add_command(learn_command, name="learn")
+cli.add_command(eval_command, name="eval")
 cli.add_command(fix_command, name="fix")
 cli.add_command(verify_command, name="verify")
 cli.add_command(report_command, name="report")
@@ -135,6 +138,7 @@ cli.add_command(sign_command, name="sign")
 cli.add_command(test_command, name="test")
 cli.add_command(pty_shell_command, name="shell")
 cli.add_command(operator_command, name="operator")
+cli.add_command(ops_group, name="ops")
 
 
 # Config profiles
@@ -313,7 +317,12 @@ def export_skill_command(destination: str) -> None:
 @click.argument("path", type=click.Path(exists=True), default=".")
 @click.option("--gate", is_flag=True, help="Gate findings based on learned model")
 @click.option("--json", "output_json", is_flag=True, help="Output JSON for CI")
-@click.option("--threshold", type=float, default=0.6, help="Failure probability threshold (default: 0.6)")
+@click.option(
+    "--threshold",
+    type=float,
+    default=THRESHOLD_DENY,
+    help=f"Failure probability threshold (default: {THRESHOLD_DENY})",
+)
 @click.pass_context
 def review_command(ctx: click.Context, path: str, gate: bool, output_json: bool, threshold: float) -> None:
     """Review and gate code changes based on learned risk model.

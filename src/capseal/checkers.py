@@ -1224,11 +1224,15 @@ def committor_gate_checker(claim: Claim, file_content: str) -> tuple[Verdict, Wi
             producer="committor_gate",
         )
 
-    # Import numpy and verification function
+    # Import numpy and canonical risk helpers
     try:
         import numpy as np
-        from capseal.shared.scoring import lookup_posterior_at_idx
-        from capseal.shared.features import SKIP_THRESHOLD, HUMAN_REVIEW_UNCERTAINTY
+        from capseal.risk_engine import (
+            COMMITTOR_REVIEW_UNCERTAINTY,
+            COMMITTOR_SKIP_THRESHOLD,
+            committor_decision,
+            posterior_from_grid_cell,
+        )
     except ImportError as e:
         return Verdict.ERROR, Witness(
             witness_type="committor_gate_error",
@@ -1254,8 +1258,8 @@ def committor_gate_checker(claim: Claim, file_content: str) -> tuple[Verdict, Wi
 
     # Get thresholds
     thresholds = gate_result.get('thresholds', {})
-    skip_threshold = thresholds.get('skip', SKIP_THRESHOLD)
-    review_uncertainty = thresholds.get('review_uncertainty', HUMAN_REVIEW_UNCERTAINTY)
+    skip_threshold = thresholds.get('skip', COMMITTOR_SKIP_THRESHOLD)
+    review_uncertainty = thresholds.get('review_uncertainty', COMMITTOR_REVIEW_UNCERTAINTY)
 
     # Verify each decision
     mismatches = []
@@ -1265,17 +1269,15 @@ def committor_gate_checker(claim: Claim, file_content: str) -> tuple[Verdict, Wi
         stored_decision = decision['decision']
 
         # Re-derive q from posteriors
-        posterior = lookup_posterior_at_idx(alpha, beta, grid_idx)
-        computed_q = posterior['q']
-        uncertainty = posterior['uncertainty']
-
-        # Compute expected decision
-        if computed_q >= skip_threshold:
-            expected_decision = 'skip'
-        elif uncertainty > review_uncertainty:
-            expected_decision = 'human_review'
-        else:
-            expected_decision = 'pass'
+        cell = posterior_from_grid_cell(grid_idx, alpha=alpha, beta=beta)
+        computed_q = cell.p_fail
+        uncertainty = cell.uncertainty
+        expected_decision = committor_decision(
+            computed_q,
+            uncertainty,
+            skip_threshold=skip_threshold,
+            review_uncertainty=review_uncertainty,
+        )
 
         # Check for mismatch (allow small float tolerance)
         if abs(stored_q - computed_q) > 1e-6:

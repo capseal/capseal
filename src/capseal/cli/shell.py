@@ -2813,7 +2813,7 @@ Be strategic about parallelization. Each subagent works independently."""
                     print(f"{DIM}[2.5/4] Applying committor gate...{RESET}")
 
                 try:
-                    from capseal.shared.features import score_plan_item, SKIP_THRESHOLD, HUMAN_REVIEW_UNCERTAINTY
+                    from capseal.shared.features import score_plan_item
                     from pathlib import Path as PathLib
 
                     # Find posteriors
@@ -4147,18 +4147,10 @@ Be strategic about parallelization. Each subagent works independently."""
                         episode_seed = hash(f"{run_uuid}:{round_num}:{grid_idx}:{episode_idx}") % (2**32)
 
                         if use_synthetic:
-                            # Synthetic mode: use closed-form p_fail
+                            # Synthetic mode: use canonical synthetic p_fail heuristic.
+                            from capseal.risk_engine import synthetic_failure_probability
                             levels = grid_idx_to_features(grid_idx)
-                            # Synthetic p_fail formula (matches agent_bench)
-                            a, b, c, d, e = 0.9, 0.3, 0.3, 0.2, 0.2
-                            p_fail = float(np.clip(
-                                a * (levels[3] / 3) +  # severity as proxy for verify_flip
-                                b * (levels[1] / 3) +  # complexity as proxy for tool_noise
-                                c * (levels[0] / 10) + # lines_changed as proxy for hint_ambiguity
-                                d * (levels[2] / 3) +  # files as proxy for distractor
-                                e * (1.0 / max(1, levels[4] + 1)),  # test coverage
-                                0.0, 1.0
-                            ))
+                            p_fail = synthetic_failure_probability(levels)
                             ep_rng = np.random.default_rng(episode_seed)
                             success = ep_rng.random() >= p_fail
                         else:

@@ -45,6 +45,16 @@ eval = [
     "httpx>=0.25",
 ]
 
+# Voice transport (PersonaPlex/Moshi websocket live call)
+voice = [
+    "websockets>=12.0",
+]
+
+# RunPod control plane helpers (ops commands / auto-stop-resume)
+ops = [
+    "runpod>=1.7",
+]
+
 # Development
 dev = [
     "pytest>=8.0",
@@ -60,7 +70,7 @@ server = [
 
 # Full installation with all optional deps
 full = [
-    "capseal[eval,server]",
+    "capseal[eval,server,voice,ops]",
     "pyyaml>=6.0",
     "rich>=13.0",
     "cryptography>=41.0",

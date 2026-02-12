@@ -18,9 +18,6 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import numpy as np
-
-from .scoring import lookup_posterior_at_idx
 
 
 # Feature discretization thresholds
@@ -31,11 +28,6 @@ COMPLEXITY_THRESHOLDS = [2, 5, 10]  # 0: <=2, 1: 3-5, 2: 6-10, 3: >10
 FILES_THRESHOLDS = [1, 3, 8]  # 0: 1 file, 1: 2-3, 2: 4-8, 3: >8
 SEVERITY_MAP = {"none": 0, "info": 0, "low": 1, "warning": 1, "medium": 2, "high": 3, "error": 3}
 TEST_THRESHOLDS = [0, 1, 5]  # 0: no tests, 1: 1 test change, 2: 2-5, 3: >5
-
-# Decision thresholds
-SKIP_THRESHOLD = 0.6  # Skip if q >= 0.6 (confident high failure probability)
-HUMAN_REVIEW_UNCERTAINTY = 0.15  # Flag for review if uncertainty > 0.15
-
 
 def extract_patch_features(diff_text: str, findings: List[Dict]) -> Dict[str, Any]:
     """Extract raw features from a diff and Semgrep findings.
@@ -193,8 +185,8 @@ def score_patch(
     diff_text: str,
     findings: List[Dict],
     posteriors_path: Path,
-    skip_threshold: float = SKIP_THRESHOLD,
-    review_uncertainty: float = HUMAN_REVIEW_UNCERTAINTY,
+    skip_threshold: Optional[float] = None,
+    review_uncertainty: Optional[float] = None,
 ) -> Dict[str, Any]:
     """End-to-end patch scoring using committor gate.
 
@@ -213,7 +205,7 @@ def score_patch(
         diff_text: Unified diff text.
         findings: List of Semgrep finding dicts.
         posteriors_path: Path to beta_posteriors.npz file.
-        skip_threshold: q threshold for skipping (default 0.3).
+        skip_threshold: q threshold for skipping (default from canonical risk_engine).
         review_uncertainty: Uncertainty threshold for human review.
 
     Returns:
@@ -225,39 +217,54 @@ def score_patch(
         - decision: str ("pass", "skip", "human_review")
         - reason: str (explanation)
     """
-    # Extract and discretize features
+    # Extract and discretize features for explainability output.
     raw_features = extract_patch_features(diff_text, findings)
     levels = discretize_features(raw_features)
-    grid_idx = features_to_grid_idx(levels)
+    # Canonical risk evaluation path (shared with scan/fix/mcp gate).
+    from capseal.risk_engine import evaluate_risk
+    risk = evaluate_risk(
+        diff_text,
+        model_path=posteriors_path,
+        workspace=posteriors_path.parent.parent,
+        findings=findings,
+        action_type="legacy_score_patch",
+        description="legacy score_patch",
+    )
+    q = float(risk.p_fail)
+    uncertainty = float(risk.uncertainty)
+    grid_idx = int(risk.grid_cell)
 
-    # Load posteriors and look up
-    try:
-        data = np.load(posteriors_path, allow_pickle=True)
-        alpha = data['alpha']
-        beta = data['beta']
-        posterior = lookup_posterior_at_idx(alpha, beta, grid_idx)
-    except FileNotFoundError:
-        # No posteriors available - use uninformative prior
-        posterior = {
-            'q': 0.5,
-            'uncertainty': 0.5,
-            'alpha': 1,
-            'beta': 1,
-            'valid': False,
-        }
+    posterior = {
+        'q': q,
+        'uncertainty': uncertainty,
+        'alpha': int(risk.observations + 1) if risk.model_loaded else 1,
+        'beta': 1,
+        'valid': bool(risk.model_loaded),
+    }
 
-    q = posterior['q']
-    uncertainty = posterior['uncertainty']
+    # Canonical committor policy (same thresholds/logic as runtime gate verification).
+    from capseal.risk_engine import (
+        COMMITTOR_REVIEW_UNCERTAINTY,
+        COMMITTOR_SKIP_THRESHOLD,
+        committor_decision,
+    )
 
-    # Make decision
-    if q >= skip_threshold:
-        decision = "skip"
+    if skip_threshold is None:
+        skip_threshold = COMMITTOR_SKIP_THRESHOLD
+    if review_uncertainty is None:
+        review_uncertainty = COMMITTOR_REVIEW_UNCERTAINTY
+
+    decision = committor_decision(
+        q,
+        uncertainty,
+        skip_threshold=skip_threshold,
+        review_uncertainty=review_uncertainty,
+    )
+    if decision == "skip":
         reason = f"High failure probability: q={q:.3f} >= {skip_threshold}"
-    elif uncertainty > review_uncertainty:
-        decision = "human_review"
+    elif decision == "human_review":
         reason = f"High uncertainty: std={uncertainty:.3f} > {review_uncertainty}"
     else:
-        decision = "pass"
         reason = f"Low risk: q={q:.3f}, uncertainty={uncertainty:.3f}"
 
     return {

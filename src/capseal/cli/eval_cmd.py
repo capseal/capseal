@@ -87,6 +87,7 @@ def eval_command(
         from capseal.shared.receipts import (
             build_round_receipt, build_run_receipt, collect_round_dirs,
         )
+        from capseal.risk_engine import synthetic_failure_probability
 
         # Create run directory
         now = datetime.datetime.now()
@@ -263,17 +264,9 @@ def eval_command(
                     episode_seed = hash(f"{run_uuid}:{round_num}:{grid_idx}:{episode_idx}") % (2**32)
 
                     if synthetic:
-                        # Synthetic mode: use closed-form p_fail
+                        # Synthetic mode: use canonical synthetic p_fail heuristic.
                         levels = grid_idx_to_features(grid_idx)
-                        a, b, c, d, e = 0.9, 0.3, 0.3, 0.2, 0.2
-                        p_fail = float(np.clip(
-                            a * (levels[3] / 3) +
-                            b * (levels[1] / 3) +
-                            c * (levels[0] / 10) +
-                            d * (levels[2] / 3) +
-                            e * (1.0 / max(1, levels[4] + 1)),
-                            0.0, 1.0
-                        ))
+                        p_fail = synthetic_failure_probability(levels)
                         ep_rng = np.random.default_rng(episode_seed)
                         success = ep_rng.random() >= p_fail
                     else:

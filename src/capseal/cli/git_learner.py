@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 
@@ -19,6 +20,8 @@ def learn_from_git(
     target: str,
     max_commits: int = 50,
     quiet: bool = False,
+    max_duration_seconds: float | None = None,
+    semgrep_timeout_seconds: int = 30,
 ) -> dict[str, dict]:
     """Walk git history and classify commits as pass/fail.
 
@@ -60,7 +63,14 @@ def learn_from_git(
 
     results: dict[str, dict] = {}
 
+    start = time.monotonic()
     for i in range(len(commits) - 1):
+        if max_duration_seconds is not None and (time.monotonic() - start) > max_duration_seconds:
+            if not quiet:
+                import click
+                click.echo(f"  Time budget reached ({max_duration_seconds:.0f}s), stopping early.")
+            break
+
         new_commit = commits[i]
         old_commit = commits[i + 1]
 
@@ -90,8 +100,12 @@ def learn_from_git(
         n_files = len(code_files)
 
         # Classify commit by comparing semgrep findings before/after
-        old_findings = _count_findings_at_commit(target_path, old_commit, code_files)
-        new_findings = _count_findings_at_commit(target_path, new_commit, code_files)
+        old_findings = _count_findings_at_commit(
+            target_path, old_commit, code_files, semgrep_timeout_seconds=semgrep_timeout_seconds
+        )
+        new_findings = _count_findings_at_commit(
+            target_path, new_commit, code_files, semgrep_timeout_seconds=semgrep_timeout_seconds
+        )
 
         if old_findings is None or new_findings is None:
             continue  # Skip if we can't analyze
@@ -119,6 +133,7 @@ def _count_findings_at_commit(
     target: Path,
     commit: str,
     files: list[str],
+    semgrep_timeout_seconds: int = 30,
 ) -> int | None:
     """Count semgrep findings at a commit without checking out."""
     with tempfile.TemporaryDirectory(prefix="capseal_git_") as tmpdir:
@@ -149,7 +164,7 @@ def _count_findings_at_commit(
                 cwd=tmpdir,
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=semgrep_timeout_seconds,
             )
             data = json.loads(sem_result.stdout)
             return len(data.get("results", []))

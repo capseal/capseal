@@ -29,15 +29,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from capseal.shared.features import (
-    score_plan_item,
-    extract_patch_features,
-    discretize_features,
-    features_to_grid_idx,
-    SKIP_THRESHOLD,
-    HUMAN_REVIEW_UNCERTAINTY,
+from capseal.risk_engine import (
+    COMMITTOR_REVIEW_UNCERTAINTY,
+    COMMITTOR_SKIP_THRESHOLD,
+    committor_decision,
+    posterior_from_grid_cell,
 )
-from capseal.shared.scoring import lookup_posterior_at_idx
+from capseal.shared.features import score_plan_item
 
 from .workflow_engine import (
     NodeExecutor,
@@ -98,8 +96,8 @@ class CommittorGateExecutor(NodeExecutor):
 
         # Get parameters
         posteriors_path = spec.params.get('posteriors_path', '')
-        skip_threshold = spec.params.get('skip_threshold', SKIP_THRESHOLD)
-        review_uncertainty = spec.params.get('review_uncertainty', HUMAN_REVIEW_UNCERTAINTY)
+        skip_threshold = spec.params.get('skip_threshold', COMMITTOR_SKIP_THRESHOLD)
+        review_uncertainty = spec.params.get('review_uncertainty', COMMITTOR_REVIEW_UNCERTAINTY)
         filter_skips = spec.params.get('filter_skips', True)
 
         # Resolve posteriors path
@@ -342,8 +340,8 @@ def verify_gate_decision(
         }
 
     thresholds = gate_result.get('thresholds', {})
-    skip_threshold = thresholds.get('skip', SKIP_THRESHOLD)
-    review_uncertainty = thresholds.get('review_uncertainty', HUMAN_REVIEW_UNCERTAINTY)
+    skip_threshold = thresholds.get('skip', COMMITTOR_SKIP_THRESHOLD)
+    review_uncertainty = thresholds.get('review_uncertainty', COMMITTOR_REVIEW_UNCERTAINTY)
 
     mismatches = []
     for decision in gate_result.get('decisions', []):
@@ -352,17 +350,15 @@ def verify_gate_decision(
         stored_decision = decision['decision']
 
         # Re-derive q from posteriors
-        posterior = lookup_posterior_at_idx(alpha, beta, grid_idx)
-        computed_q = posterior['q']
-        uncertainty = posterior['uncertainty']
-
-        # Compute expected decision
-        if computed_q >= skip_threshold:
-            expected_decision = 'skip'
-        elif uncertainty > review_uncertainty:
-            expected_decision = 'human_review'
-        else:
-            expected_decision = 'pass'
+        cell = posterior_from_grid_cell(grid_idx, alpha=alpha, beta=beta)
+        computed_q = cell.p_fail
+        uncertainty = cell.uncertainty
+        expected_decision = committor_decision(
+            computed_q,
+            uncertainty,
+            skip_threshold=skip_threshold,
+            review_uncertainty=review_uncertainty,
+        )
 
         # Check for mismatch
         if abs(stored_q - computed_q) > 1e-6:

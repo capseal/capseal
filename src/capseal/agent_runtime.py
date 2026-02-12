@@ -271,51 +271,67 @@ class AgentRuntime:
             }
 
         try:
-            from capseal.shared.features import (
-                extract_patch_features,
-                discretize_features,
-                features_to_grid_idx,
-                SKIP_THRESHOLD,
-                HUMAN_REVIEW_UNCERTAINTY,
+            from capseal.risk_engine import (
+                COMMITTOR_REVIEW_UNCERTAINTY,
+                COMMITTOR_SKIP_THRESHOLD,
+                committor_decision,
+                evaluate_risk,
             )
-            from capseal.shared.scoring import lookup_posterior_at_idx
             import numpy as np
 
-            # Load posteriors
-            data = np.load(self.gate_posteriors, allow_pickle=True)
-            alpha = data["alpha"]
-            beta = data["beta"]
-
-            # Extract features from diff
             if diff_text:
-                features = extract_patch_features(diff_text, findings or [])
-                discrete = discretize_features(features)
-                grid_idx = features_to_grid_idx(discrete)
+                diff_for_eval = diff_text
             else:
-                grid_idx = 0
+                diff_for_eval = (
+                    "diff --git a/unknown b/unknown\n"
+                    "--- a/unknown\n"
+                    "+++ b/unknown\n"
+                    "@@ -1,1 +1,2 @@\n"
+                    "+# runtime gate fallback\n"
+                )
 
-            # Look up posterior
-            posterior = lookup_posterior_at_idx(alpha, beta, grid_idx)
-            q = posterior["q"]
-            uncertainty = posterior["uncertainty"]
+            risk = evaluate_risk(
+                diff_for_eval,
+                model_path=self.gate_posteriors,
+                workspace=self.output_dir,
+                findings=findings or [],
+                action_type="runtime_gate",
+                description="agent runtime gate",
+            )
+            q = risk.p_fail
+            uncertainty = risk.uncertainty
+            grid_idx = risk.grid_cell
 
             # Total episodes across all grid points (alpha+beta started at 1,1 prior)
-            n_episodes = int(np.sum(alpha + beta - 2))
+            data = np.load(self.gate_posteriors, allow_pickle=True)
+            alpha = data["alpha"] if "alpha" in data.files else (data["alphas"] if "alphas" in data.files else None)
+            beta = data["beta"] if "beta" in data.files else (data["betas"] if "betas" in data.files else None)
+            if alpha is not None and beta is not None:
+                n_episodes = int(np.sum(alpha + beta - 2))
+            else:
+                n_episodes = 0
 
             # Make decision — progressive trust for young models
             if n_episodes < 20 and uncertainty > 0.3:
                 # Not enough data to block confidently — approve with caution
                 decision = "pass"
                 reason = f"low confidence (n={n_episodes}, uncertainty={uncertainty:.3f}) — approving with caution"
-            elif q >= SKIP_THRESHOLD:
-                decision = "skip"
-                reason = f"q={q:.3f} >= skip_threshold={SKIP_THRESHOLD}"
-            elif uncertainty > HUMAN_REVIEW_UNCERTAINTY:
-                decision = "human_review"
-                reason = f"uncertainty={uncertainty:.3f} > review_threshold={HUMAN_REVIEW_UNCERTAINTY}"
             else:
-                decision = "pass"
-                reason = f"q={q:.3f}, uncertainty={uncertainty:.3f}"
+                decision = committor_decision(
+                    q,
+                    uncertainty,
+                    skip_threshold=COMMITTOR_SKIP_THRESHOLD,
+                    review_uncertainty=COMMITTOR_REVIEW_UNCERTAINTY,
+                )
+                if decision == "skip":
+                    reason = f"q={q:.3f} >= skip_threshold={COMMITTOR_SKIP_THRESHOLD}"
+                elif decision == "human_review":
+                    reason = (
+                        f"uncertainty={uncertainty:.3f} > "
+                        f"review_threshold={COMMITTOR_REVIEW_UNCERTAINTY}"
+                    )
+                else:
+                    reason = f"q={q:.3f}, uncertainty={uncertainty:.3f}"
 
             return {
                 "q": float(q),

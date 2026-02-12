@@ -13,7 +13,12 @@ import numpy as np
 from capseal.agent_runtime import AgentRuntime
 from capseal.cli.cap_format import create_run_cap_file, verify_cap_integrity
 from capseal.demo_diffs import DEMO_DIFFS, DemoDiff
-from capseal.risk_engine import evaluate_risk, to_internal_decision
+from capseal.risk_engine import THRESHOLD_DENY, evaluate_risk, to_internal_decision
+
+# Keep quickstart bounded so first-run never looks hung.
+QUICKSTART_GIT_MAX_COMMITS = 8
+QUICKSTART_GIT_MAX_SECONDS = 25
+QUICKSTART_GIT_SEMGREP_TIMEOUT_SECONDS = 6
 
 
 @dataclass
@@ -67,64 +72,83 @@ def _ensure_workspace_initialized(workspace: Path) -> None:
     cap = workspace / ".capseal"
     (cap / "runs").mkdir(parents=True, exist_ok=True)
     (cap / "models").mkdir(parents=True, exist_ok=True)
+    (cap / "policies").mkdir(parents=True, exist_ok=True)
     (cap / "events.jsonl").touch(exist_ok=True)
 
     config_path = cap / "config.json"
     if not config_path.exists():
-        config = {
-            "provider": "anthropic",
-            "model": "claude-sonnet-4-20250514",
-            "workspace": str(workspace),
-            "gate": {"threshold": 0.6, "uncertainty_threshold": 0.15},
-            "learning": {"episode_timeout_seconds": 180},
-        }
-        config_path.write_text(json.dumps(config, indent=2))
+        # Reuse the same non-interactive init path as autopilot/hub.
+        from capseal.cli.autopilot_cmd import _auto_init, _detect_provider
+
+        detected = _detect_provider()
+        if detected:
+            provider, env_var, model = detected
+        else:
+            provider, env_var, model = ("anthropic", "ANTHROPIC_API_KEY", "claude-sonnet-4-20250514")
+        _auto_init(workspace, provider, env_var, model)
+
+    # Ensure quickstart-required defaults are present without clobbering user config.
+    try:
+        config = json.loads(config_path.read_text())
+    except Exception:
+        config = {}
+    config.setdefault("workspace", str(workspace))
+    gate_cfg = config.setdefault("gate", {})
+    gate_cfg.setdefault("threshold", THRESHOLD_DENY)
+    gate_cfg.setdefault("uncertainty_threshold", 0.15)
+    learning_cfg = config.setdefault("learning", {})
+    learning_cfg.setdefault("episode_timeout_seconds", 180)
+    config_path.write_text(json.dumps(config, indent=2))
 
 
-def _quick_learn_from_git(workspace: Path, max_commits: int = 20) -> int:
+def _quick_learn_from_git(
+    workspace: Path,
+    max_commits: int = QUICKSTART_GIT_MAX_COMMITS,
+    max_duration_seconds: float = QUICKSTART_GIT_MAX_SECONDS,
+    semgrep_timeout_seconds: int = QUICKSTART_GIT_SEMGREP_TIMEOUT_SECONDS,
+) -> int:
     """Run a fast git-history learn pass and persist posteriors."""
     try:
-        from capseal.cli.git_learner import learn_from_git
+        from capseal.cli.learn_cmd import _run_git_learn
     except Exception:
         return 0
 
-    results = learn_from_git(str(workspace), max_commits=max_commits, quiet=True)
-    if not results:
-        return 0
-
-    n_points = 1024
-    alpha = np.ones(n_points, dtype=np.int64)
-    beta = np.ones(n_points, dtype=np.int64)
-    total_episodes = 0
-
-    for data in results.values():
-        idx = int(data.get("grid_idx", 0))
-        if idx < 0 or idx >= n_points:
-            continue
-        fails = int(data.get("fails", 0))
-        passes = int(data.get("passes", 0))
-        alpha[idx] += fails
-        beta[idx] += passes
-        total_episodes += fails + passes
+    _run_git_learn(
+        target_path=workspace,
+        quiet=True,
+        CYAN="",
+        GREEN="",
+        YELLOW="",
+        RED="",
+        DIM="",
+        BOLD="",
+        RESET="",
+        max_commits=max_commits,
+        max_duration_seconds=max_duration_seconds,
+        semgrep_timeout_seconds=semgrep_timeout_seconds,
+    )
 
     model_path = workspace / ".capseal" / "models" / "beta_posteriors.npz"
-    np.savez(
-        model_path,
-        alpha=alpha,
-        beta=beta,
-        n_episodes=total_episodes,
-        run_uuid="quickstart-git",
-        grid_version="semgrep_scan",
-    )
+    if not model_path.exists():
+        return 0
+    data = np.load(model_path, allow_pickle=True)
+    alpha = data["alpha"] if "alpha" in data.files else (data["alphas"] if "alphas" in data.files else None)
+    beta = data["beta"] if "beta" in data.files else (data["betas"] if "betas" in data.files else None)
+    if alpha is None or beta is None:
+        return 0
     return int(np.sum((alpha > 1) | (beta > 1)))
 
 
-def _bootstrap_demo_risk(workspace: Path, demo_diff: DemoDiff) -> None:
-    """Ensure demo diff has a visibly high-risk posterior cell."""
-    model_path = workspace / ".capseal" / "models" / "beta_posteriors.npz"
+def _bootstrap_demo_model(workspace: Path, demo_diff: DemoDiff) -> Path:
+    """Boost the demo diff cell inside the canonical workspace model.
+
+    This keeps quickstart and regular gate paths consistent because both
+    read the same posteriors file afterward.
+    """
+    source_model_path = workspace / ".capseal" / "models" / "beta_posteriors.npz"
     existing: dict[str, Any] = {}
-    if model_path.exists():
-        data = np.load(model_path, allow_pickle=True)
+    if source_model_path.exists():
+        data = np.load(source_model_path, allow_pickle=True)
         alpha = data["alpha"] if "alpha" in data.files else (data["alphas"] if "alphas" in data.files else None)
         beta = data["beta"] if "beta" in data.files else (data["betas"] if "betas" in data.files else None)
         if alpha is None or beta is None:
@@ -139,9 +163,13 @@ def _bootstrap_demo_risk(workspace: Path, demo_diff: DemoDiff) -> None:
         alpha = np.ones(1024, dtype=np.int64)
         beta = np.ones(1024, dtype=np.int64)
 
-    seed = evaluate_risk(demo_diff.content, workspace=workspace, model_path=model_path if model_path.exists() else None)
+    seed = evaluate_risk(
+        demo_diff.content,
+        workspace=workspace,
+        model_path=source_model_path if source_model_path.exists() else None,
+    )
     idx = seed.grid_cell
-    alpha[idx] += 12  # strong failure prior for demo-only quickstart path
+    alpha[idx] += 12  # strong demo-only prior for the chosen diff profile
     if "n_episodes" in existing:
         try:
             existing["n_episodes"] = int(existing["n_episodes"]) + 12
@@ -150,8 +178,9 @@ def _bootstrap_demo_risk(workspace: Path, demo_diff: DemoDiff) -> None:
     else:
         existing["n_episodes"] = 12
     existing["run_uuid"] = "quickstart-bootstrap"
-
-    np.savez(model_path, alpha=alpha, beta=beta, **existing)
+    source_model_path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez(source_model_path, alpha=alpha, beta=beta, **existing)
+    return source_model_path
 
 
 def _seal_demo_session(workspace: Path, result: Any, demo_diff: DemoDiff) -> QuickstartOutcome:
@@ -184,13 +213,13 @@ def _seal_demo_session(workspace: Path, result: Any, demo_diff: DemoDiff) -> Qui
     )
     runtime.finalize(prove=True)
 
-    cap_path = workspace / ".capseal" / "runs" / "quickstart-demo.cap"
+    cap_path = workspace / ".capseal" / "runs" / f"{run_dir.name}.cap"
     create_run_cap_file(
         run_dir=run_dir,
         output_path=cap_path,
         run_type="mcp",
         extras={
-            "session_name": "quickstart-demo",
+            "session_name": run_dir.name,
             "actions_count": len(runtime.actions),
             "agent": "quickstart",
         },
@@ -223,19 +252,27 @@ def run_quickstart(workspace: str = ".", color: bool = True) -> int:
     _ensure_workspace_initialized(ws)
     printer.done("Workspace initialized")
 
-    printer.step("Scanning git history for risk patterns")
-    learned_cells = _quick_learn_from_git(ws, max_commits=20)
+    printer.step(
+        f"Scanning git history for risk patterns "
+        f"(up to {QUICKSTART_GIT_MAX_COMMITS} commits, {QUICKSTART_GIT_MAX_SECONDS:.0f}s budget)"
+    )
+    learned_cells = _quick_learn_from_git(
+        ws,
+        max_commits=QUICKSTART_GIT_MAX_COMMITS,
+        max_duration_seconds=QUICKSTART_GIT_MAX_SECONDS,
+        semgrep_timeout_seconds=QUICKSTART_GIT_SEMGREP_TIMEOUT_SECONDS,
+    )
     if learned_cells > 0:
         printer.done(f"Learned {learned_cells} distinct risk profile cells")
     else:
-        printer.note("No strong history signal found; using demo bootstrap model")
-        _bootstrap_demo_risk(ws, DEMO_DIFFS[0])
+        printer.note("No strong history signal found; bootstrapping demo profile")
+        _bootstrap_demo_model(ws, DEMO_DIFFS[0])
 
     demo = DEMO_DIFFS[0]
     printer.step(f"Running gate check on demo change: {demo.description}")
     result = evaluate_risk(demo.content, workspace=ws)
     if result.decision == "approve":
-        _bootstrap_demo_risk(ws, demo)
+        _bootstrap_demo_model(ws, demo)
         result = evaluate_risk(demo.content, workspace=ws)
     printer.gate_result(result)
 

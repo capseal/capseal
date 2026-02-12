@@ -76,7 +76,15 @@ class SignificanceFilter:
 
     def _score_gate(self, data: dict, context) -> float:
         """Score a gate decision event."""
-        decision = data.get("decision", "")
+        raw = str(data.get("decision", "")).strip().lower()
+        if raw in {"deny", "denied", "skip"}:
+            decision = "denied"
+        elif raw in {"approve", "approved", "pass"}:
+            decision = "approved"
+        elif raw in {"flag", "flagged", "human_review"}:
+            decision = "flagged"
+        else:
+            decision = raw
         p_fail = data.get("p_fail")
         files = data.get("files", [])
         action_type = data.get("action_type", "")
@@ -86,6 +94,8 @@ class SignificanceFilter:
         # --- Decision type ---
         if decision == "denied":
             score = 0.8  # Denials are always important
+        elif decision == "flagged":
+            score = 0.55  # Flags should trigger at least text tier
         elif decision == "approved":
             score = 0.15  # Routine approvals are quiet
 

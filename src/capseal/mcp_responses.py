@@ -14,6 +14,39 @@ def _utc_stamp() -> str:
     return _dt.datetime.now(_dt.timezone.utc).strftime("%Y%m%dT%H%M%S")
 
 
+def _envelope(
+    payload: dict[str, Any],
+    *,
+    tool: str,
+    session_id: str | None,
+    ok: bool = True,
+) -> dict[str, Any]:
+    """Attach universal MCP response metadata fields."""
+    wrapped = dict(payload)
+    wrapped.setdefault("ok", ok)
+    wrapped.setdefault("tool", tool)
+    wrapped.setdefault("session_id", session_id)
+    wrapped.setdefault("timestamp", _utc_stamp())
+    wrapped.setdefault("schema_version", SCHEMA_VERSION)
+    return wrapped
+
+
+def format_error_response(
+    *,
+    tool: str,
+    error: str,
+    session_id: str | None = None,
+    details: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Structured error response used by all MCP handlers."""
+    payload: dict[str, Any] = {
+        "error": error,
+        "details": details or {},
+        "human_summary": f"{tool}: failed ({error})",
+    }
+    return _envelope(payload, tool=tool, session_id=session_id, ok=False)
+
+
 def format_gate_response(
     result: RiskResult,
     *,
@@ -38,7 +71,7 @@ def format_gate_response(
         f"{result.label} | files={files_str}"
     )
 
-    return {
+    payload = {
         "decision": decision,
         "predicted_failure": round(result.p_fail, 6),
         "p_fail": round(result.p_fail, 6),
@@ -61,8 +94,8 @@ def format_gate_response(
         "model_loaded": result.model_loaded,
         "reason": base_reason,
         "human_summary": summary,
-        "schema_version": SCHEMA_VERSION,
     }
+    return _envelope(payload, tool="capseal_gate", session_id=session_id)
 
 
 def format_record_response(
@@ -74,6 +107,8 @@ def format_record_response(
     action_id: str | None = None,
     receipt_hash: str | None = None,
     receipt_chain_length: int = 0,
+    gate_label: str | None = None,
+    gate_p_fail: float | None = None,
     error: str | None = None,
 ) -> dict[str, Any]:
     if recorded:
@@ -83,7 +118,7 @@ def format_record_response(
         )
     else:
         summary = f"CAPSEAL RECORD: failed ({error or 'unknown error'})"
-    return {
+    payload = {
         "recorded": recorded,
         "action_id": action_id,
         "receipt_hash": receipt_hash,
@@ -91,10 +126,12 @@ def format_record_response(
         "action_type": action_type,
         "files_affected": files_affected,
         "receipt_chain_length": receipt_chain_length,
+        "label": gate_label,
+        "p_fail": gate_p_fail,
         "error": error,
         "human_summary": summary,
-        "schema_version": SCHEMA_VERSION,
     }
+    return _envelope(payload, tool="capseal_record", session_id=session_id, ok=recorded)
 
 
 def format_seal_response(
@@ -115,7 +152,7 @@ def format_seal_response(
         summary = f"CAPSEAL SEALED: {actions_count} actions -> {cap_file}"
     else:
         summary = f"CAPSEAL SEALED: failed ({error or 'unknown error'})"
-    return {
+    payload = {
         "sealed": sealed,
         "session_id": session_id,
         "session_name": session_name,
@@ -129,8 +166,8 @@ def format_seal_response(
         "model_episodes": model_episodes,
         "error": error,
         "human_summary": summary,
-        "schema_version": SCHEMA_VERSION,
     }
+    return _envelope(payload, tool="capseal_seal", session_id=session_id, ok=sealed)
 
 
 def format_status_response(
@@ -151,7 +188,7 @@ def format_status_response(
         f"CAPSEAL STATUS | Session: {state} | Workspace: {workspace} | "
         f"Actions: {actions_count} | Denied: {denials_count}"
     )
-    return {
+    payload = {
         "session_id": session_id,
         "session_active": session_active,
         "workspace": workspace,
@@ -163,8 +200,8 @@ def format_status_response(
         "recent_sessions": recent_sessions,
         "project_stats": project_stats,
         "human_summary": summary,
-        "schema_version": SCHEMA_VERSION,
     }
+    return _envelope(payload, tool="capseal_status", session_id=session_id, ok=True)
 
 
 def format_context_response(
@@ -173,23 +210,25 @@ def format_context_response(
     total_changes: int,
     total_sessions: int,
     sessions: list[dict[str, Any]],
+    session_id: str | None = None,
 ) -> dict[str, Any]:
     summary = (
         f"CAPSEAL CONTEXT: {file_path} has {total_changes} change(s) "
         f"across {total_sessions} session(s)"
     )
-    return {
+    payload = {
         "file": file_path,
         "total_changes": total_changes,
         "total_sessions": total_sessions,
         "sessions": sessions,
         "human_summary": summary,
-        "schema_version": SCHEMA_VERSION,
     }
+    return _envelope(payload, tool="capseal_context", session_id=session_id, ok=True)
 
 
 __all__ = [
     "SCHEMA_VERSION",
+    "format_error_response",
     "format_context_response",
     "format_gate_response",
     "format_record_response",

@@ -65,7 +65,15 @@ class MessageComposer:
             )
 
     def _compose_gate(self, data: dict, context, score: float) -> Message:
-        decision = data.get("decision", "unknown")
+        raw_decision = str(data.get("decision", "unknown")).strip().lower()
+        if raw_decision in {"deny", "denied", "skip"}:
+            decision = "denied"
+        elif raw_decision in {"approve", "approved", "pass"}:
+            decision = "approved"
+        elif raw_decision in {"flag", "flagged", "human_review"}:
+            decision = "flagged"
+        else:
+            decision = raw_decision
         files = data.get("files", [])
         p_fail = data.get("p_fail")
         label = (data.get("label") or "").strip()
@@ -89,6 +97,11 @@ class MessageComposer:
                 file_short, file_str, p_str, p_pct, p_voice,
                 diff, risk_factors, label, data, context, score
             )
+        elif decision == "flagged":
+            return self._compose_flagged(
+                file_short, file_str, p_str, p_pct, p_voice,
+                diff, risk_factors, label, data, context, score
+            )
         elif decision == "approved" and p_fail is not None and p_fail >= 0.5:
             return self._compose_risky_approval(
                 file_short, file_str, p_str, p_pct, p_voice,
@@ -99,6 +112,16 @@ class MessageComposer:
                 file_short, file_str, p_str, p_pct, p_voice,
                 label, data, context, score
             )
+
+    def _gate_buttons(self, files: list[str]) -> list[dict]:
+        target = _callback_target(files[0]) if files else ""
+        return [
+            {"text": "✅ allow once", "callback": f"approve:{target}"},
+            {"text": "🛑 block once", "callback": f"deny:{target}"},
+            {"text": "⏸ pause session", "callback": "pause:"},
+            {"text": "🔍 show why", "callback": f"investigate:{target}"},
+            {"text": "📦 seal now", "callback": "end:"},
+        ]
 
     def _compose_denial(self, file_short, file_str, p_str, p_pct,
                         p_voice, diff, risk_factors, label, data, context, score):
@@ -126,30 +149,27 @@ class MessageComposer:
             risk_voice = f"The risk is: {risk_factors}. "
 
         headline = label or file_short
-        short = f"🛑 Denied: {headline}{p_str}"
+        short = f"🛑 Blocked for safety — {headline} (chance this breaks: {p_pct})"
 
         full = (
-            f"🛑 <b>DENIED</b> — {_esc(headline)}\n"
-            f"Risk: {p_pct}"
+            f"🛑 <b>Blocked for safety</b>\n"
+            f"Change: {_esc(headline)}\n"
+            f"Chance this breaks: {p_pct}"
             f"{streak_info}"
             f"{risk_line}"
-            f"{diff_preview}"
+            f"{diff_preview}\n\n"
+            f"Use the buttons below: <b>allow once</b>, <b>block once</b>, <b>pause session</b>, or <b>seal now</b>."
         )
 
         voice = (
-            f"Hey — I just blocked an edit to {file_short}. "
+            f"I blocked this change for safety on {file_short}. "
             f"{p_voice}. "
             f"{streak_voice}"
             f"{risk_voice}"
-            f"Want me to let it through or keep blocking?"
+            f"Say allow once, block once, pause session, or seal now."
         )
 
-        target = _callback_target(files[0]) if files else ""
-        buttons = [
-            {"text": "✅ Approve", "callback": f"approve:{target}"},
-            {"text": "🛑 Keep Blocking", "callback": f"deny:{target}"},
-            {"text": "📋 Show Diff", "callback": f"diff:{target}"},
-        ]
+        buttons = self._gate_buttons(files)
 
         return Message(short_text=short, full_text=full,
                        voice_text=voice, buttons=buttons)
@@ -168,32 +188,65 @@ class MessageComposer:
             risk_voice = f"{risk_factors}. "
 
         headline = label or file_short
-        short = f"⚠️ Approved (risky): {headline}{p_str}"
+        short = f"🟡 Proceed with caution — {headline} (chance this breaks: {p_pct})"
 
         full = (
-            f"⚠️ <b>APPROVED (HIGH RISK)</b> — {_esc(headline)}\n"
-            f"Risk: {p_pct} — above normal threshold"
+            f"🟡 <b>Proceed with caution</b>\n"
+            f"Change: {_esc(headline)}\n"
+            f"Chance this breaks: {p_pct} (higher than normal)"
             f"{risk_line}"
-            f"{diff_preview}"
+            f"{diff_preview}\n\n"
+            f"Use <b>show why</b> for details, or choose <b>block once</b>."
         )
 
         voice = (
-            f"Heads up — I approved an edit to {file_short} but the risk score "
-            f"is {p_pct}, which is higher than usual. "
+            f"This was allowed, but with caution, for {file_short}. "
+            f"{p_voice}. "
             f"{risk_voice}"
-            f"Keeping an eye on it."
+            f"Say block once if you want me to stop it next time."
         )
 
-        return Message(short_text=short, full_text=full, voice_text=voice)
+        return Message(short_text=short, full_text=full, voice_text=voice, buttons=self._gate_buttons(data.get("files", [])))
+
+    def _compose_flagged(self, file_short, file_str, p_str, p_pct,
+                         p_voice, diff, risk_factors, label, data, context, score):
+        diff_preview = ""
+        if diff:
+            lines = diff.strip().split("\n")[:4]
+            diff_preview = "\n<pre>" + _esc("\n".join(lines)) + "</pre>"
+
+        risk_line = f"\n📊 Risk: {risk_factors}" if risk_factors else ""
+        headline = label or file_short
+
+        short = f"🟡 Proceed with caution — {headline} (chance this breaks: {p_pct})"
+        full = (
+            f"🟡 <b>Proceed with caution</b>\n"
+            f"Change: {_esc(headline)}\n"
+            f"Chance this breaks: {p_pct}"
+            f"{risk_line}"
+            f"{diff_preview}\n\n"
+            f"Use <b>show why</b> for details, then choose <b>allow once</b> or <b>block once</b>."
+        )
+        voice = (
+            f"This change needs caution for {file_short}. "
+            f"{p_voice}. "
+            f"Say allow once or block once."
+        )
+        return Message(short_text=short, full_text=full, voice_text=voice, buttons=self._gate_buttons(data.get("files", [])))
 
     def _compose_routine_approval(self, file_short, file_str, p_str, p_pct,
                                   p_voice, label, data, context, score):
         headline = label or file_short
-        short = f"✅ Approved: {headline}{p_str}"
-        full = f"✅ Approved — {headline} (risk: {p_pct})"
-        voice = f"Approved an edit to {file_short}. Low risk."
+        short = f"✅ Safe to proceed — {headline} (chance this breaks: {p_pct})"
+        full = (
+            f"✅ <b>Safe to proceed</b>\n"
+            f"Change: {_esc(headline)}\n"
+            f"Chance this breaks: {p_pct}\n\n"
+            f"If you want details, tap <b>show why</b>."
+        )
+        voice = f"This change looks safe to proceed for {file_short}. Low risk."
 
-        return Message(short_text=short, full_text=full, voice_text=voice)
+        return Message(short_text=short, full_text=full, voice_text=voice, buttons=self._gate_buttons(data.get("files", [])))
 
     def _compose_session_start(self, data, context):
         agent = data.get("agent", "agent")

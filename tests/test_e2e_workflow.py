@@ -965,13 +965,17 @@ class TestProofOnSeal:
         return responses
 
     def test_seal_includes_proof_line(self, project_dir):
-        """Seal output should include a Proof: status line."""
+        """Seal output should include proof status (structured JSON)."""
         responses = self._run_full_session(project_dir)
         assert 3 in responses, "No seal response"
         seal_text = responses[3]["result"]["content"][0]["text"]
-        assert "CAPSEAL SEALED" in seal_text
-        # Should have a Proof: line (either verified or failed)
-        assert "Proof:" in seal_text, f"No Proof: line in seal output: {seal_text}"
+        payload = json.loads(seal_text)
+        assert payload.get("sealed") is True
+        assert "CAPSEAL SEALED" in (payload.get("human_summary") or "")
+        # Proof fields should be present even when verification is stubbed.
+        assert payload.get("proof_type") in ("constraint_check", "fri")
+        assert payload.get("proof_generated") in (True, False)
+        assert payload.get("proof_verified") in (True, False)
 
     def test_seal_creates_agent_capsule(self, project_dir):
         """After seal, agent_capsule.json should exist in the run directory."""

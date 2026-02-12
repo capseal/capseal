@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 import numpy as np
 
@@ -19,6 +19,8 @@ from capseal.shared.scoring import lookup_posterior_at_idx
 THRESHOLD_APPROVE = 0.3
 THRESHOLD_FLAG = 0.6
 THRESHOLD_DENY = 0.6
+COMMITTOR_SKIP_THRESHOLD = THRESHOLD_DENY
+COMMITTOR_REVIEW_UNCERTAINTY = 0.15
 
 
 @dataclass(frozen=True)
@@ -33,6 +35,14 @@ class RiskResult:
     label: str
     reason: str
     model_loaded: bool
+
+
+@dataclass(frozen=True)
+class CellRisk:
+    p_fail: float
+    uncertainty: float
+    observations: int
+    confidence: float
 
 
 def _resolve_model_path(workspace: str | Path, model_path: str | Path | None) -> Path:
@@ -147,6 +157,59 @@ def _decision_from_p_fail(p_fail: float, approve_threshold: float, deny_threshol
     return "approve"
 
 
+def posterior_from_grid_cell(grid_cell: int, *, alpha: np.ndarray, beta: np.ndarray) -> CellRisk:
+    """Compute p_fail/uncertainty/confidence for a grid cell from beta posteriors."""
+    posterior = lookup_posterior_at_idx(alpha, beta, int(grid_cell))
+    p_fail = float(posterior["q"])
+    uncertainty = float(posterior["uncertainty"])
+    observations = int(max(0.0, float(posterior["alpha"] + posterior["beta"] - 2)))
+    confidence = float(min(1.0, observations / (observations + 5.0))) if observations > 0 else 0.0
+    return CellRisk(
+        p_fail=p_fail,
+        uncertainty=uncertainty,
+        observations=observations,
+        confidence=confidence,
+    )
+
+
+def committor_decision(
+    p_fail: float,
+    uncertainty: float,
+    *,
+    skip_threshold: float = COMMITTOR_SKIP_THRESHOLD,
+    review_uncertainty: float = COMMITTOR_REVIEW_UNCERTAINTY,
+) -> str:
+    """Shared committor decision policy for legacy/verification paths."""
+    if p_fail >= skip_threshold:
+        return "skip"
+    if uncertainty > review_uncertainty:
+        return "human_review"
+    return "pass"
+
+
+def beta_mean_failure_probability(alpha_value: float, beta_value: float) -> float:
+    """Mean failure probability for a Beta(alpha, beta) posterior."""
+    total = float(alpha_value) + float(beta_value)
+    if total <= 0:
+        return 0.5
+    return float(alpha_value) / total
+
+
+def synthetic_failure_probability(levels: Sequence[int]) -> float:
+    """Canonical synthetic p_fail heuristic used by eval/legacy paths."""
+    if len(levels) < 5:
+        return 0.5
+    a, b, c, d, e = 0.9, 0.3, 0.3, 0.2, 0.2
+    p_fail = (
+        a * (levels[3] / 3) +
+        b * (levels[1] / 3) +
+        c * (levels[0] / 10) +
+        d * (levels[2] / 3) +
+        e * (1.0 / max(1, levels[4] + 1))
+    )
+    return float(np.clip(p_fail, 0.0, 1.0))
+
+
 def to_internal_decision(decision: str) -> str:
     return {
         "approve": "pass",
@@ -198,11 +261,11 @@ def evaluate_risk(
         reason = "risk model not trained; approving with caution"
     else:
         alpha, beta = loaded
-        posterior = lookup_posterior_at_idx(alpha, beta, grid_idx)
-        p_fail = float(posterior["q"])
-        uncertainty = float(posterior["uncertainty"])
-        observations = int(max(0.0, float(posterior["alpha"] + posterior["beta"] - 2)))
-        confidence = float(min(1.0, observations / (observations + 5.0))) if observations > 0 else 0.0
+        cell = posterior_from_grid_cell(grid_idx, alpha=alpha, beta=beta)
+        p_fail = cell.p_fail
+        uncertainty = cell.uncertainty
+        observations = cell.observations
+        confidence = cell.confidence
         decision = _decision_from_p_fail(p_fail, approve_threshold, deny_threshold)
         reason = (
             f"p_fail={p_fail:.3f} "
@@ -295,9 +358,16 @@ __all__ = [
     "THRESHOLD_APPROVE",
     "THRESHOLD_FLAG",
     "THRESHOLD_DENY",
+    "COMMITTOR_SKIP_THRESHOLD",
+    "COMMITTOR_REVIEW_UNCERTAINTY",
+    "CellRisk",
+    "beta_mean_failure_probability",
+    "committor_decision",
     "evaluate_action_risk",
     "evaluate_risk",
     "evaluate_risk_for_finding",
+    "posterior_from_grid_cell",
+    "synthetic_failure_probability",
     "synthesize_diff_for_files",
     "to_internal_decision",
 ]

@@ -138,18 +138,13 @@ def _build_report(target: Path) -> dict:
     # ── Run semgrep scan ──────────────────────────────────────────────────
     findings = _run_semgrep(target)
     report["findings_count"] = len(findings)
+    report["session_history"] = _gather_session_history(target)
 
     if not findings:
         return report
 
     # ── Score findings and build hotspots ─────────────────────────────────
-    from capseal.shared.features import (
-        extract_patch_features,
-        discretize_features,
-        features_to_grid_idx,
-    )
-    from capseal.risk_labels import generate_label
-    from capseal.shared.scoring import lookup_posterior_at_idx
+    from capseal.risk_engine import THRESHOLD_APPROVE, THRESHOLD_DENY, evaluate_risk_for_finding
 
     # Group findings by file (use relative paths for display)
     by_file: dict[str, list] = {}
@@ -171,37 +166,10 @@ def _build_report(target: Path) -> dict:
         start_line = finding.get("start", {}).get("line", 1)
         end_line = finding.get("end", {}).get("line", start_line + 5)
 
-        # Build a minimal diff for feature extraction
-        diff_preview = f"diff --git a/{file_path} b/{file_path}\n"
-        diff_preview += f"+++ b/{file_path}\n"
-        lines_changed = max(5, end_line - start_line + 1)
-        diff_preview += f"@@ -{start_line},{lines_changed} @@\n"
-
-        raw_features = extract_patch_features(diff_preview, [{"severity": severity}])
-        levels = discretize_features(raw_features)
-        grid_idx = features_to_grid_idx(levels)
-        sev = str(severity).lower()
-        if sev in {"error", "high"}:
-            security_signal = 1.0
-        elif sev in {"warning", "medium"}:
-            security_signal = 0.66
-        elif sev in {"low"}:
-            security_signal = 0.33
-        else:
-            security_signal = 0.0
-        label = generate_label({
-            "lines_changed": int(raw_features.get("lines_changed", 0) or 0),
-            "files_touched": int(raw_features.get("files_touched", 0) or 0),
-            "modules_crossed": max(0, int(raw_features.get("files_touched", 0) or 0) - 1),
-            "security": security_signal,
-            "change_type": "fix",
-            "test_coverage_delta": int(raw_features.get("test_coverage_delta", 0) or 0),
-        })
-
-        p_fail = 0.50  # default uninformative prior
-        if alpha is not None and beta is not None:
-            posterior = lookup_posterior_at_idx(alpha, beta, grid_idx)
-            p_fail = posterior["q"]
+        # Canonical scoring path used by scan/fix/mcp gate.
+        risk = evaluate_risk_for_finding(finding, workspace=target)
+        p_fail = float(risk.p_fail)
+        label = risk.label
 
         scored_findings.append({
             "file": file_path,
@@ -224,9 +192,9 @@ def _build_report(target: Path) -> dict:
         avg_p_fail = sum(s["p_fail"] for s in file_scores) / len(file_scores)
         max_p_fail = max(s["p_fail"] for s in file_scores)
 
-        if max_p_fail > 0.6:
+        if max_p_fail >= THRESHOLD_DENY:
             recommendation = "NEEDS HUMAN REVIEW"
-        elif avg_p_fail < 0.3:
+        elif avg_p_fail < THRESHOLD_APPROVE:
             recommendation = "safe to auto-fix"
         else:
             recommendation = "review recommended"
@@ -266,15 +234,12 @@ def _build_report(target: Path) -> dict:
             "count": len(rule_findings),
             "avg_p_fail": round(avg_p, 2),
         }
-        if avg_p < 0.3:
+        if avg_p < THRESHOLD_APPROVE:
             report["recommendations"]["safe"].append(entry)
-        elif avg_p <= 0.6:
+        elif avg_p < THRESHOLD_DENY:
             report["recommendations"]["needs_review"].append(entry)
         else:
             report["recommendations"]["dont_automate"].append(entry)
-
-    # ── Session history ───────────────────────────────────────────────────
-    report["session_history"] = _gather_session_history(target)
 
     return report
 

@@ -11,6 +11,12 @@ from pathlib import Path
 from typing import Any
 
 import click
+from capseal.risk_engine import (
+    THRESHOLD_APPROVE,
+    THRESHOLD_DENY,
+    evaluate_risk,
+    synthesize_diff_for_files,
+)
 
 
 def _get_changed_files() -> list[str]:
@@ -45,38 +51,43 @@ def _get_changed_files() -> list[str]:
         return []
 
 
-def _compute_risk_score(file_path: str, diff_lines: int) -> float:
-    """Compute risk score for a file change."""
-    # TODO: Replace with canonical risk_engine -- see upgrade-spec #2.
-    import random
+def _evaluate_file_risk(
+    file_path: str,
+    workspace: Path,
+    gate_threshold: float,
+    review_threshold: float,
+) -> dict[str, Any]:
+    """Evaluate risk for a file change via canonical risk engine."""
+    diff_text = synthesize_diff_for_files(
+        [file_path],
+        description=f"watch analysis for {file_path}",
+    )
+    risk = evaluate_risk(
+        diff_text,
+        workspace=workspace,
+        approve_threshold=review_threshold,
+        deny_threshold=gate_threshold,
+        action_type="ci_watch",
+        description=f"watch analysis for {file_path}",
+    )
 
-    # Seed based on file path for determinism
-    random.seed(hash(file_path))
+    if risk.decision == "deny":
+        decision = "gated"
+    elif risk.decision == "flag":
+        decision = "review"
+    else:
+        decision = "approved"
 
-    # Base score from file characteristics
-    score = 0.2
-
-    # Higher risk for certain file types
-    if file_path.endswith((".py", ".js", ".ts")):
-        score += 0.1
-    if "test" in file_path.lower():
-        score -= 0.1  # Tests are lower risk
-    if "config" in file_path.lower() or "secret" in file_path.lower():
-        score += 0.2
-
-    # Risk increases with diff size
-    if diff_lines > 100:
-        score += 0.2
-    elif diff_lines > 50:
-        score += 0.1
-
-    # Add some variance
-    score += random.uniform(-0.1, 0.1)
-
-    return max(0.0, min(1.0, score))
+    return {
+        "risk_score": float(risk.p_fail),
+        "decision": decision,
+        "label": risk.label,
+        "grid_cell": int(risk.grid_cell),
+        "confidence": float(risk.confidence),
+    }
 
 
-def _generate_receipt(file_path: str, decision: str, risk_score: float) -> dict:
+def _generate_receipt(file_path: str, decision: str, risk_score: float, label: str) -> dict:
     """Generate a receipt for a gating decision."""
     timestamp = datetime.now(timezone.utc).isoformat()
     rounded_score = round(risk_score, 3)
@@ -87,6 +98,7 @@ def _generate_receipt(file_path: str, decision: str, risk_score: float) -> dict:
         "file": file_path,
         "decision": decision,
         "risk_score": rounded_score,
+        "label": label,
         "timestamp": timestamp,
         "receipt_hash": hashlib.sha256(content.encode()).hexdigest()[:16],
     }
@@ -96,6 +108,7 @@ def _run_gate_analysis(
     files: list[str],
     gate_threshold: float,
     review_threshold: float,
+    workspace: Path,
 ) -> dict:
     """Run gating analysis on changed files."""
     results = {
@@ -111,22 +124,27 @@ def _run_gate_analysis(
         if not any(file_path.endswith(ext) for ext in [".py", ".js", ".ts", ".go", ".rs", ".java"]):
             continue
 
-        # Compute risk score
-        risk_score = _compute_risk_score(file_path, diff_lines=50)  # Mock diff lines
+        # Compute risk score using canonical risk engine
+        risk_eval = _evaluate_file_risk(
+            file_path=file_path,
+            workspace=workspace,
+            gate_threshold=gate_threshold,
+            review_threshold=review_threshold,
+        )
+        risk_score = risk_eval["risk_score"]
+        label = risk_eval["label"]
+        decision = risk_eval["decision"]
 
-        # Make decision
-        if risk_score >= gate_threshold:
-            decision = "gated"
+        # Bucket results
+        if decision == "gated":
             results["gated"].append(file_path)
-        elif risk_score >= review_threshold:
-            decision = "review"
+        elif decision == "review":
             results["flagged_for_review"].append(file_path)
         else:
-            decision = "approved"
             results["approved"].append(file_path)
 
         # Generate receipt
-        receipt = _generate_receipt(file_path, decision, risk_score)
+        receipt = _generate_receipt(file_path, decision, risk_score, label)
         results["receipts"].append(receipt)
 
     return results
@@ -191,14 +209,14 @@ def _format_pr_comment(results: dict, verified: bool) -> str:
 @click.option(
     "--gate-threshold",
     type=float,
-    default=0.7,
-    help="Risk score threshold for gating (default: 0.7)",
+    default=THRESHOLD_DENY,
+    help=f"Risk score threshold for gating (default: {THRESHOLD_DENY})",
 )
 @click.option(
     "--review-threshold",
     type=float,
-    default=0.4,
-    help="Risk score threshold for flagging review (default: 0.4)",
+    default=THRESHOLD_APPROVE,
+    help=f"Risk score threshold for flagging review (default: {THRESHOLD_APPROVE})",
 )
 @click.option(
     "--json", "json_output",
@@ -246,6 +264,15 @@ def watch_command(
     """
     start_time = time.time()
 
+    if review_threshold > gate_threshold:
+        click.echo(
+            f"Error: review-threshold ({review_threshold}) must be <= gate-threshold ({gate_threshold})",
+            err=True,
+        )
+        sys.exit(1)
+
+    workspace = Path.cwd().resolve()
+
     # Get files to analyze
     if files:
         file_list = [f.strip() for f in files.split(",")]
@@ -260,7 +287,7 @@ def watch_command(
         return
 
     # Run analysis
-    results = _run_gate_analysis(file_list, gate_threshold, review_threshold)
+    results = _run_gate_analysis(file_list, gate_threshold, review_threshold, workspace)
 
     # Verify receipts
     verified = _verify_receipts(results["receipts"])

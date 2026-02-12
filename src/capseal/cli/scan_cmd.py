@@ -15,6 +15,7 @@ from pathlib import Path
 import click
 from capseal.risk_engine import (
     THRESHOLD_APPROVE,
+    THRESHOLD_DENY,
     evaluate_risk,
     evaluate_risk_for_finding,
 )
@@ -24,7 +25,12 @@ from capseal.risk_engine import (
 @click.argument("path", type=click.Path(exists=True), default=".")
 @click.option("--gate", is_flag=True, help="Gate findings based on learned model")
 @click.option("--json", "output_json", is_flag=True, help="Output JSON instead of human-readable")
-@click.option("--threshold", type=float, default=0.6, help="Failure probability threshold for gating (default: 0.6)")
+@click.option(
+    "--threshold",
+    type=float,
+    default=THRESHOLD_DENY,
+    help=f"Failure probability threshold for gating (default: {THRESHOLD_DENY})",
+)
 @click.option("--diff", "diff_path", type=click.Path(exists=True), default=None, help="Evaluate a unified diff file directly")
 @click.option("--profile", type=click.Choice(["security", "quality", "bugs", "all", "custom"]),
               default=None, help="Scan profile (default: from config or 'auto')")
