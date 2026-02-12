@@ -13,6 +13,7 @@ Usage:
 
 import asyncio
 import contextlib
+import errno
 import json
 import signal
 import sys
@@ -112,6 +113,8 @@ class SessionContext:
 class OperatorDaemon:
     def __init__(self, workspace: Path, config: dict):
         self.workspace = workspace
+        self._instance_lock_fp = None
+        self._acquire_instance_lock()
         self.events_path = workspace / ".capseal" / "events.jsonl"
         self.pty_events_path = workspace / ".capseal" / "pty_events.jsonl"
         self.home_pty_events_path = Path.home() / ".capseal" / "pty_events.jsonl"
@@ -198,6 +201,38 @@ class OperatorDaemon:
 
         if self.voice_call:
             self.voice_call.playback_enabled = bool(self._voice_active)
+
+    def _acquire_instance_lock(self) -> None:
+        """Prevent multiple operators in the same workspace.
+
+        Moshi's server is single-connection (global lock). Multiple operator instances
+        can easily deadlock the voice call handshake and make the system look flaky.
+        """
+        lock_path = self.workspace / ".capseal" / "operator.lock"
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+
+        fp = open(lock_path, "a+")
+        try:
+            try:
+                import fcntl  # Unix only
+
+                fcntl.flock(fp.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except ImportError:
+                # Best-effort on non-Unix. We still write pid for humans.
+                pass
+        except OSError as e:
+            fp.close()
+            if e.errno in (errno.EAGAIN, errno.EACCES):
+                raise RuntimeError(
+                    f"another capseal operator is already running for workspace {self.workspace}"
+                )
+            raise
+
+        fp.seek(0)
+        fp.truncate()
+        fp.write(f"{os.getpid()}\n")
+        fp.flush()
+        self._instance_lock_fp = fp
 
     def _init_channels(self, config: dict):
         """Initialize notification channels from config."""

@@ -5,7 +5,7 @@ use crate::capseal::{CapSealState, PendingIntervention};
 use notify::{Event as NotifyEvent, RecursiveMode, Watcher};
 use std::path::PathBuf;
 use std::sync::mpsc;
-use std::time::{Instant, SystemTime};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 pub struct EventWatcher {
     tx: mpsc::Sender<NotifyEvent>,
@@ -170,8 +170,17 @@ impl EventWatcher {
                 for path in [&self.operator_status_path, &self.home_operator_status_path] {
                     if let Ok(contents) = std::fs::read_to_string(path) {
                         if let Ok(val) = serde_json::from_str::<serde_json::Value>(&contents) {
+                            // Treat stale status as offline. This matters when the operator is killed
+                            // abruptly (no final "offline" status write).
+                            let now = SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs_f64();
+                            let ts = val.get("ts").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                            let stale = ts > 0.0 && (now - ts) > 15.0;
+
                             state.operator_online =
-                                val.get("online").and_then(|v| v.as_bool()).unwrap_or(false);
+                                !stale && val.get("online").and_then(|v| v.as_bool()).unwrap_or(false);
                             state.operator_channels =
                                 val.get("channels").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
                             state.operator_channel_types = val
@@ -197,6 +206,15 @@ impl EventWatcher {
                                 .get("workspace")
                                 .and_then(|v| v.as_str())
                                 .map(|s| s.to_string());
+
+                            if stale {
+                                state.operator_channels = 0;
+                                state.operator_channel_types.clear();
+                                state.operator_events_processed = 0;
+                                state.operator_voice_connected = false;
+                                state.operator_last_alert_ts = None;
+                                state.operator_workspace = None;
+                            }
                             loaded = true;
                             break;
                         }

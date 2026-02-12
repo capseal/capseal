@@ -8,6 +8,7 @@ Supports:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import math
 import json
 import re
@@ -120,6 +121,8 @@ class VoiceCallManager:
         if self.voice_profile not in VOICE_PROFILES:
             self.voice_profile = "balanced"
         profile = dict(VOICE_PROFILES[self.voice_profile])
+        # Lazily initialized inside async methods to avoid loop-bound issues.
+        self._connect_lock: asyncio.Lock | None = None
         self.ws = None
         self.connected = False
         self.audio_frames_received = 0
@@ -204,6 +207,21 @@ class VoiceCallManager:
             print("[voice_call] websockets not installed. pip install websockets")
             return False
 
+        if self._connect_lock is None:
+            self._connect_lock = asyncio.Lock()
+        async with self._connect_lock:
+            return await self._connect_inner()
+
+    async def _connect_inner(self) -> bool:
+        """Inner connect implementation (serialized by _connect_lock)."""
+        # Ensure we never leak multiple open sockets. Moshi holds a global lock per
+        # connection, so leaked/duplicate websockets can block new handshakes.
+        if self.ws is not None:
+            with contextlib.suppress(Exception):
+                await self.ws.close()
+            self.ws = None
+            self.connected = False
+
         if self.protocol == "json_stream":
             target = self.ws_url
         else:
@@ -252,6 +270,9 @@ class VoiceCallManager:
             return True
         except Exception as e:
             print(f"[voice_call] connection failed: {e!r}")
+            if self.ws is not None:
+                with contextlib.suppress(Exception):
+                    await self.ws.close()
             self.connected = False
             self.ws = None
             return False
@@ -522,14 +543,16 @@ class VoiceCallManager:
 
     async def disconnect(self) -> None:
         """Close websocket."""
-        await self.stop_mic_uplink()
-        if self.ws:
-            try:
-                await self.ws.close()
-            except Exception:
-                pass
-        self._stop_local_player()
-        self.connected = False
+        if self._connect_lock is None:
+            self._connect_lock = asyncio.Lock()
+        async with self._connect_lock:
+            await self.stop_mic_uplink()
+            if self.ws:
+                with contextlib.suppress(Exception):
+                    await self.ws.close()
+            self.ws = None
+            self._stop_local_player()
+            self.connected = False
 
     async def set_active(self, active: bool) -> None:
         """Apply voice toggle to playback and freeform uplink."""
