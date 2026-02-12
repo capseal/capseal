@@ -1,6 +1,5 @@
 /// Watches PTY output for patterns indicating the agent is waiting for user input
 /// or requesting approval. Writes events to .capseal/pty_events.jsonl.
-
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -179,11 +178,9 @@ impl AgentOutputWatcher {
     }
 
     fn write_event(&self, event_json: &str) {
-        if let Ok(()) = std::fs::create_dir_all(
-            self.pty_events_path
-                .parent()
-                .unwrap_or(&PathBuf::from(".")),
-        ) {
+        if let Ok(()) =
+            std::fs::create_dir_all(self.pty_events_path.parent().unwrap_or(&PathBuf::from(".")))
+        {
             if let Ok(mut f) = std::fs::OpenOptions::new()
                 .create(true)
                 .append(true)

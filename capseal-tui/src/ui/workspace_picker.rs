@@ -27,10 +27,7 @@ impl<'a> Widget for WorkspacePicker<'a> {
         lines.push(Line::raw(""));
         lines.push(Line::styled("  CAPSEAL", cyan));
         lines.push(Line::raw(""));
-        lines.push(Line::styled(
-            "  Select a project workspace",
-            white,
-        ));
+        lines.push(Line::styled("  Select a project workspace", white));
         lines.push(Line::raw(""));
 
         // Recent projects section
@@ -50,10 +47,7 @@ impl<'a> Widget for WorkspacePicker<'a> {
                 };
 
                 lines.push(Line::from(vec![
-                    Span::styled(
-                        format!("{}{:<40}", prefix, project.display_path),
-                        style,
-                    ),
+                    Span::styled(format!("{}{:<40}", prefix, project.display_path), style),
                     Span::styled(
                         format!(" \u{25cf} {}", session_text),
                         if is_sel { green } else { dim },
@@ -92,7 +86,11 @@ impl<'a> Widget for WorkspacePicker<'a> {
                 let global_idx = recent_len + git_idx;
                 let is_sel = self.state.selected == global_idx;
                 let prefix = if is_sel { "  \u{25b8} " } else { "    " };
-                let style = if is_sel { selected_style } else { Style::default().fg(Color::Cyan) };
+                let style = if is_sel {
+                    selected_style
+                } else {
+                    Style::default().fg(Color::Cyan)
+                };
 
                 let mut spans = vec![Span::styled(
                     format!("{}{}", prefix, project.display_path),
@@ -106,10 +104,7 @@ impl<'a> Widget for WorkspacePicker<'a> {
                     } else {
                         format!("{} sessions", project.session_count)
                     };
-                    spans.push(Span::styled(
-                        format!("  \u{25cf} {}", session_text),
-                        green,
-                    ));
+                    spans.push(Span::styled(format!("  \u{25cf} {}", session_text), green));
                 }
 
                 lines.push(Line::from(spans));

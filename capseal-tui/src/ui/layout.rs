@@ -31,10 +31,7 @@ impl SessionLayout {
         // Step 2: Horizontal — left 25% | right 75%
         let horizontal = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Percentage(25),
-                Constraint::Percentage(75),
-            ])
+            .constraints([Constraint::Percentage(25), Constraint::Percentage(75)])
             .split(main_area);
 
         let control_panel = horizontal[0];
@@ -43,10 +40,7 @@ impl SessionLayout {
         // Step 3: Right side vertical — session monitor 60% | terminal 40%
         let right_split = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Percentage(60),
-                Constraint::Percentage(40),
-            ])
+            .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
             .split(right_area);
 
         let action_chain = right_split[0];

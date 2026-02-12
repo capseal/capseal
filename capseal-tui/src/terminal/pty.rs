@@ -52,7 +52,10 @@ impl PtyHandle {
             if !zshrc.exists() {
                 let _ = std::fs::write(&zshrc, "PS1='\u{276f} '\nunsetopt PROMPT_SUBST\n");
             }
-            cmd.env("ZDOTDIR", empty_zsh_dir.to_str().unwrap_or("/tmp/capseal-empty-zsh"));
+            cmd.env(
+                "ZDOTDIR",
+                empty_zsh_dir.to_str().unwrap_or("/tmp/capseal-empty-zsh"),
+            );
         }
 
         let child = pair.slave.spawn_command(cmd)?;
@@ -94,9 +97,6 @@ impl PtyHandle {
     /// Get a reference to the reader for use in a background thread
     pub fn take_reader(&mut self) -> Box<dyn Read + Send> {
         // Replace with a dummy reader — caller takes ownership
-        std::mem::replace(
-            &mut self.reader,
-            Box::new(std::io::empty()),
-        )
+        std::mem::replace(&mut self.reader, Box::new(std::io::empty()))
     }
 }

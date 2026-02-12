@@ -24,10 +24,14 @@ pub struct CapSealState {
 
     // Current session
     pub session_active: bool,
+    pub gates_attempted: u32,
+    pub gates_approved: u32,
+    pub gates_denied: u32,
+    pub actions_recorded: u32,
     pub action_count: u32,
     pub denied_count: u32,
+    pub chain_verified: bool,
     pub chain_intact: bool,
-    pub latest_event: Option<CapSealEvent>,
     pub action_chain: Vec<ActionEntry>,
     pub session_start: Option<std::time::Instant>,
 
@@ -37,6 +41,15 @@ pub struct CapSealState {
     // Operator status
     pub operator_online: bool,
     pub operator_channels: u32,
+    pub operator_channel_types: Vec<String>,
+    pub operator_events_processed: u64,
+    pub operator_voice_connected: bool,
+    pub operator_last_alert_ts: Option<f64>,
+    pub operator_workspace: Option<String>,
+    pub voice_active: bool,
+
+    // Intervention visibility
+    pub pending_intervention: Option<PendingIntervention>,
 
     // History
     pub sessions: Vec<sessions::SessionSummary>,
@@ -57,22 +70,41 @@ impl CapSealState {
             training_total_rounds: 0,
             training_profiles: Vec::new(),
             session_active: false,
+            gates_attempted: 0,
+            gates_approved: 0,
+            gates_denied: 0,
+            actions_recorded: 0,
             action_count: 0,
             denied_count: 0,
+            chain_verified: false,
             chain_intact: true,
-            latest_event: None,
             action_chain: Vec::new(),
             session_start: None,
             pending_pty_injection: None,
             operator_online: false,
             operator_channels: 0,
+            operator_channel_types: Vec::new(),
+            operator_events_processed: 0,
+            operator_voice_connected: false,
+            operator_last_alert_ts: None,
+            operator_workspace: None,
+            voice_active: false,
+            pending_intervention: None,
             sessions: Vec::new(),
         }
     }
 
     pub fn session_duration_secs(&self) -> u64 {
-        self.session_start.map(|s| s.elapsed().as_secs()).unwrap_or(0)
+        self.session_start
+            .map(|s| s.elapsed().as_secs())
+            .unwrap_or(0)
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct PendingIntervention {
+    pub action: String,
+    pub source: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]

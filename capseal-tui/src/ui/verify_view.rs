@@ -32,7 +32,9 @@ impl<'a> Widget for VerifyView<'a> {
         let (status_text, status_style) = match self.info.status.as_str() {
             "VERIFIED" => (
                 "VERIFIED",
-                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
             ),
             "REJECTED" => (
                 "REJECTED",
@@ -44,7 +46,9 @@ impl<'a> Widget for VerifyView<'a> {
                 } else {
                     &self.info.status
                 },
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
             ),
         };
 
@@ -87,7 +91,10 @@ impl<'a> Widget for VerifyView<'a> {
             lines.push(Line::raw(""));
             lines.push(Line::styled("  Error:", Style::default().fg(Color::Red)));
             lines.push(Line::styled(
-                format!("  {}", truncate_str(err, inner.width.saturating_sub(4) as usize)),
+                format!(
+                    "  {}",
+                    truncate_str(err, inner.width.saturating_sub(4) as usize)
+                ),
                 Style::default().fg(Color::Red),
             ));
         }
@@ -113,4 +120,3 @@ fn truncate_str(s: &str, max_len: usize) -> String {
         s.chars().take(max_len).collect()
     }
 }
-

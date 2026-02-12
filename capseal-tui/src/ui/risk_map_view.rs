@@ -9,12 +9,13 @@ pub struct RiskMapView<'a> {
     pub model_loaded: bool,
     pub episode_count: u32,
     pub profile_count: u32,
+    pub recent_labels: Vec<String>,
 }
 
 impl<'a> Widget for RiskMapView<'a> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let block = Block::default()
-            .title(" Risk Map ")
+            .title(" Risk Profiles ")
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(Color::Cyan));
@@ -33,7 +34,7 @@ impl<'a> Widget for RiskMapView<'a> {
 
         lines.push(Line::styled(
             format!(
-                "  Risk Model: {} episodes, {} active profiles",
+                "  Model Confidence: {} episodes, {} active profiles",
                 self.episode_count, self.profile_count
             ),
             Style::default()
@@ -53,9 +54,21 @@ impl<'a> Widget for RiskMapView<'a> {
         ]));
         lines.push(Line::raw(""));
 
+        if self.profile_count <= 3 || self.risk_scores.len() <= 2 {
+            lines.push(Line::styled(
+                "  Most profiles are at baseline (limited observations).",
+                Style::default().fg(Color::Yellow),
+            ));
+            lines.push(Line::styled(
+                "  Run more sessions with `capseal learn` to improve confidence.",
+                Style::default().fg(Color::DarkGray),
+            ));
+            lines.push(Line::raw(""));
+        }
+
         // Header
         lines.push(Line::styled(
-            format!("  {:<20} {:>8} {}", "Profile", "p_fail", "Risk"),
+            format!("  {:<22} {:>8} {}", "Profile", "Break %", "Risk"),
             Style::default()
                 .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
@@ -73,13 +86,16 @@ impl<'a> Widget for RiskMapView<'a> {
             let empty = bar_width - filled.min(bar_width);
             let bar = format!(
                 "{}{}",
-                "\u{2588}".repeat(filled),  // █
-                "\u{2591}".repeat(empty)      // ░
+                "\u{2588}".repeat(filled), // █
+                "\u{2591}".repeat(empty)   // ░
             );
 
             lines.push(Line::from(vec![
-                Span::raw(format!("  {:<20} ", truncate(name, 20))),
-                Span::styled(format!("{:>5.2}  ", p_fail), Style::default().fg(color)),
+                Span::raw(format!("  {:<22} ", truncate(name, 22))),
+                Span::styled(
+                    format!("{:>6.0}%  ", p_fail * 100.0),
+                    Style::default().fg(color),
+                ),
                 Span::styled(bar, Style::default().fg(color)),
             ]));
         }
@@ -89,6 +105,22 @@ impl<'a> Widget for RiskMapView<'a> {
                 "  No active profiles (need more training data)",
                 Style::default().fg(Color::DarkGray),
             ));
+        }
+
+        if !self.recent_labels.is_empty() {
+            lines.push(Line::raw(""));
+            lines.push(Line::styled(
+                "  Recent gate labels:",
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ));
+            for label in self.recent_labels {
+                lines.push(Line::styled(
+                    format!("    - {}", truncate(&label, 56)),
+                    Style::default().fg(Color::DarkGray),
+                ));
+            }
         }
 
         lines.push(Line::raw(""));

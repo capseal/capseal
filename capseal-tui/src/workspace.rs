@@ -68,7 +68,11 @@ impl PickerState {
         // Reserve lines for header, section labels, footer
         // Header: 3 (title + blank + "Recent:"), footer: 3 (blank + hint + blank)
         // Between sections: 2 (blank + "Git repositories:")
-        let overhead = if self.recent.is_empty() { 6 } else { 8 + self.recent.len() };
+        let overhead = if self.recent.is_empty() {
+            6
+        } else {
+            8 + self.recent.len()
+        };
         let visible_slots = vh.saturating_sub(overhead);
 
         if visible_slots == 0 {
@@ -90,8 +94,7 @@ impl PickerState {
             self.scroll_offset = git_idx.saturating_sub(margin);
         }
         if git_idx >= self.scroll_offset + visible_slots.saturating_sub(margin) {
-            self.scroll_offset = git_idx
-                .saturating_sub(visible_slots.saturating_sub(margin + 1));
+            self.scroll_offset = git_idx.saturating_sub(visible_slots.saturating_sub(margin + 1));
         }
     }
 }
@@ -177,12 +180,7 @@ fn find_git_repos(exclude: &HashSet<PathBuf>) -> Vec<ProjectEntry> {
 /// Scan one directory level for projects.
 /// If `require_capseal` is true, only include dirs with .capseal/.
 /// Otherwise, only include dirs with .git.
-fn scan_one_level(
-    dir: &Path,
-    home: &Path,
-    out: &mut Vec<ProjectEntry>,
-    require_capseal: bool,
-) {
+fn scan_one_level(dir: &Path, home: &Path, out: &mut Vec<ProjectEntry>, require_capseal: bool) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
@@ -217,22 +215,39 @@ fn scan_one_level(
     }
 }
 
-/// Count .cap files in .capseal/runs/
+/// Count unique sessions in .capseal/runs/ by deduping run dirs and .cap files.
 fn count_sessions(capseal_dir: &Path) -> usize {
+    use std::collections::HashSet;
+
     let runs_dir = capseal_dir.join("runs");
     if !runs_dir.is_dir() {
         return 0;
     }
+
     std::fs::read_dir(&runs_dir)
         .map(|entries| {
-            entries
-                .flatten()
-                .filter(|e| {
-                    let name = e.file_name();
-                    let name = name.to_string_lossy();
-                    name.ends_with(".cap") || (e.path().is_dir() && name != "latest")
-                })
-                .count()
+            let mut session_ids: HashSet<String> = HashSet::new();
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name == "latest" || name == "latest.cap" {
+                    continue;
+                }
+
+                if path.is_dir() {
+                    session_ids.insert(name);
+                } else if name.ends_with(".cap") {
+                    // Use .cap stem as canonical session key.
+                    // This dedupes correctly against run directories even when
+                    // manifest session_name differs.
+                    let stem = path
+                        .file_stem()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .unwrap_or(name);
+                    session_ids.insert(stem);
+                }
+            }
+            session_ids.len()
         })
         .unwrap_or(0)
 }
@@ -245,5 +260,34 @@ fn tilde_path(path: &Path, home: &Path) -> String {
         format!("~{}", &s[home_s.len()..])
     } else {
         s
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::count_sessions;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_dir(prefix: &str) -> PathBuf {
+        let ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        std::env::temp_dir().join(format!("{prefix}-{ts}"))
+    }
+
+    #[test]
+    fn dedupes_run_directory_and_matching_cap_stem() {
+        let root = temp_dir("capseal-workspace-test");
+        let capseal = root.join(".capseal");
+        let runs = capseal.join("runs");
+        fs::create_dir_all(runs.join("20260211T010101-mcp")).expect("create run dir");
+        fs::write(runs.join("20260211T010101-mcp.cap"), b"dummy").expect("write cap");
+
+        assert_eq!(count_sessions(&capseal), 1);
+
+        let _ = fs::remove_dir_all(root);
     }
 }

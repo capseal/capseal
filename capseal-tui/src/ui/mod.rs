@@ -1,14 +1,13 @@
-pub mod action_chain_view;
-pub mod session_monitor;
 pub mod agent_picker;
 pub mod control_panel;
 pub mod help_view;
 pub mod hub_view;
 pub mod layout;
-pub mod workspace_picker;
 pub mod risk_map_view;
 pub mod session_complete_view;
+pub mod session_monitor;
 pub mod sessions_view;
 pub mod status_bar;
 pub mod title_bar;
 pub mod verify_view;
+pub mod workspace_picker;

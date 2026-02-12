@@ -57,7 +57,10 @@ impl AgentPicker {
 
         // Pre-select: check default_agent first, then provider
         let default_idx = if !default_agent.is_empty() {
-            agents.iter().position(|a| a.command == default_agent).unwrap_or(0)
+            agents
+                .iter()
+                .position(|a| a.command == default_agent)
+                .unwrap_or(0)
         } else if provider.contains("openai") {
             1
         } else if provider.contains("gemini") || provider.contains("google") {
@@ -171,8 +174,7 @@ fn which_exists(cmd: &str) -> bool {
         .map(|paths| {
             std::env::split_paths(&paths).any(|dir| {
                 let full = dir.join(cmd);
-                full.is_file()
-                    || full.with_extension("exe").is_file()
+                full.is_file() || full.with_extension("exe").is_file()
             })
         })
         .unwrap_or(false)

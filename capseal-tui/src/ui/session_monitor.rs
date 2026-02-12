@@ -85,11 +85,17 @@ fn render_latest_gate(state: &CapSealState, area: Rect, buf: &mut Buffer) {
             Paragraph::new(lines).render(inner, buf);
         }
         Some(gate) => {
-            let (icon, color, label) = decision_style(&gate.decision);
-            let risk_label = gate
-                .label
-                .as_deref()
-                .unwrap_or("unclassified");
+            let (icon, color, label) = plain_decision_style(&gate.decision);
+            let risk_label = gate.label.as_deref().unwrap_or("unclassified");
+            let p = gate.p_fail.unwrap_or(0.0).clamp(0.0, 1.0);
+            let chance = format!("{:.0}%", p * 100.0);
+            let chance_color = if p < 0.3 {
+                Color::Green
+            } else if p < 0.6 {
+                Color::Yellow
+            } else {
+                Color::Red
+            };
 
             let mut lines = vec![Line::from(vec![
                 Span::styled(
@@ -105,8 +111,8 @@ fn render_latest_gate(state: &CapSealState, area: Rect, buf: &mut Buffer) {
                     Style::default().fg(Color::Cyan),
                 ),
                 Span::styled(
-                    format!("  p_fail: {:.2}", gate.p_fail.unwrap_or(0.0)),
-                    Style::default().fg(Color::DarkGray),
+                    format!("  chance this breaks: {}", chance),
+                    Style::default().fg(chance_color),
                 ),
             ])];
 
@@ -199,7 +205,10 @@ fn render_files_touched(state: &CapSealState, area: Rect, buf: &mut Buffer) {
     if latest_by_file.is_empty() {
         Paragraph::new(vec![
             Line::raw(""),
-            Line::styled("  No gated file actions yet", Style::default().fg(Color::DarkGray)),
+            Line::styled(
+                "  No gated file actions yet",
+                Style::default().fg(Color::DarkGray),
+            ),
         ])
         .render(inner, buf);
         return;
@@ -239,11 +248,16 @@ fn render_files_touched(state: &CapSealState, area: Rect, buf: &mut Buffer) {
                     Color::Red
                 };
                 let warn = if p >= 0.7 { "\u{26a0}" } else { " " };
-                let warn_color = if p >= 0.7 { Color::Red } else { Color::DarkGray };
-                (bar, color, format!("{:.2}", p), warn, warn_color)
+                let warn_color = if p >= 0.7 {
+                    Color::Red
+                } else {
+                    Color::DarkGray
+                };
+                (bar, color, format!("{:.0}%", p * 100.0), warn, warn_color)
             }
             None => (
-                "\u{2591}\u{2591}\u{2591}\u{2591}\u{2591}\u{2591}\u{2591}\u{2591}\u{2591}\u{2591}".to_string(),
+                "\u{2591}\u{2591}\u{2591}\u{2591}\u{2591}\u{2591}\u{2591}\u{2591}\u{2591}\u{2591}"
+                    .to_string(),
                 Color::DarkGray,
                 "--".to_string(),
                 " ",
@@ -287,34 +301,13 @@ fn render_live_stats(state: &CapSealState, area: Rect, buf: &mut Buffer) {
         return;
     }
 
-    let total = state.action_count;
-    let denied = state.denied_count;
-    let approved = total.saturating_sub(denied);
+    let attempted = state.gates_attempted;
+    let executed = state.actions_recorded;
+    let denied = state.gates_denied;
 
-    // Trust score
-    let trust = if total == 0 {
-        100.0
-    } else {
-        (approved as f64 / total as f64) * 100.0
-    };
-
-    let trust_filled = (trust / 10.0).round() as usize;
-    let trust_filled = trust_filled.min(10);
-    let trust_bar = format!(
-        "{}{}",
-        "\u{2588}".repeat(trust_filled),
-        "\u{2591}".repeat(10 - trust_filled)
-    );
-
-    let trust_color = if trust >= 80.0 {
-        Color::Green
-    } else if trust >= 50.0 {
+    let chain_color = if !state.chain_verified {
         Color::Yellow
-    } else {
-        Color::Red
-    };
-
-    let chain_color = if state.chain_intact {
+    } else if state.chain_intact {
         Color::Green
     } else {
         Color::Red
@@ -325,11 +318,20 @@ fn render_live_stats(state: &CapSealState, area: Rect, buf: &mut Buffer) {
     let duration = format!("{}m {:02}s", secs / 60, secs % 60);
 
     // Operator status
+    let channel_names = if state.operator_channel_types.is_empty() {
+        format!("{} ch", state.operator_channels)
+    } else {
+        state.operator_channel_types.join("+")
+    };
     let (op_icon, op_color, op_text) = if state.operator_online {
         (
             "\u{25cf}",
             Color::Green,
-            format!("online ({} ch)", state.operator_channels),
+            if state.operator_voice_connected {
+                format!("online ({}, voice)", channel_names)
+            } else {
+                format!("online ({})", channel_names)
+            },
         )
     } else {
         ("\u{25cb}", Color::DarkGray, "offline".to_string())
@@ -337,23 +339,18 @@ fn render_live_stats(state: &CapSealState, area: Rect, buf: &mut Buffer) {
 
     let lines = vec![
         Line::raw(format!(" Duration:  {}", duration)),
-        Line::raw(format!(
-            " Actions:   {} ({}\u{2713} {}\u{2717})",
-            total, approved, denied
-        )),
-        Line::from(vec![
-            Span::raw(format!(" Trust:     {:.0}% ", trust)),
-            Span::styled(trust_bar, Style::default().fg(trust_color)),
-        ]),
+        Line::raw(format!(" Try/Exec:  {} / {}", attempted, executed)),
+        Line::raw(format!(" Denied:    {}", denied)),
         Line::from(vec![
             Span::raw(" Chain:     "),
             Span::styled(
-                format!(
-                    "\u{25cf} {} ({}/{})",
-                    if state.chain_intact { "intact" } else { "BROKEN" },
-                    total,
-                    total,
-                ),
+                if !state.chain_verified {
+                    "\u{25cf} unverified".to_string()
+                } else if state.chain_intact {
+                    "\u{25cf} intact \u{2713}".to_string()
+                } else {
+                    "\u{25cf} broken \u{2717}".to_string()
+                },
                 Style::default().fg(chain_color),
             ),
         ]),
@@ -397,41 +394,121 @@ fn render_event_log(state: &CapSealState, scroll_offset: usize, area: Rect, buf:
     let target_max = (inner.width as usize).saturating_sub(32).max(4);
 
     for event in &state.action_chain {
-        let (icon, color) = match event.decision.as_str() {
-            "approve" | "approved" | "pass" => ("\u{2713}", Color::Green),
-            d if d.starts_with("recorded") => ("\u{2713}", Color::Green),
-            "deny" | "denied" | "skip" => ("\u{2717}", Color::Red),
-            "flag" | "flagged" | "human_review" => ("\u{25b2}", Color::Yellow),
-            "waiting" => ("\u{25cf}", Color::Cyan),
-            "pending" => ("\u{25cf}", Color::Magenta),
-            _ => ("\u{25cf}", Color::White),
-        };
-
         let time: String = event.timestamp.chars().take(5).collect();
-
-        let detail = if let Some(p) = event.p_fail {
-            if let Some(ref label) = event.label {
-                format!("p={:.2}  {}", p, truncate_str(label, 22))
-            } else {
-                format!("p={:.2}  {}", p, event.decision)
+        match event.action_type.as_str() {
+            "gate" => {
+                let (icon, color, plain) = plain_decision_style(&event.decision);
+                let p = event.p_fail.unwrap_or(0.0).clamp(0.0, 1.0);
+                let chance = format!("{:>3.0}%", p * 100.0);
+                let mut note = String::new();
+                if let Some(reason) = &event.risk_factors {
+                    if reason.to_lowercase().contains("override") {
+                        note = "  operator override".to_string();
+                    }
+                }
+                lines.push(Line::from(vec![
+                    Span::styled(format!(" {}  ", time), Style::default().fg(Color::DarkGray)),
+                    Span::styled(format!("{} ", icon), Style::default().fg(color)),
+                    Span::styled(
+                        format!("{:<22}", truncate_str(plain, 22)),
+                        Style::default().fg(color).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        format!(
+                            "{:<w$}",
+                            truncate_str(&event.target, target_max),
+                            w = target_max
+                        ),
+                        Style::default().fg(Color::White),
+                    ),
+                    Span::styled(format!("  {}", chance), Style::default().fg(color)),
+                    Span::styled(note, Style::default().fg(Color::Magenta)),
+                ]));
             }
-        } else if let Some(ref hash) = event.receipt_hash {
-            let h: String = hash.chars().take(8).collect();
-            format!("sha:{}\u{2026}", h)
-        } else {
-            event.decision.clone()
-        };
-
-        lines.push(Line::from(vec![
-            Span::styled(format!(" {}  ", time), Style::default().fg(Color::DarkGray)),
-            Span::styled(format!("{} ", icon), Style::default().fg(color)),
-            Span::raw(format!("{:<6} ", event.action_type)),
-            Span::styled(
-                format!("{:<w$}", truncate_str(&event.target, target_max), w = target_max),
-                Style::default().fg(Color::White),
-            ),
-            Span::styled(format!(" {}", detail), Style::default().fg(Color::DarkGray)),
-        ]));
+            "record" => {
+                let h = event
+                    .receipt_hash
+                    .as_ref()
+                    .map(|s| format!(" sha:{}…", s.chars().take(8).collect::<String>()))
+                    .unwrap_or_default();
+                lines.push(Line::from(vec![
+                    Span::styled(format!(" {}  ", time), Style::default().fg(Color::DarkGray)),
+                    Span::styled("\u{00b7} ", Style::default().fg(Color::DarkGray)),
+                    Span::styled("Action recorded      ", Style::default().fg(Color::Gray)),
+                    Span::styled(
+                        format!(
+                            "{:<w$}",
+                            truncate_str(&event.target, target_max),
+                            w = target_max
+                        ),
+                        Style::default().fg(Color::Gray),
+                    ),
+                    Span::styled(h, Style::default().fg(Color::DarkGray)),
+                ]));
+            }
+            "session_start" => {
+                lines.push(Line::from(vec![
+                    Span::styled(format!(" {}  ", time), Style::default().fg(Color::DarkGray)),
+                    Span::styled("\u{25a0} ", Style::default().fg(Color::Blue)),
+                    Span::styled("Session started", Style::default().fg(Color::Blue)),
+                ]));
+            }
+            "seal" => {
+                let hash = event
+                    .receipt_hash
+                    .as_ref()
+                    .map(|h| format!(" receipt {}…", h.chars().take(8).collect::<String>()))
+                    .unwrap_or_default();
+                let color = if event.decision == "seal_broken" {
+                    Color::Red
+                } else {
+                    Color::Green
+                };
+                lines.push(Line::from(vec![
+                    Span::styled(format!(" {}  ", time), Style::default().fg(Color::DarkGray)),
+                    Span::styled("\u{25a0} ", Style::default().fg(color)),
+                    Span::styled(
+                        "Session sealed",
+                        Style::default().fg(color).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(hash, Style::default().fg(Color::DarkGray)),
+                ]));
+            }
+            "chain_break" => {
+                lines.push(Line::from(vec![
+                    Span::styled(format!(" {}  ", time), Style::default().fg(Color::DarkGray)),
+                    Span::styled("\u{2717} ", Style::default().fg(Color::Red)),
+                    Span::styled(
+                        "Chain broken",
+                        Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                    ),
+                ]));
+            }
+            _ => {
+                let (icon, color) = match event.decision.as_str() {
+                    "waiting" => ("\u{25cf}", Color::Cyan),
+                    "pending" => ("\u{25cf}", Color::Magenta),
+                    _ => ("\u{25cf}", Color::White),
+                };
+                lines.push(Line::from(vec![
+                    Span::styled(format!(" {}  ", time), Style::default().fg(Color::DarkGray)),
+                    Span::styled(format!("{} ", icon), Style::default().fg(color)),
+                    Span::raw(format!("{:<6} ", event.action_type)),
+                    Span::styled(
+                        format!(
+                            "{:<w$}",
+                            truncate_str(&event.target, target_max),
+                            w = target_max
+                        ),
+                        Style::default().fg(Color::White),
+                    ),
+                    Span::styled(
+                        format!(" {}", event.decision),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                ]));
+            }
+        }
     }
 
     // Scrolling: auto-scroll to newest unless manually scrolled
@@ -453,15 +530,14 @@ fn render_event_log(state: &CapSealState, scroll_offset: usize, area: Rect, buf:
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
-fn decision_style(decision: &str) -> (&str, Color, &str) {
+fn plain_decision_style(decision: &str) -> (&str, Color, &str) {
     match decision {
-        "approve" | "approved" | "pass" => ("\u{2713}", Color::Green, "APPROVED"),
-        "deny" | "denied" => ("\u{2717}", Color::Red, "DENIED"),
-        "skip" => ("\u{2717}", Color::Red, "SKIPPED"),
-        "flag" | "flagged" | "human_review" => ("\u{25b2}", Color::Yellow, "FLAGGED"),
+        "approve" | "approved" | "pass" => ("\u{2713}", Color::Green, "Safe to proceed"),
+        "deny" | "denied" | "skip" => ("\u{2717}", Color::Red, "Blocked for safety"),
+        "flag" | "flagged" | "human_review" => ("\u{25b2}", Color::Yellow, "Proceed with caution"),
         "waiting" => ("\u{25cf}", Color::Cyan, "WAITING"),
         "pending" => ("\u{25cf}", Color::Magenta, "PENDING"),
-        _ => ("\u{25cf}", Color::White, "UNKNOWN"),
+        _ => ("\u{25cf}", Color::White, "Unknown decision"),
     }
 }
 

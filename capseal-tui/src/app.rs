@@ -1,8 +1,12 @@
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{
+    self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent,
+    MouseEventKind,
+};
 use ratatui::backend::CrosstermBackend;
-use ratatui::Terminal;
 use ratatui::widgets::Widget;
+use ratatui::Terminal;
+use std::collections::HashSet;
 use std::io::{Read, Stdout};
 use std::path::PathBuf;
 use std::sync::mpsc;
@@ -16,19 +20,19 @@ use crate::capseal::CapSealState;
 use crate::config::CapSealConfig;
 use crate::terminal::pty::PtyHandle;
 use crate::terminal::renderer::TerminalWidget;
-use crate::ui::session_monitor::SessionMonitor;
 use crate::ui::agent_picker::{AgentPicker, AgentPickerResult};
 use crate::ui::control_panel::ControlPanel;
 use crate::ui::help_view::HelpView;
 use crate::ui::hub_view::HubView;
 use crate::ui::layout::{HubLayout, SessionLayout};
-use crate::ui::workspace_picker::WorkspacePicker;
 use crate::ui::risk_map_view::RiskMapView;
 use crate::ui::session_complete_view::{SessionCompleteInfo, SessionCompleteView};
+use crate::ui::session_monitor::SessionMonitor;
 use crate::ui::sessions_view::SessionsView;
-use crate::ui::verify_view::{VerifyInfo, VerifyView};
 use crate::ui::status_bar::StatusBar;
 use crate::ui::title_bar::TitleBar;
+use crate::ui::verify_view::{VerifyInfo, VerifyView};
+use crate::ui::workspace_picker::WorkspacePicker;
 use crate::workspace::PickerState;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -77,6 +81,9 @@ pub struct App {
     // Animation / display state
     tick_count: u64,
     shell_name: String,
+    voice_active: bool,
+    voice_active_override: Option<bool>,
+    last_voice_toggle_at: Option<Instant>,
 
     // Overlay state
     show_help: bool,
@@ -86,6 +93,9 @@ pub struct App {
     session_complete_info: Option<SessionCompleteInfo>,
     session_start_time: Option<Instant>,
     session_selected: usize,
+    deny_alert: Option<String>,
+    deny_alert_ticks: u16,
+    last_seen_denied_count: u32,
 
     // Agent picker
     show_agent_picker: bool,
@@ -113,7 +123,14 @@ impl App {
     pub fn new(config: CapSealConfig, start_in_shell: bool) -> Self {
         let capseal_dir = config.capseal_dir();
         eprintln!("[TUI] capseal_dir = {:?}", capseal_dir);
-        let capseal_state = CapSealState::new(&config.workspace);
+        let initial_voice_active = std::fs::read_to_string(capseal_dir.join("voice_control.json"))
+            .ok()
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+            .and_then(|v| v.get("voice_active").and_then(|x| x.as_bool()))
+            .unwrap_or(false);
+
+        let mut capseal_state = CapSealState::new(&config.workspace);
+        capseal_state.voice_active = initial_voice_active;
         let watcher = EventWatcher::new(&capseal_dir);
 
         // Only skip the workspace picker when the directory has .git
@@ -148,6 +165,9 @@ impl App {
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_else(|| "shell".to_string())
             },
+            voice_active: initial_voice_active,
+            voice_active_override: None,
+            last_voice_toggle_at: None,
             show_help: false,
             show_verify_overlay: false,
             verify_info: None,
@@ -155,6 +175,9 @@ impl App {
             session_complete_info: None,
             session_start_time: None,
             session_selected: 0,
+            deny_alert: None,
+            deny_alert_ticks: 0,
+            last_seen_denied_count: 0,
             show_agent_picker: false,
             agent_picker: None,
             pending_pty_write: None,
@@ -197,6 +220,26 @@ impl App {
 
             // Poll capseal file watcher
             self.watcher.poll(&mut self.capseal_state);
+            if let Some(expected) = self.voice_active_override {
+                // Sticky UI: keep showing the user's toggle until the watcher reads back
+                // the same value from voice_control.json.
+                if self.capseal_state.voice_active == expected {
+                    self.voice_active_override = None;
+                    self.voice_active = expected;
+                } else {
+                    self.voice_active = expected;
+                    self.capseal_state.voice_active = expected;
+                }
+            } else {
+                self.voice_active = self.capseal_state.voice_active;
+            }
+            self.update_deny_alert();
+            if self.deny_alert_ticks > 0 {
+                self.deny_alert_ticks -= 1;
+                if self.deny_alert_ticks == 0 {
+                    self.deny_alert = None;
+                }
+            }
 
             // Inject bytes from operator (pty_input.txt → PTY stdin)
             if let Some(data) = self.capseal_state.pending_pty_injection.take() {
@@ -230,9 +273,23 @@ impl App {
                     .map(|t| t.elapsed().as_secs())
                     .unwrap_or(0);
 
-                let has_actions = self.capseal_state.action_count > 0;
+                let has_actions = self.capseal_state.gates_attempted > 0
+                    || self.capseal_state.actions_recorded > 0;
 
                 if has_actions {
+                    let top_gate = self
+                        .capseal_state
+                        .action_chain
+                        .iter()
+                        .filter(|e| e.action_type == "gate")
+                        .max_by(|a, b| {
+                            let ap = a.p_fail.unwrap_or(-1.0);
+                            let bp = b.p_fail.unwrap_or(-1.0);
+                            ap.partial_cmp(&bp).unwrap_or(std::cmp::Ordering::Equal)
+                        });
+                    let top_risk_label = top_gate.and_then(|e| e.label.clone());
+                    let top_risk_p_fail = top_gate.and_then(|e| e.p_fail);
+
                     // Find latest .cap file from runs dir
                     let cap_file = self
                         .capseal_state
@@ -249,11 +306,15 @@ impl App {
                         .filter(|p| std::path::Path::new(p).exists());
 
                     self.session_complete_info = Some(SessionCompleteInfo {
-                        action_count: self.capseal_state.action_count,
-                        denied_count: self.capseal_state.denied_count,
+                        attempted_count: self.capseal_state.gates_attempted,
+                        action_count: self.capseal_state.actions_recorded,
+                        denied_count: self.capseal_state.gates_denied,
                         duration_secs,
                         cap_file,
+                        chain_verified: self.capseal_state.chain_verified,
                         chain_intact: self.capseal_state.chain_intact,
+                        top_risk_label,
+                        top_risk_p_fail,
                     });
                     self.show_session_complete = true;
                 } else {
@@ -291,8 +352,16 @@ impl App {
     fn spawn_terminal(&mut self, cols: u16, rows: u16) -> Result<()> {
         // Clear stale events from previous session
         self.capseal_state.action_chain.clear();
+        self.capseal_state.gates_attempted = 0;
+        self.capseal_state.gates_approved = 0;
+        self.capseal_state.gates_denied = 0;
+        self.capseal_state.actions_recorded = 0;
         self.capseal_state.action_count = 0;
         self.capseal_state.denied_count = 0;
+        self.capseal_state.chain_verified = false;
+        self.last_seen_denied_count = 0;
+        self.deny_alert = None;
+        self.deny_alert_ticks = 0;
         self.capseal_state.session_active = true;
         self.capseal_state.session_start = Some(std::time::Instant::now());
         self.watcher.reset_events_position();
@@ -363,6 +432,29 @@ impl App {
         self.pending_write_delay = None;
     }
 
+    fn set_voice_active(&mut self, active: bool) -> Result<()> {
+        // If the operator is online in another workspace, toggle that workspace's voice control.
+        let mut control_path = self.config.capseal_dir().join("voice_control.json");
+        if self.capseal_state.operator_online {
+            if let Some(ws) = &self.capseal_state.operator_workspace {
+                control_path = PathBuf::from(ws).join(".capseal").join("voice_control.json");
+            }
+        }
+        if let Some(parent) = control_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let payload = serde_json::json!({ "voice_active": active });
+        // Atomic-ish write: write temp then rename to avoid transient parse failures in watchers.
+        let tmp_path = control_path.with_extension("json.tmp");
+        std::fs::write(&tmp_path, serde_json::to_vec_pretty(&payload)?)?;
+        std::fs::rename(&tmp_path, &control_path)?;
+
+        self.voice_active = active;
+        self.capseal_state.voice_active = active;
+        self.voice_active_override = Some(active);
+        Ok(())
+    }
+
     fn find_latest_cap_file(&self) -> Option<PathBuf> {
         let runs_dir = self.config.capseal_dir().join("runs");
         if !runs_dir.exists() {
@@ -426,8 +518,7 @@ impl App {
                         if let Some(n) = v.get("num_actions").and_then(|n| n.as_u64()) {
                             info.count_label = "Actions".to_string();
                             info.count_value = n.to_string();
-                        } else if let Some(n) = v.get("rounds_verified").and_then(|n| n.as_u64())
-                        {
+                        } else if let Some(n) = v.get("rounds_verified").and_then(|n| n.as_u64()) {
                             info.count_label = "Rounds".to_string();
                             info.count_value = n.to_string();
                         } else if let Some(n) =
@@ -478,10 +569,7 @@ impl App {
         // Workspace picker: full-screen, no panels
         if self.mode == AppMode::WorkspacePicker {
             if let Some(ref picker) = self.picker {
-                frame.render_widget(
-                    WorkspacePicker { state: picker },
-                    area,
-                );
+                frame.render_widget(WorkspacePicker { state: picker }, area);
             }
             return;
         }
@@ -498,6 +586,26 @@ impl App {
         } else {
             None
         };
+        let operator_last_alert_age = self
+            .capseal_state
+            .operator_last_alert_ts
+            .and_then(format_relative_age);
+        let pending_intervention = self
+            .capseal_state
+            .pending_intervention
+            .as_ref()
+            .map(|p| (p.action.as_str(), p.source.as_str()));
+        let operator_workspace_name = self
+            .capseal_state
+            .operator_workspace
+            .as_ref()
+            .and_then(|p| std::path::Path::new(p).file_name())
+            .map(|n| n.to_string_lossy().to_string());
+        let operator_workspace_mismatch = self.capseal_state.operator_online
+            && operator_workspace_name
+                .as_deref()
+                .map(|n| n != ws_name.as_str())
+                .unwrap_or(false);
 
         let pty_visible = self.pty_active() || self.show_session_complete;
 
@@ -518,6 +626,14 @@ impl App {
                     model_trained: self.capseal_state.model_loaded,
                     session_count: self.capseal_state.sessions.len(),
                     session_active: self.capseal_state.session_active,
+                    operator_online: self.capseal_state.operator_online,
+                    operator_channel_types: &self.capseal_state.operator_channel_types,
+                    operator_voice_connected: self.capseal_state.operator_voice_connected,
+                    voice_active: self.voice_active,
+                    operator_workspace_name: operator_workspace_name.as_deref(),
+                    operator_workspace_mismatch,
+                    operator_last_alert_age: operator_last_alert_age.as_deref(),
+                    pending_intervention,
                 },
                 layout.title_bar,
             );
@@ -530,9 +646,12 @@ impl App {
                     session_count: self.capseal_state.sessions.len(),
                     focused: self.focus == Focus::ControlPanel,
                     pty_active: self.pty_active(),
-                    action_count: self.capseal_state.action_count,
-                    denied_count: self.capseal_state.denied_count,
+                    gates_attempted: self.capseal_state.gates_attempted,
+                    actions_recorded: self.capseal_state.actions_recorded,
+                    gates_denied: self.capseal_state.gates_denied,
+                    chain_verified: self.capseal_state.chain_verified,
                     chain_intact: self.capseal_state.chain_intact,
+                    pending_intervention: self.capseal_state.pending_intervention.as_ref(),
                     tick: self.tick_count,
                     training_in_progress: self.capseal_state.training_in_progress,
                     training_round: self.capseal_state.training_round,
@@ -572,7 +691,9 @@ impl App {
                 for y in term_inner.y..term_inner.y + term_inner.height {
                     for x in term_inner.x..term_inner.x + term_inner.width {
                         if let Some(cell) = frame.buffer_mut().cell_mut((x, y)) {
-                            cell.set_style(ratatui::style::Style::default().bg(ratatui::style::Color::Black));
+                            cell.set_style(
+                                ratatui::style::Style::default().bg(ratatui::style::Color::Black),
+                            );
                             cell.set_symbol(" ");
                         }
                     }
@@ -620,16 +741,26 @@ impl App {
                     model_trained: self.capseal_state.model_loaded,
                     session_count: self.capseal_state.sessions.len(),
                     session_active: self.capseal_state.session_active,
+                    operator_online: self.capseal_state.operator_online,
+                    operator_channel_types: &self.capseal_state.operator_channel_types,
+                    operator_voice_connected: self.capseal_state.operator_voice_connected,
+                    voice_active: self.voice_active,
+                    operator_workspace_name: operator_workspace_name.as_deref(),
+                    operator_workspace_mismatch,
+                    operator_last_alert_age: operator_last_alert_age.as_deref(),
+                    pending_intervention,
                 },
                 layout.title_bar,
             );
 
             // Hub view
+            let recent_risk_label = self.recent_risk_label();
             let hub = HubView {
                 workspace_name: &ws_name,
                 provider: &self.config.provider,
                 agent_name: &self.config.default_agent,
                 model_name: &self.config.model,
+                recent_risk_label: &recent_risk_label,
                 initialized: self.config.initialized,
                 model_loaded: self.capseal_state.model_loaded,
                 episode_count: self.capseal_state.episode_count,
@@ -668,6 +799,20 @@ impl App {
 
         // Risk Map overlay
         if self.mode == AppMode::RiskMap {
+            let mut seen = HashSet::new();
+            let mut recent_labels: Vec<String> = self
+                .capseal_state
+                .action_chain
+                .iter()
+                .rev()
+                .filter_map(|e| e.label.as_ref())
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .filter(|s| seen.insert((*s).to_string()))
+                .map(|s| s.to_string())
+                .collect();
+            recent_labels.truncate(5);
+
             let overlay_w = 72.min(area.width.saturating_sub(4));
             let overlay_h = 28.min(area.height.saturating_sub(4));
             let overlay_area = ratatui::layout::Rect::new(
@@ -683,6 +828,7 @@ impl App {
                     model_loaded: self.capseal_state.model_loaded,
                     episode_count: self.capseal_state.episode_count,
                     profile_count: self.capseal_state.profile_count,
+                    recent_labels,
                 },
                 overlay_area,
             );
@@ -720,6 +866,34 @@ impl App {
             }
         }
 
+        // Transient high-visibility deny alert while session is active
+        if self.pty_active() {
+            if let Some(message) = self.deny_alert.as_ref() {
+                if self.deny_alert_ticks > 0 {
+                    use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
+                    let overlay_w = 64.min(area.width.saturating_sub(4));
+                    let overlay_h = 5.min(area.height.saturating_sub(2));
+                    let overlay_area = ratatui::layout::Rect::new(
+                        area.x + area.width.saturating_sub(overlay_w + 2),
+                        area.y + 1,
+                        overlay_w,
+                        overlay_h,
+                    );
+                    Clear.render(overlay_area, frame.buffer_mut());
+                    let alert = Paragraph::new(message.clone()).block(
+                        Block::default()
+                            .title(" gate denied ")
+                            .borders(Borders::ALL)
+                            .border_type(BorderType::Rounded)
+                            .border_style(
+                                ratatui::style::Style::default().fg(ratatui::style::Color::Red),
+                            ),
+                    );
+                    frame.render_widget(alert, overlay_area);
+                }
+            }
+        }
+
         // Help overlay (always on top)
         if self.show_help {
             let help_width = 50.min(area.width.saturating_sub(4));
@@ -742,7 +916,8 @@ impl App {
                     ("Ctrl+H", "Panel"),
                     ("F1", "Help"),
                     ("F2", "Sessions"),
-                    ("F3", "Risk Map"),
+                    ("F3", "Profiles"),
+                    ("F4", "Voice"),
                     ("F5", "Verify"),
                     ("F10", "Quit"),
                 ],
@@ -750,6 +925,7 @@ impl App {
                     ("Ctrl+H", "Terminal"),
                     ("s/v/r/c", "Actions"),
                     ("F1", "Help"),
+                    ("F4", "Voice"),
                     ("F5", "Verify"),
                     ("F10", "Quit"),
                 ],
@@ -758,6 +934,7 @@ impl App {
             vec![
                 ("\u{2191}\u{2193}", "Navigate"),
                 ("Enter", "Select"),
+                ("F4", "Voice"),
                 ("F5", "Verify"),
                 ("q", "Quit"),
             ]
@@ -780,6 +957,27 @@ impl App {
         if key.code == KeyCode::F(5) {
             self.refresh_verify_overlay();
             self.show_verify_overlay = true;
+            return Ok(Action::Continue);
+        }
+
+        // F4 toggles voice operator narration+listening.
+        if key.code == KeyCode::F(4) {
+            // Avoid auto-repeat/hold retriggering a second toggle.
+            if key.kind != KeyEventKind::Press {
+                return Ok(Action::Continue);
+            }
+            let now = Instant::now();
+            if let Some(last) = self.last_voice_toggle_at {
+                if now.duration_since(last) < Duration::from_millis(300) {
+                    return Ok(Action::Continue);
+                }
+            }
+            self.last_voice_toggle_at = Some(now);
+            let next = !self.voice_active;
+            if let Err(err) = self.set_voice_active(next) {
+                self.deny_alert = Some(format!("  voice toggle failed: {}", err));
+                self.deny_alert_ticks = 180;
+            }
             return Ok(Action::Continue);
         }
 
@@ -933,7 +1131,9 @@ impl App {
     }
 
     fn hub_view(&self) -> HubView<'_> {
-        let ws_name = self.config.workspace
+        let ws_name = self
+            .config
+            .workspace
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| self.config.workspace.display().to_string());
@@ -942,12 +1142,50 @@ impl App {
             provider: Box::leak(self.config.provider.clone().into_boxed_str()),
             agent_name: Box::leak(self.config.default_agent.clone().into_boxed_str()),
             model_name: Box::leak(self.config.model.clone().into_boxed_str()),
+            recent_risk_label: Box::leak(self.recent_risk_label().into_boxed_str()),
             initialized: self.capseal_state.initialized,
             model_loaded: self.capseal_state.model_loaded,
             episode_count: self.capseal_state.episode_count,
             profile_count: self.capseal_state.profile_count,
             session_count: self.capseal_state.sessions.len(),
             selected: self.hub_selected,
+        }
+    }
+
+    fn recent_risk_label(&self) -> String {
+        self.capseal_state
+            .action_chain
+            .iter()
+            .rev()
+            .find_map(|e| e.label.as_ref())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_default()
+    }
+
+    fn update_deny_alert(&mut self) {
+        if self.capseal_state.denied_count < self.last_seen_denied_count {
+            self.last_seen_denied_count = self.capseal_state.denied_count;
+        }
+        if self.capseal_state.denied_count <= self.last_seen_denied_count {
+            return;
+        }
+        self.last_seen_denied_count = self.capseal_state.denied_count;
+
+        if let Some(event) = self.capseal_state.action_chain.iter().rev().find(|e| {
+            e.action_type == "gate" && matches!(e.decision.as_str(), "deny" | "denied" | "skip")
+        }) {
+            let label = event
+                .label
+                .as_deref()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or("unclassified");
+            let p = event
+                .p_fail
+                .map(|v| format!("{v:.2}"))
+                .unwrap_or_else(|| "--".to_string());
+            self.deny_alert = Some(format!("  {}  p_fail={}  {}", event.target, p, label));
+            self.deny_alert_ticks = 210; // ~3.3s at 16ms
         }
     }
 
@@ -1154,7 +1392,10 @@ impl App {
         match action {
             "session" => {
                 // Show agent picker overlay instead of spawning immediately
-                self.agent_picker = Some(AgentPicker::new(&self.config.default_agent, &self.config.provider));
+                self.agent_picker = Some(AgentPicker::new(
+                    &self.config.default_agent,
+                    &self.config.provider,
+                ));
                 self.show_agent_picker = true;
             }
             "autopilot" => {
@@ -1267,8 +1508,10 @@ impl App {
 
                 // Click on terminal area → focus terminal
                 if let Some(rect) = self.last_terminal_rect {
-                    if col >= rect.x && col < rect.x + rect.width
-                        && row >= rect.y && row < rect.y + rect.height
+                    if col >= rect.x
+                        && col < rect.x + rect.width
+                        && row >= rect.y
+                        && row < rect.y + rect.height
                     {
                         self.focus = Focus::Terminal;
                         return Ok(Action::Continue);
@@ -1277,8 +1520,10 @@ impl App {
 
                 // Click on control panel → focus control panel
                 if let Some(rect) = self.last_control_rect {
-                    if col >= rect.x && col < rect.x + rect.width
-                        && row >= rect.y && row < rect.y + rect.height
+                    if col >= rect.x
+                        && col < rect.x + rect.width
+                        && row >= rect.y
+                        && row < rect.y + rect.height
                     {
                         self.focus = Focus::ControlPanel;
                         return Ok(Action::Continue);
@@ -1291,8 +1536,10 @@ impl App {
             MouseEventKind::ScrollUp => {
                 // Scroll in action chain → scroll history up (older)
                 if let Some(rect) = self.last_chain_rect {
-                    if mouse.column >= rect.x && mouse.column < rect.x + rect.width
-                        && mouse.row >= rect.y && mouse.row < rect.y + rect.height
+                    if mouse.column >= rect.x
+                        && mouse.column < rect.x + rect.width
+                        && mouse.row >= rect.y
+                        && mouse.row < rect.y + rect.height
                     {
                         self.chain_scroll_offset = self.chain_scroll_offset.saturating_add(3);
                         return Ok(Action::Continue);
@@ -1302,8 +1549,10 @@ impl App {
                 // Scroll in terminal → forward to PTY (check rect)
                 if self.pty_active() {
                     if let Some(rect) = self.last_terminal_rect {
-                        if mouse.column >= rect.x && mouse.column < rect.x + rect.width
-                            && mouse.row >= rect.y && mouse.row < rect.y + rect.height
+                        if mouse.column >= rect.x
+                            && mouse.column < rect.x + rect.width
+                            && mouse.row >= rect.y
+                            && mouse.row < rect.y + rect.height
                         {
                             if let Some(pty) = &mut self.pty {
                                 let _ = pty.write(b"\x1b[A\x1b[A\x1b[A");
@@ -1317,8 +1566,10 @@ impl App {
             MouseEventKind::ScrollDown => {
                 // Scroll in session monitor → scroll event log up (older)
                 if let Some(rect) = self.last_chain_rect {
-                    if mouse.column >= rect.x && mouse.column < rect.x + rect.width
-                        && mouse.row >= rect.y && mouse.row < rect.y + rect.height
+                    if mouse.column >= rect.x
+                        && mouse.column < rect.x + rect.width
+                        && mouse.row >= rect.y
+                        && mouse.row < rect.y + rect.height
                     {
                         self.chain_scroll_offset = self.chain_scroll_offset.saturating_sub(3);
                         return Ok(Action::Continue);
@@ -1328,8 +1579,10 @@ impl App {
                 // Scroll in terminal → forward to PTY (check rect)
                 if self.pty_active() {
                     if let Some(rect) = self.last_terminal_rect {
-                        if mouse.column >= rect.x && mouse.column < rect.x + rect.width
-                            && mouse.row >= rect.y && mouse.row < rect.y + rect.height
+                        if mouse.column >= rect.x
+                            && mouse.column < rect.x + rect.width
+                            && mouse.row >= rect.y
+                            && mouse.row < rect.y + rect.height
                         {
                             if let Some(pty) = &mut self.pty {
                                 let _ = pty.write(b"\x1b[B\x1b[B\x1b[B");
@@ -1342,6 +1595,27 @@ impl App {
             }
             _ => Ok(Action::Continue),
         }
+    }
+}
+
+fn format_relative_age(ts: f64) -> Option<String> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()?
+        .as_secs_f64();
+    if !ts.is_finite() || ts > now {
+        return None;
+    }
+    let delta = (now - ts) as u64;
+    if delta < 60 {
+        Some(format!("{delta}s ago"))
+    } else if delta < 3600 {
+        Some(format!("{}m ago", delta / 60))
+    } else if delta < 86_400 {
+        Some(format!("{}h ago", delta / 3600))
+    } else {
+        Some(format!("{}d ago", delta / 86_400))
     }
 }
 
@@ -1373,7 +1647,9 @@ fn key_to_bytes(key: KeyEvent) -> Vec<u8> {
     match key.code {
         KeyCode::Char(c) => {
             if ctrl {
-                let code = (c.to_ascii_lowercase() as u8).wrapping_sub(b'a').wrapping_add(1);
+                let code = (c.to_ascii_lowercase() as u8)
+                    .wrapping_sub(b'a')
+                    .wrapping_add(1);
                 if code <= 26 {
                     return vec![code];
                 }

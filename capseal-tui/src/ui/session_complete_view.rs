@@ -5,11 +5,15 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Widget};
 
 pub struct SessionCompleteInfo {
+    pub attempted_count: u32,
     pub action_count: u32,
     pub denied_count: u32,
     pub duration_secs: u64,
     pub cap_file: Option<String>,
+    pub chain_verified: bool,
     pub chain_intact: bool,
+    pub top_risk_label: Option<String>,
+    pub top_risk_p_fail: Option<f64>,
 }
 
 pub struct SessionCompleteView<'a> {
@@ -69,20 +73,30 @@ impl<'a> Widget for SessionCompleteView<'a> {
             format!("{}s", self.info.duration_secs)
         };
 
-        let approved = self.info.action_count.saturating_sub(self.info.denied_count);
+        let approved_like = self
+            .info
+            .attempted_count
+            .saturating_sub(self.info.denied_count);
 
         // Chain status
-        let (chain_dot, chain_color, chain_text) = if self.info.chain_intact {
+        let (chain_dot, chain_color, chain_text) = if !self.info.chain_verified {
+            ("\u{25cf}", Color::Yellow, "unverified")
+        } else if self.info.chain_intact {
             ("\u{25cf}", Color::Green, "intact")
         } else {
             ("\u{25cf}", Color::Red, "BROKEN")
         };
 
-        let receipt_display = self
-            .info
-            .cap_file
-            .as_deref()
-            .unwrap_or("(no receipt)");
+        let receipt_display = self.info.cap_file.as_deref().unwrap_or("(no receipt)");
+        let top_risk_display = match (
+            self.info.top_risk_label.as_deref(),
+            self.info.top_risk_p_fail,
+        ) {
+            (Some(label), Some(p)) => format!("{} (chance this breaks: {:.0}%)", label, p * 100.0),
+            (Some(label), None) => label.to_string(),
+            (None, Some(p)) => format!("chance this breaks: {:.0}%", p * 100.0),
+            (None, None) => "n/a".to_string(),
+        };
 
         let lines = vec![
             Line::raw(""),
@@ -91,15 +105,19 @@ impl<'a> Widget for SessionCompleteView<'a> {
                 Span::styled(duration, value),
             ]),
             Line::from(vec![
-                Span::styled("  Actions:     ", label),
+                Span::styled("  Attempted:   ", label),
+                Span::styled(format!("{}", self.info.attempted_count), value),
+            ]),
+            Line::from(vec![
+                Span::styled("  Executed:    ", label),
                 Span::styled(format!("{}", self.info.action_count), value),
             ]),
             Line::from(vec![
-                Span::styled("  Approved:    ", label),
-                Span::styled(format!("{}", approved), value),
+                Span::styled("  Safe/caution:", label),
+                Span::styled(format!("{}", approved_like), value),
             ]),
             Line::from(vec![
-                Span::styled("  Denied:      ", label),
+                Span::styled("  Blocked:     ", label),
                 Span::styled(format!("{}", self.info.denied_count), value),
             ]),
             Line::from(vec![
@@ -113,7 +131,10 @@ impl<'a> Widget for SessionCompleteView<'a> {
                     Style::default().fg(chain_color),
                 ),
             ]),
-            Line::raw(""),
+            Line::from(vec![
+                Span::styled("  Top risk:    ", label),
+                Span::styled(top_risk_display, value),
+            ]),
             Line::raw(""),
             Line::styled(
                 "  [Enter] Back   [v] Verify   [q] Quit",

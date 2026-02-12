@@ -1,3 +1,4 @@
+use crate::capseal::PendingIntervention;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
@@ -10,9 +11,12 @@ pub struct ControlPanel<'a> {
     pub session_count: usize,
     pub focused: bool,
     pub pty_active: bool,
-    pub action_count: u32,
-    pub denied_count: u32,
+    pub gates_attempted: u32,
+    pub actions_recorded: u32,
+    pub gates_denied: u32,
+    pub chain_verified: bool,
     pub chain_intact: bool,
+    pub pending_intervention: Option<&'a PendingIntervention>,
     pub tick: u64,
 
     // Training state
@@ -31,7 +35,11 @@ impl<'a> Widget for ControlPanel<'a> {
 
         let block = Block::default()
             .title(" CAPSEAL ")
-            .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+            .title_style(
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(border_color));
@@ -95,14 +103,25 @@ impl<'a> Widget for ControlPanel<'a> {
         if self.pty_active {
             lines.push(Line::styled(" Session", cyan));
             lines.push(Line::from(vec![
-                Span::styled(" Acts: ", dim),
-                Span::styled(format!("{}", self.action_count), white),
+                Span::styled(" Try:  ", dim),
+                Span::styled(format!("{}", self.gates_attempted), white),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled(" Exec: ", dim),
+                Span::styled(
+                    format!("{}", self.actions_recorded),
+                    if self.actions_recorded > 0 {
+                        Style::default().fg(Color::Green)
+                    } else {
+                        white
+                    },
+                ),
             ]));
             lines.push(Line::from(vec![
                 Span::styled(" Deny: ", dim),
                 Span::styled(
-                    format!("{}", self.denied_count),
-                    if self.denied_count > 0 {
+                    format!("{}", self.gates_denied),
+                    if self.gates_denied > 0 {
                         Style::default().fg(Color::Red)
                     } else {
                         white
@@ -110,7 +129,9 @@ impl<'a> Widget for ControlPanel<'a> {
                 ),
             ]));
 
-            let chain_color = if self.chain_intact {
+            let chain_color = if !self.chain_verified {
+                Color::Yellow
+            } else if self.chain_intact {
                 Color::Green
             } else {
                 Color::Red
@@ -118,7 +139,9 @@ impl<'a> Widget for ControlPanel<'a> {
             lines.push(Line::from(vec![
                 Span::styled(" Chain: ", dim),
                 Span::styled(
-                    if self.chain_intact {
+                    if !self.chain_verified {
+                        "\u{25cf} unverified"
+                    } else if self.chain_intact {
                         "\u{25cf} ok"
                     } else {
                         "\u{25cf} BROKEN"
@@ -126,6 +149,21 @@ impl<'a> Widget for ControlPanel<'a> {
                     Style::default().fg(chain_color),
                 ),
             ]));
+
+            if let Some(pending) = self.pending_intervention {
+                lines.push(Line::raw(""));
+                lines.push(Line::styled(
+                    format!(
+                        " \u{26a0} INTERVENTION: {} ({})",
+                        pending.action.to_uppercase(),
+                        pending.source
+                    ),
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ));
+            }
 
             lines.push(Line::raw(""));
         }

@@ -1,7 +1,7 @@
+use crate::capseal::events;
 use crate::capseal::models::RiskModel;
 use crate::capseal::sessions;
-use crate::capseal::events;
-use crate::capseal::CapSealState;
+use crate::capseal::{CapSealState, PendingIntervention};
 use notify::{Event as NotifyEvent, RecursiveMode, Watcher};
 use std::path::PathBuf;
 use std::sync::mpsc;
@@ -17,6 +17,9 @@ pub struct EventWatcher {
     posteriors_path: PathBuf,
     runs_dir: PathBuf,
     operator_status_path: PathBuf,
+    home_operator_status_path: PathBuf,
+    intervention_path: PathBuf,
+    voice_control_path: PathBuf,
     pty_input_path: PathBuf,
     last_events_pos: u64,
     last_pty_events_pos: u64,
@@ -40,6 +43,11 @@ impl EventWatcher {
         };
 
         let dir = capseal_dir.to_path_buf();
+        let home_operator_status_path = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".capseal")
+            .join("operator_status.json");
         Self {
             tx,
             rx,
@@ -49,6 +57,9 @@ impl EventWatcher {
             posteriors_path: dir.join("models").join("beta_posteriors.npz"),
             runs_dir: dir.join("runs"),
             operator_status_path: dir.join("operator_status.json"),
+            home_operator_status_path,
+            intervention_path: dir.join("intervention.json"),
+            voice_control_path: dir.join("voice_control.json"),
             pty_input_path: dir.join("pty_input.txt"),
             capseal_dir: dir,
             last_events_pos: 0,
@@ -99,10 +110,7 @@ impl EventWatcher {
         // Drain all pending file system events from notify
         while let Ok(event) = self.rx.try_recv() {
             for path in &event.paths {
-                let filename = path
-                    .file_name()
-                    .and_then(|f| f.to_str())
-                    .unwrap_or("");
+                let filename = path.file_name().and_then(|f| f.to_str()).unwrap_or("");
 
                 match filename {
                     "events.jsonl" | "pty_events.jsonl" => events_changed = true,
@@ -157,20 +165,89 @@ impl EventWatcher {
             }
 
             // Check operator_status.json
-            if let Ok(contents) = std::fs::read_to_string(&self.operator_status_path) {
+            {
+                let mut loaded = false;
+                for path in [&self.operator_status_path, &self.home_operator_status_path] {
+                    if let Ok(contents) = std::fs::read_to_string(path) {
+                        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&contents) {
+                            state.operator_online =
+                                val.get("online").and_then(|v| v.as_bool()).unwrap_or(false);
+                            state.operator_channels =
+                                val.get("channels").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                            state.operator_channel_types = val
+                                .get("channel_types")
+                                .and_then(|v| v.as_array())
+                                .map(|arr| {
+                                    arr.iter()
+                                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                                        .collect()
+                                })
+                                .unwrap_or_default();
+                            state.operator_events_processed = val
+                                .get("events_processed")
+                                .and_then(|v| v.as_u64())
+                                .unwrap_or(0);
+                            state.operator_voice_connected = val
+                                .get("voice_connected")
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(false);
+                            state.operator_last_alert_ts =
+                                val.get("last_alert_ts").and_then(|v| v.as_f64());
+                            state.operator_workspace = val
+                                .get("workspace")
+                                .and_then(|v| v.as_str())
+                                .map(|s| s.to_string());
+                            loaded = true;
+                            break;
+                        }
+                    }
+                }
+                if !loaded {
+                    state.operator_online = false;
+                    state.operator_channels = 0;
+                    state.operator_channel_types.clear();
+                    state.operator_events_processed = 0;
+                    state.operator_voice_connected = false;
+                    state.operator_last_alert_ts = None;
+                    state.operator_workspace = None;
+                }
+            }
+
+            // Check voice_control.json for the user-requested voice state.
+            // This is the source of truth for the TUI toggle, even if the operator is offline.
+            let voice_path = if state.operator_online {
+                state
+                    .operator_workspace
+                    .as_ref()
+                    .map(|ws| PathBuf::from(ws).join(".capseal").join("voice_control.json"))
+                    .unwrap_or_else(|| self.voice_control_path.clone())
+            } else {
+                self.voice_control_path.clone()
+            };
+            if let Ok(contents) = std::fs::read_to_string(&voice_path) {
                 if let Ok(val) = serde_json::from_str::<serde_json::Value>(&contents) {
-                    state.operator_online = val
-                        .get("online")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false);
-                    state.operator_channels = val
-                        .get("channels")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(0) as u32;
+                    if let Some(active) = val.get("voice_active").and_then(|v| v.as_bool()) {
+                        state.voice_active = active;
+                    }
+                }
+            }
+
+            // Check intervention.json for pending human override state.
+            if let Ok(contents) = std::fs::read_to_string(&self.intervention_path) {
+                if let Some((action, source)) = parse_pending_intervention(&contents) {
+                    match &state.pending_intervention {
+                        Some(existing)
+                            if existing.action == action && existing.source == source => {}
+                        _ => {
+                            state.pending_intervention =
+                                Some(PendingIntervention { action, source });
+                        }
+                    }
+                } else {
+                    state.pending_intervention = None;
                 }
             } else {
-                state.operator_online = false;
-                state.operator_channels = 0;
+                state.pending_intervention = None;
             }
         }
 
@@ -238,10 +315,17 @@ impl EventWatcher {
                 Ok(model) => {
                     state.episode_count = model.episode_count();
                     state.profile_count = model.profile_count();
-                    state.risk_scores = model
-                        .active_profiles(1.0)
+                    let mut profiles = model.active_profiles(1.0);
+                    profiles
+                        .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+                    state.risk_scores = profiles
                         .into_iter()
-                        .map(|(idx, p)| (format!("profile_{}", idx), p))
+                        .map(|(idx, p)| {
+                            let obs = ((model.alpha[idx] - 1.0).max(0.0)
+                                + (model.beta[idx] - 1.0).max(0.0))
+                                as u32;
+                            (format!("cell {idx} (n={obs})"), p)
+                        })
                         .take(10) // Show top 10
                         .collect();
                     state.model_loaded = true;
@@ -264,6 +348,52 @@ impl EventWatcher {
 
     fn reload_sessions(&self, state: &mut CapSealState) {
         state.sessions = sessions::list_sessions(&self.runs_dir);
+    }
+}
+
+fn parse_pending_intervention(contents: &str) -> Option<(String, String)> {
+    let val = serde_json::from_str::<serde_json::Value>(contents).ok()?;
+    let item = if val.is_array() {
+        val.as_array()?.first()?.clone()
+    } else {
+        val
+    };
+    let action = item.get("action")?.as_str()?.trim().to_string();
+    if action.is_empty() {
+        return None;
+    }
+    let source = item
+        .get("source")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown")
+        .to_string();
+    Some((action, source))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_pending_intervention;
+
+    #[test]
+    fn parses_intervention_object_format() {
+        let payload = r#"{"action":"deny","source":"voice"}"#;
+        let parsed = parse_pending_intervention(payload).expect("parsed");
+        assert_eq!(parsed.0, "deny");
+        assert_eq!(parsed.1, "voice");
+    }
+
+    #[test]
+    fn parses_intervention_queue_format() {
+        let payload = r#"[{"action":"approve","source":"telegram"}]"#;
+        let parsed = parse_pending_intervention(payload).expect("parsed");
+        assert_eq!(parsed.0, "approve");
+        assert_eq!(parsed.1, "telegram");
+    }
+
+    #[test]
+    fn ignores_invalid_intervention() {
+        assert!(parse_pending_intervention("{}").is_none());
+        assert!(parse_pending_intervention("[]").is_none());
     }
 }
 

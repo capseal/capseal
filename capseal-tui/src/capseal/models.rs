@@ -165,7 +165,10 @@ fn read_npy_as_f64(archive: &mut zip::ZipArchive<std::fs::File>, name: &str) -> 
             if data_bytes.len() < num_elements {
                 anyhow::bail!("Not enough data for {} u8s in {}", num_elements, name);
             }
-            Ok(data_bytes[..num_elements].iter().map(|&b| b as f64).collect())
+            Ok(data_bytes[..num_elements]
+                .iter()
+                .map(|&b| b as f64)
+                .collect())
         }
         _ => {
             anyhow::bail!("Unsupported numpy dtype '{}' in {}", descr, name);
@@ -179,7 +182,7 @@ fn parse_descr(header: &str) -> Result<String> {
     // Look for 'descr': '<XX'  or  'descr': '|XX'
     if let Some(idx) = header.find("'descr'") {
         let rest = &header[idx + 7..]; // skip "'descr'"
-        // Find the opening quote of the value
+                                       // Find the opening quote of the value
         if let Some(q1) = rest.find('\'') {
             let after_q1 = &rest[q1 + 1..];
             if let Some(q2) = after_q1.find('\'') {

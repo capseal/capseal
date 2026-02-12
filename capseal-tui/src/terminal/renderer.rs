@@ -60,10 +60,7 @@ impl<'a> Widget for TerminalWidget<'a> {
         let (cursor_row, cursor_col) = self.screen.cursor_position();
         if cursor_row < area.height && cursor_col < area.width {
             if let Some(cell) = buf.cell_mut((area.x + cursor_col, area.y + cursor_row)) {
-                cell.set_style(
-                    cell.style()
-                        .add_modifier(Modifier::REVERSED),
-                );
+                cell.set_style(cell.style().add_modifier(Modifier::REVERSED));
             }
         }
     }

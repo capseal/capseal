@@ -37,6 +37,7 @@ pub struct HubView<'a> {
     pub provider: &'a str,
     pub agent_name: &'a str,
     pub model_name: &'a str,
+    pub recent_risk_label: &'a str,
     pub initialized: bool,
     pub model_loaded: bool,
     pub episode_count: u32,
@@ -263,6 +264,12 @@ impl<'a> Widget for HubView<'a> {
                     Span::styled("    Sessions    ", dim),
                     Span::styled(session_text, white),
                 ]));
+                if !self.recent_risk_label.trim().is_empty() {
+                    lines.push(Line::from(vec![
+                        Span::styled("    Recent risk ", dim),
+                        Span::styled(self.recent_risk_label, white),
+                    ]));
+                }
             }
         }
 
@@ -284,11 +291,7 @@ impl<'a> Widget for HubView<'a> {
 
             // Step 1: Initialize
             let step1_done = self.initialized;
-            let step1_style = if step1_done {
-                dim
-            } else {
-                white
-            };
+            let step1_style = if step1_done { dim } else { white };
             let step1_suffix = if step1_done {
                 Span::styled("  done", green)
             } else if mode == HubMode::Uninitialized {
@@ -352,10 +355,7 @@ impl<'a> Widget for HubView<'a> {
                 };
                 lines.push(Line::styled(format!("{}{}", prefix, item.label), style));
                 if is_selected {
-                    lines.push(Line::styled(
-                        format!("        {}", item.description),
-                        dim,
-                    ));
+                    lines.push(Line::styled(format!("        {}", item.description), dim));
                 }
             }
         } else if mode == HubMode::Untrained {
