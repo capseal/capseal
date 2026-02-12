@@ -369,7 +369,13 @@ impl App {
         // Auto-launch operator daemon if not already running
         if !self.capseal_state.operator_online {
             let op_config = self.config.workspace.join(".capseal").join("operator.json");
-            if op_config.exists() {
+            let home_op_config = std::env::var_os("HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join(".capseal")
+                .join("operator.json");
+            // Operator can run with either a workspace config or a global (~/.capseal) config.
+            if op_config.exists() || home_op_config.exists() {
                 let ws = self.config.workspace.display().to_string();
                 if let Ok(_child) = std::process::Command::new("capseal")
                     .args(["operator", &ws, "--bg"])

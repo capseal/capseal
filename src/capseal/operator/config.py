@@ -2,11 +2,17 @@
 CapSeal Operator — Configuration
 
 Loads config from:
-  1. CLI --config flag
-  2. .capseal/operator.json in workspace
-  3. ~/.capseal/operator.json
+  1. Defaults
+  2. Global operator config (CLI --config or ~/.capseal/operator.json)
+  3. Workspace override (<workspace>/.capseal/operator.json)
   4. Environment variables
-  5. Defaults
+
+Rationale:
+  - Global config is user-scoped (voice server URL, RunPod creds, Telegram channel).
+  - Workspace config is repo-scoped (optional overrides).
+  - Avoid using the current working directory as an implicit config source when a
+    workspace is explicitly provided; that's a footgun when running the operator
+    from one repo while monitoring another.
 """
 
 import json
@@ -77,37 +83,56 @@ DEFAULT_CONFIG = {
 
 
 def load_config(config_path: Optional[Path] = None, workspace: Optional[Path] = None) -> dict:
-    """Load config from file, falling back to defaults."""
+    """Load operator config.
+
+    `config_path` (CLI --config) is treated as the global user config layer.
+    If absent, ~/.capseal/operator.json is used as the global layer.
+
+    If `workspace` is provided, <workspace>/.capseal/operator.json is loaded
+    as a workspace-specific override on top of the global layer.
+    """
     config = copy.deepcopy(DEFAULT_CONFIG)
-    source_path: Optional[Path] = None
-    loaded_config: Optional[dict] = None
+    loaded_files: list[tuple[Path, dict]] = []
 
-    # Try explicit path first
-    if config_path and config_path.exists():
-        source_path = config_path
-    else:
-        # Try workspace .capseal/operator.json (use actual workspace, not CWD)
-        if workspace:
-            workspace_config = Path(workspace) / ".capseal" / "operator.json"
-            if workspace_config.exists():
-                source_path = workspace_config
+    # Global user config layer
+    # NOTE: During pytest runs we intentionally avoid reading real user config from disk.
+    # Tests should be hermetic and must not depend on ~/.capseal/operator.json existing.
+    is_pytest = bool(os.environ.get("PYTEST_CURRENT_TEST"))
 
-        # Fallback: try CWD .capseal/operator.json
-        if source_path is None:
-            cwd_config = Path(".capseal") / "operator.json"
-            if cwd_config.exists():
-                source_path = cwd_config
+    capseal_home = Path(os.environ.get("CAPSEAL_HOME")) if os.environ.get("CAPSEAL_HOME") else None
+    default_global_path = (capseal_home or (Path.home() / ".capseal")) / "operator.json"
 
-        # Try home directory
-        if source_path is None:
-            home_config = Path.home() / ".capseal" / "operator.json"
-            if home_config.exists():
-                source_path = home_config
+    global_path = config_path if config_path else default_global_path
+    if is_pytest and config_path is None:
+        global_path = None
+    if global_path is not None and global_path.exists():
+        global_cfg = _read_json(global_path)
+        if global_cfg:
+            config = _merge(config, global_cfg)
+            loaded_files.append((global_path, global_cfg))
 
-    if source_path:
-        loaded_config = _read_json(source_path)
-        config = _merge(config, loaded_config)
-        print(f"[config] Loaded from {source_path}")
+    # Workspace override layer
+    if workspace:
+        ws_config_path = Path(workspace) / ".capseal" / "operator.json"
+        if ws_config_path.exists():
+            ws_cfg = _read_json(ws_config_path)
+            if ws_cfg:
+                config = _merge(config, ws_cfg)
+                loaded_files.append((ws_config_path, ws_cfg))
+
+    # Legacy fallback: if workspace is not provided, allow CWD .capseal/operator.json.
+    # When a workspace is provided, never implicitly use CWD as a config source.
+    if workspace is None:
+        cwd_config = Path(".capseal") / "operator.json"
+        if cwd_config.exists():
+            cwd_cfg = _read_json(cwd_config)
+            if cwd_cfg:
+                config = _merge(config, cwd_cfg)
+                loaded_files.append((cwd_config, cwd_cfg))
+
+    if loaded_files:
+        for path, _cfg in loaded_files:
+            print(f"[config] Loaded from {path}")
     else:
         print("[config] Using defaults (no config file found)")
         print("[config] Set up channels: capseal operator --setup telegram")
@@ -116,7 +141,8 @@ def load_config(config_path: Optional[Path] = None, workspace: Optional[Path] = 
     # Resolve secret indirections from config, then allow explicit env overrides.
     _resolve_secret_env_refs(config)
     _apply_env_overrides(config)
-    _warn_on_plaintext_secrets(loaded_config, source_path)
+    for path, cfg in loaded_files:
+        _warn_on_plaintext_secrets(cfg, path)
     return config
 
 
