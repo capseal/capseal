@@ -12,6 +12,7 @@ Usage:
 """
 
 import asyncio
+import contextlib
 import json
 import signal
 import sys
@@ -26,6 +27,7 @@ from .significance import SignificanceFilter
 from .composer import MessageComposer, Message
 from .config import load_config, DEFAULT_CONFIG
 from .intervention import InterventionChannel
+from .narration import LocalNarrator
 
 
 @dataclass
@@ -115,6 +117,7 @@ class OperatorDaemon:
         self.pty_events_path = workspace / ".capseal" / "pty_events.jsonl"
         self.home_pty_events_path = Path.home() / ".capseal" / "pty_events.jsonl"
         self.status_path = workspace / ".capseal" / "operator_status.json"
+        self.voice_control_path = workspace / ".capseal" / "voice_control.json"
         self.config = config
         self.context = SessionContext()
         self.significance = SignificanceFilter(config)
@@ -129,8 +132,12 @@ class OperatorDaemon:
         self.replay = False
         self.running = False
         self._last_status_write = 0.0
+        self._last_alert_ts = None
         self._events_processed = 0
         self._seen_timestamps = set()
+        self.last_event_time = time.time()
+        self._voice_active = False
+        self._narration_lock = asyncio.Lock()
 
         self.intervention = InterventionChannel(workspace)
         self._init_channels(config)
@@ -146,18 +153,57 @@ class OperatorDaemon:
             except Exception as e:
                 print(f"[operator] Voice init failed: {e}")
 
+        # Deterministic event narration (no Moshi round-trip).
+        self.narrator = LocalNarrator(voice_cfg.get("narration", {}))
+        if self.narrator.available:
+            print(f"[operator] Local narration enabled ({self.narrator.cfg.backend})")
+        else:
+            print("[operator] Local narration unavailable (install espeak)")
+
         # Live voice call (Phase 6)
         self.voice_call = None
+        self._voice_listen_task = None
+        self._voice_maintenance_task = None
+        self._voice_resume_task = None
+        self._voice_listen_commands = False
+        self._voice_pod_stopped = False
+        self._last_voice_reconnect_attempt = 0.0
+        self._voice_reconnect_interval_seconds = 30
+        self._voice_idle_seconds = 1800
+        self._voice_resume_wait_seconds = 45
+        self._runpod_pod_id = None
+        self._runpod_api_key = None
         if voice_cfg.get("live_call"):
             try:
                 from .voice_call import VoiceCallManager
                 self.voice_call = VoiceCallManager(voice_cfg)
+                self._voice_listen_commands = bool(voice_cfg.get("listen_commands", False))
+                self._voice_reconnect_interval_seconds = int(voice_cfg.get("reconnect_interval_seconds", 30))
+                self._voice_idle_seconds = int(voice_cfg.get("auto_stop_idle_seconds", 1800))
+                self._voice_resume_wait_seconds = int(voice_cfg.get("resume_wait_seconds", 45))
+                self._runpod_pod_id = config.get("runpod_pod_id") or voice_cfg.get("runpod_pod_id")
+                self._runpod_api_key = config.get("runpod_api_key") or os.environ.get("RUNPOD_API_KEY")
                 if self.voice_call.available:
                     print("[operator] Live voice call enabled")
+                    # Start in silent mode unless explicitly toggled by control file.
+                    self.voice_call.playback_enabled = False
                 else:
                     self.voice_call = None
             except Exception as e:
                 print(f"[operator] Voice call init failed: {e}")
+
+        # Restore last user-selected voice state (default off).
+        try:
+            if self.voice_control_path.exists():
+                with open(self.voice_control_path, "r") as f:
+                    data = json.load(f)
+                if isinstance(data, dict):
+                    self._voice_active = bool(data.get("voice_active", False))
+        except (OSError, json.JSONDecodeError):
+            self._voice_active = False
+
+        if self.voice_call:
+            self.voice_call.playback_enabled = bool(self._voice_active)
 
     def _init_channels(self, config: dict):
         """Initialize notification channels from config."""
@@ -201,6 +247,75 @@ class OperatorDaemon:
             print("[operator] WARNING: No notification channels configured!")
             print("[operator] Set up Telegram: capseal operator --setup telegram")
 
+    async def _sync_voice_toggle(self):
+        """Apply TUI voice toggle from .capseal/voice_control.json."""
+        target = self._voice_active
+        try:
+            if self.voice_control_path.exists():
+                with open(self.voice_control_path, "r") as f:
+                    data = json.load(f)
+                if isinstance(data, dict):
+                    target = bool(data.get("voice_active", False))
+        except (OSError, json.JSONDecodeError):
+            return
+
+        if target == self._voice_active:
+            return
+
+        if target:
+            self._voice_active = True
+            if self.voice_call:
+                with contextlib.suppress(Exception):
+                    await self.voice_call.set_active(True)
+            await self._narrate("CapSeal Ops online. Monitoring your session.")
+            print("[operator] Voice toggle: active")
+            return
+
+        # Turning OFF: announce once, then mute.
+        if self._voice_active:
+            await self._narrate("CapSeal Ops going silent.")
+        self._voice_active = False
+        if self.voice_call:
+            with contextlib.suppress(Exception):
+                await self.voice_call.set_active(False)
+        print("[operator] Voice toggle: silent")
+
+    async def _narrate(self, text: str) -> None:
+        """Speak deterministic narration locally.
+
+        This intentionally bypasses Moshi (speech-to-speech). For event narration
+        we want exact wording, not a model response.
+
+        If the live call mic uplink is active, pause it while narrating so Moshi
+        doesn't respond to the narration played over speakers.
+        """
+        if not self._voice_active:
+            return
+        if not self.narrator.available:
+            return
+        cleaned = (text or "").strip()
+        if not cleaned:
+            return
+
+        async with self._narration_lock:
+            mic_was_running = False
+            if self.voice_call and self.voice_call.connected:
+                mic_was_running = bool(getattr(self.voice_call, "_mic_uplink_running", False))
+                if mic_was_running:
+                    with contextlib.suppress(Exception):
+                        await self.voice_call.stop_mic_uplink()
+            try:
+                await self.narrator.speak(cleaned)
+            finally:
+                if (
+                    mic_was_running
+                    and self.voice_call
+                    and self.voice_call.connected
+                    and self._voice_active
+                ):
+                    with contextlib.suppress(Exception):
+                        await self.voice_call.start_mic_uplink()
+
     async def run(self):
         """Main event loop."""
         self.running = True
@@ -213,9 +328,16 @@ class OperatorDaemon:
 
         # Connect live voice call if configured
         if self.voice_call:
-            if await self.voice_call.connect():
-                asyncio.create_task(self.voice_call.listen_loop())
+            if self._voice_listen_commands:
                 self.voice_call.on_transcript(self._handle_voice_transcript)
+                print("[operator] Voice command listening enabled")
+            else:
+                print("[operator] Voice command listening disabled (narration-only)")
+            if await self.voice_call.connect():
+                self._voice_listen_task = asyncio.create_task(self.voice_call.listen_loop())
+                with contextlib.suppress(Exception):
+                    await self.voice_call.set_active(self._voice_active)
+            self._voice_maintenance_task = asyncio.create_task(self._voice_maintenance_loop())
 
         # Send startup notification
         await self._broadcast(Message(
@@ -245,6 +367,7 @@ class OperatorDaemon:
 
         while self.running:
             try:
+                await self._sync_voice_toggle()
                 new_events = self._read_new_events()
 
                 for event in new_events:
@@ -269,6 +392,15 @@ class OperatorDaemon:
 
             await asyncio.sleep(0.25)  # 250ms poll
 
+        if self._voice_maintenance_task:
+            self._voice_maintenance_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._voice_maintenance_task
+        if self._voice_listen_task:
+            self._voice_listen_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._voice_listen_task
+
         # Write offline status on shutdown
         self._write_status(offline=True)
 
@@ -292,17 +424,59 @@ class OperatorDaemon:
                 data["decision"] = "approved"
             elif d == "deny":
                 data["decision"] = "denied"
+            elif d == "flag":
+                data["decision"] = "flagged"
             # MCP uses "reason", daemon expects "risk_factors"
             if "reason" in data and "risk_factors" not in data:
                 data["risk_factors"] = data["reason"]
 
         return event
 
+    @staticmethod
+    def _normalize_gate_decision(raw: str) -> str:
+        value = str(raw or "").strip().lower()
+        if value in {"approve", "approved", "pass"}:
+            return "approve"
+        if value in {"deny", "denied", "skip"}:
+            return "deny"
+        if value in {"flag", "flagged", "human_review"}:
+            return "flag"
+        return value
+
+    def _should_force_gate_voice(self, event: dict | None, score: float) -> bool:
+        """True when voice output should be forced for a gate event."""
+        if not event or event.get("type") != "gate":
+            return False
+
+        voice_cfg = self.config.get("voice", {})
+        # "enabled" toggles voice synthesis (Phase 5). Live call narration should still work
+        # when voice synthesis is disabled, as long as live_call is configured.
+        if not (voice_cfg.get("enabled") or voice_cfg.get("live_call")):
+            return False
+        if not voice_cfg.get("speak_gate_events", True):
+            return False
+
+        try:
+            min_score = float(voice_cfg.get("speak_min_score", 0.55))
+        except (TypeError, ValueError):
+            min_score = 0.55
+        if score < min_score:
+            return False
+
+        decisions = voice_cfg.get("speak_gate_decisions", ["deny", "flag"])
+        if not isinstance(decisions, list):
+            decisions = ["deny", "flag"]
+        allow = {self._normalize_gate_decision(x) for x in decisions}
+
+        decision = self._normalize_gate_decision(event.get("data", {}).get("decision", ""))
+        return decision in allow
+
     async def _process_event(self, event: dict):
         """Process a single event: normalize, update context, score, notify."""
         event = self._normalize_event(event)
         self.context.update(event)
         self._events_processed += 1
+        self.last_event_time = time.time()
 
         score = self.significance.score(event, self.context)
         etype = event.get("type", "unknown")
@@ -316,9 +490,15 @@ class OperatorDaemon:
         print(f"[operator] Event: {etype} | score={score:.2f} | "
               f"decision={decision} | files={files} | p_fail={p_fail}")
 
-        if score >= self.config["notify_threshold"]:
+        if etype == "session_start":
+            if self.voice_call and (self._voice_pod_stopped or not self.voice_call.connected):
+                if not self._voice_resume_task or self._voice_resume_task.done():
+                    self._voice_resume_task = asyncio.create_task(self._resume_voice_on_session_start())
+
+        force_gate_voice = self._should_force_gate_voice(event, score)
+        if score >= self.config["notify_threshold"] or force_gate_voice:
             message = self.composer.compose(event, self.context, score)
-            await self._broadcast(message, score)
+            await self._broadcast(message, score, event=event)
 
     def _read_new_events(self) -> list[dict]:
         """Read new lines from events.jsonl and pty_events.jsonl."""
@@ -375,29 +555,39 @@ class OperatorDaemon:
 
         return events
 
-    async def _broadcast(self, message: Message, score: float):
+    async def _broadcast(self, message: Message, score: float, event: dict | None = None):
         """Send notification through all configured channels."""
         tier = self.significance.tier(score)
+        force_gate_voice = self._should_force_gate_voice(event, score)
+        wants_voice = tier in ("voice_note", "critical") or force_gate_voice
+        delivered = False
 
         # Synthesize voice for voice_note and critical tiers (Phase 5)
         audio = None
-        if tier in ("voice_note", "critical") and self.voice and message.voice_text:
+        if wants_voice and self.voice and message.voice_text:
             audio = await self.voice.synthesize(message.voice_text)
 
-        # Speak on live voice call for critical events (Phase 6)
-        if tier == "critical" and self.voice_call and self.voice_call.connected:
-            await self.voice_call.speak(message.voice_text)
+        # Deterministic local narration (no Moshi round-trip).
+        if wants_voice and self._voice_active and message.voice_text:
+            await self._narrate(message.voice_text)
+            delivered = True
 
         for channel in self.channels:
             try:
-                if audio and hasattr(channel, 'send_voice'):
+                if wants_voice and audio and hasattr(channel, 'send_voice'):
                     await channel.send_voice(audio, caption=message.short_text)
-                elif tier in ("voice_note", "critical"):
+                    delivered = True
+                elif wants_voice:
                     await channel.send_text(message.full_text, buttons=message.buttons)
+                    delivered = True
                 elif score >= self.config["notify_threshold"]:
                     await channel.send_text(message.short_text, buttons=message.buttons)
+                    delivered = True
             except Exception as e:
                 print(f"[operator] Channel {channel.__class__.__name__} error: {e}")
+
+        if delivered:
+            self._last_alert_ts = time.time()
 
     async def _check_incoming(self):
         """Poll channels for user commands."""
@@ -536,12 +726,170 @@ class OperatorDaemon:
 
     async def _handle_voice_transcript(self, text: str):
         """Handle transcribed speech from live voice call."""
-        if not text.strip():
+        if not self._voice_listen_commands or not self._voice_active:
             return
-        print(f"[operator] Voice transcript: {text}")
-        # Route through NLP parser, respond on first channel
+        cleaned = text.strip()
+        if not cleaned:
+            return
+        # NOTE: For the Moshi binary protocol, kind=0x02 frames are model output text tokens,
+        # not a reliable ASR transcript of the user's microphone. Treat them as "voice text"
+        # and only act on explicit slash-commands to avoid accidental interventions.
+        print(f"[operator] Voice text: {cleaned}")
+
+        # Only accept explicit slash commands. Freeform voice commands require client-side ASR.
+        command = cleaned
+        if not command.startswith("/"):
+            return
+
+        ack = await self._apply_voice_command(command)
+        if not ack:
+            return
+
         if self.channels:
-            await self._handle_command(text, self.channels[0])
+            try:
+                await self.channels[0].send_text(f"\U0001f3a4 {ack}")
+            except Exception:
+                pass
+
+        await self._narrate(ack)
+
+    async def _apply_voice_command(self, command: str) -> str | None:
+        """Apply a slash command parsed from voice transcript."""
+        raw = command.strip()
+        if not raw:
+            return None
+        lowered = raw.lower()
+        parts = raw.split(maxsplit=1)
+        target = parts[1] if len(parts) > 1 else None
+
+        if lowered.startswith("/approve"):
+            await self.intervention.approve_pending(target=target)
+            return f"Approved{f' for {target}' if target else ''}."
+        if lowered.startswith("/deny"):
+            await self.intervention.deny_pending(target=target)
+            return f"Denied{f' for {target}' if target else ''}."
+        if lowered.startswith("/pause"):
+            await self.intervention.pause_session()
+            return "Session paused."
+        if lowered.startswith("/resume"):
+            await self.intervention.resume_session()
+            return "Session resumed."
+        if lowered.startswith("/end"):
+            await self.intervention.end_session()
+            return "Session end requested."
+        if lowered.startswith("/instruct"):
+            instruction = target or ""
+            if not instruction:
+                return "No instruction text provided."
+            await self.intervention.instruct_agent(instruction)
+            return f"Instruction sent: {instruction}"
+        if lowered.startswith("/status"):
+            return self.context.summary()
+        if lowered.startswith("/trust"):
+            return f"Trust score {self.context.trust_score:.0%}."
+        if lowered.startswith("/files"):
+            if not self.context.files_touched:
+                return "No files touched yet."
+            top = sorted(self.context.files_touched.items(), key=lambda x: -x[1])[:3]
+            details = ", ".join(f"{name} ({count}x)" for name, count in top)
+            return f"Top files: {details}."
+        if lowered.startswith("/help"):
+            return "Say approve, deny, pause, resume, status, trust, files, or instruct."
+
+        return None
+
+    async def _voice_maintenance_loop(self):
+        """Reconnect voice call and auto-stop idle RunPod pod."""
+        while self.running:
+            try:
+                await asyncio.sleep(30)
+                if not self.voice_call:
+                    continue
+
+                if self.voice_call.connected and self._voice_idle_seconds > 0:
+                    idle = time.time() - self.last_event_time
+                    if idle >= self._voice_idle_seconds:
+                        print(f"[operator] Voice idle for {int(idle)}s, stopping pod")
+                        await self._auto_stop_voice()
+                        continue
+
+                # Best-effort reconnect if pod is expected online.
+                if (
+                    not self._voice_pod_stopped
+                    and not self.voice_call.connected
+                    and (time.time() - self._last_voice_reconnect_attempt) >= self._voice_reconnect_interval_seconds
+                ):
+                    self._last_voice_reconnect_attempt = time.time()
+                    ok = await self.voice_call.connect()
+                    if ok:
+                        if not self._voice_listen_task or self._voice_listen_task.done():
+                            self._voice_listen_task = asyncio.create_task(self.voice_call.listen_loop())
+                        with contextlib.suppress(Exception):
+                            await self.voice_call.set_active(self._voice_active)
+                        if self._voice_active:
+                            await self._narrate("CapSeal Ops reconnected.")
+            except Exception as e:
+                print(f"[operator] voice maintenance error: {e}")
+
+    async def _auto_stop_voice(self):
+        if not self.voice_call:
+            return
+        if self.voice_call.connected:
+            await self._narrate("Going offline due to inactivity.")
+            await asyncio.sleep(0.2)
+        await self.voice_call.disconnect()
+        self._voice_pod_stopped = True
+
+        if self._runpod_pod_id and self._runpod_api_key:
+            try:
+                from .runpod_ops import stop_pod
+                stop_pod(self._runpod_api_key, self._runpod_pod_id)
+                print(f"[operator] stopped RunPod pod {self._runpod_pod_id}")
+            except Exception as e:
+                print(f"[operator] failed to stop pod: {e}")
+
+    async def _resume_voice_on_session_start(self):
+        if not self.voice_call:
+            return
+        if self.voice_call.connected:
+            return
+
+        if self._runpod_pod_id and self._runpod_api_key and self._voice_pod_stopped:
+            try:
+                from .runpod_ops import resume_pod
+                resume_pod(self._runpod_api_key, self._runpod_pod_id)
+                print(f"[operator] resumed RunPod pod {self._runpod_pod_id}")
+                await asyncio.sleep(max(5, self._voice_resume_wait_seconds))
+                self._voice_pod_stopped = False
+            except Exception as e:
+                print(f"[operator] failed to resume pod: {e}")
+                return
+
+        ok = await self.voice_call.connect()
+        if ok:
+            with contextlib.suppress(Exception):
+                await self.voice_call.set_active(self._voice_active)
+            if self._voice_listen_commands:
+                self.voice_call.on_transcript(self._handle_voice_transcript)
+            if not self._voice_listen_task or self._voice_listen_task.done():
+                self._voice_listen_task = asyncio.create_task(self.voice_call.listen_loop())
+            if self._voice_active:
+                await self._narrate("CapSeal Ops back online. Monitoring your session.")
+
+    @staticmethod
+    def _channel_type_name(channel) -> str:
+        """Normalize channel class names into stable display values."""
+        name = channel.__class__.__name__.strip()
+        lowered = name.lower()
+        if lowered.endswith("channel"):
+            lowered = lowered[: -len("channel")]
+        # Normalize common aliases for UI readability.
+        aliases = {
+            "telegram": "telegram",
+            "whatsapp": "whatsapp",
+            "imessage": "imessage",
+        }
+        return aliases.get(lowered, lowered)
 
     def _write_status(self, offline: bool = False):
         """Write operator status file atomically for TUI consumption."""
@@ -553,10 +901,13 @@ class OperatorDaemon:
         status = {
             "online": not offline,
             "channels": len(self.channels),
-            "channel_types": [ch.__class__.__name__ for ch in self.channels],
+            "channel_types": [self._channel_type_name(ch) for ch in self.channels],
             "session_id": self.context.session_id,
             "total_actions": self.context.total_actions,
             "events_processed": self._events_processed,
+            "voice_connected": bool(self.voice_call and self.voice_call.connected),
+            "voice_active": bool(self._voice_active),
+            "last_alert_ts": self._last_alert_ts,
             "notify_threshold": self.config.get("notify_threshold", 0.5),
             "ts": now,
         }
