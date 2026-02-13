@@ -43,6 +43,10 @@ DEFAULT_CONFIG = {
         "mic_enabled": False,
         "mic_backend": "auto",  # auto, pulse, alsa
         "mic_input": "default",
+        # Bluetooth UX: avoid opening the BT headset mic when output is BT (keeps A2DP quality).
+        "bt_avoid_headset_mic": True,
+        # Best-effort: temporarily disable WirePlumber's autoswitch-to-headset-profile while voice is active.
+        "bt_disable_autoswitch": True,
         "reconnect_interval_seconds": 30,
         "auto_stop_idle_seconds": 1800,
         "resume_wait_seconds": 45,

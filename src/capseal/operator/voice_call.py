@@ -27,6 +27,40 @@ except ImportError:
     HAS_WEBSOCKETS = False
 
 
+def _run_capture_text(args: list[str], *, timeout_s: float = 2.0) -> str | None:
+    try:
+        cp = subprocess.run(
+            args,
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+            check=False,
+        )
+    except Exception:
+        return None
+    if cp.returncode != 0:
+        return None
+    return (cp.stdout or "").strip()
+
+
+def _parse_boolish(value: str | None) -> bool | None:
+    if not value:
+        return None
+    lowered = value.strip().lower()
+    if lowered in {"true", "1", "yes", "on"}:
+        return True
+    if lowered in {"false", "0", "no", "off"}:
+        return False
+    # Handle "key = true" and similar.
+    if "=" in lowered:
+        tail = lowered.split("=", 1)[1].strip()
+        if tail in {"true", "1", "yes", "on"}:
+            return True
+        if tail in {"false", "0", "no", "off"}:
+            return False
+    return None
+
+
 VOICE_PROFILES = {
     # Fastest response, higher chance of choppiness under jitter.
     "low_latency": {
@@ -158,6 +192,15 @@ class VoiceCallManager:
         self.mic_backend = str(config.get("mic_backend", "auto")).strip().lower()
         self.mic_sample_rate = int(config.get("mic_sample_rate", 24000))
         self.mic_frame_duration_ms = int(config.get("mic_frame_duration_ms", 20))
+        # Bluetooth UX: if output is Bluetooth (A2DP), opening a Bluetooth *mic* often forces HFP/HSP
+        # which can mute output and/or degrade audio. Default behavior is to avoid BT mic when possible.
+        self.bt_avoid_headset_mic = bool(config.get("bt_avoid_headset_mic", True))
+        # Best-effort: temporarily disable WirePlumber autoswitch-to-headset-profile while voice is active.
+        # We restore the previous value when stopping mic uplink.
+        self.bt_disable_autoswitch = bool(config.get("bt_disable_autoswitch", True))
+        self._wpctl_prev_autoswitch: bool | None = None
+        self._wpctl_autoswitch_changed = False
+        self._audio_setup_logged = False
         # Local VAD/noise gate: replace low-energy mic frames with zeros (silence) before Opus encode.
         # This preserves timing (silence still flows) while stopping the model from responding to ambient noise.
         self.mic_vad_enabled = bool(config.get("mic_vad_enabled", True))
@@ -709,6 +752,8 @@ class VoiceCallManager:
             return
         if self._mic_pcm_task and not self._mic_pcm_task.done():
             return
+        self._maybe_avoid_bluetooth_mic()
+        self._maybe_disable_bt_autoswitch()
         if not self._start_mic_uplink_processes():
             print("[voice_call] mic uplink unavailable (ffmpeg/input device)")
             return
@@ -754,6 +799,119 @@ class VoiceCallManager:
                 except Exception:
                     pass
         print("[voice_call] mic uplink stopped")
+        self._maybe_restore_bt_autoswitch()
+
+    def _maybe_avoid_bluetooth_mic(self) -> None:
+        """If output is Bluetooth, prefer a non-Bluetooth mic source to avoid A2DP->HFP switch."""
+        if not self.bt_avoid_headset_mic:
+            return
+        if self.mic_backend not in {"auto", "pulse"}:
+            return
+        pactl = shutil.which("pactl")
+        if not pactl:
+            return
+
+        sink = _run_capture_text([pactl, "get-default-sink"])
+        source = _run_capture_text([pactl, "get-default-source"])
+        if not sink:
+            return
+        output_is_bt = "bluez" in sink.lower()
+        if not output_is_bt:
+            return
+
+        # Log audio situation once per instance.
+        if not self._audio_setup_logged:
+            self._audio_setup_logged = True
+            print(f"[voice_call] audio output is bluetooth (sink={sink})")
+
+        # Respect explicit mic_input, unless it looks like a BT source.
+        configured = (self.mic_input or "").strip()
+        configured_is_default = configured.lower() == "default"
+        configured_is_bt = "bluez" in configured.lower()
+        default_source_is_bt = bool(source and "bluez" in source.lower())
+        if not (configured_is_default or configured_is_bt or default_source_is_bt):
+            return
+
+        sources_raw = _run_capture_text([pactl, "list", "sources", "short"], timeout_s=3.0)
+        if not sources_raw:
+            return
+        sources: list[str] = []
+        for line in sources_raw.splitlines():
+            parts = line.split("\t")
+            if len(parts) >= 2:
+                sources.append(parts[1].strip())
+
+        # Drop monitors and BT sources.
+        candidates = [
+            s
+            for s in sources
+            if s
+            and "monitor" not in s.lower()
+            and "bluez" not in s.lower()
+        ]
+        if not candidates:
+            print("[voice_call] warning: bluetooth output detected but no non-bt mic sources found; using default mic")
+            return
+
+        def score(name: str) -> tuple[int, int]:
+            # Higher is better. Prefer USB, then analog, then anything else.
+            lowered = name.lower()
+            usb = 2 if "usb" in lowered else 0
+            analog = 1 if ("analog" in lowered or "pci" in lowered) else 0
+            return (usb, analog)
+
+        best = sorted(candidates, key=score, reverse=True)[0]
+        if best and best != configured:
+            self.mic_input = best
+            print(f"[voice_call] using non-bt mic to keep a2dp quality (mic={best})")
+
+    def _maybe_disable_bt_autoswitch(self) -> None:
+        """Best-effort disable of WirePlumber bluetooth autoswitch for this session."""
+        if not self.bt_disable_autoswitch:
+            return
+        if self._wpctl_autoswitch_changed:
+            return
+        pactl = shutil.which("pactl")
+        wpctl = shutil.which("wpctl")
+        if not pactl or not wpctl:
+            return
+        sink = _run_capture_text([pactl, "get-default-sink"])
+        if not sink or "bluez" not in sink.lower():
+            return
+        # Only do this if we're *not* using a BT mic (i.e., we intend to keep A2DP).
+        if "bluez" in (self.mic_input or "").lower():
+            return
+
+        key = "bluetooth.autoswitch-to-headset-profile"
+        current = _run_capture_text([wpctl, "settings", key], timeout_s=3.0)
+        prev = _parse_boolish(current)
+        if prev is None:
+            return
+        self._wpctl_prev_autoswitch = prev
+        if prev is False:
+            return  # already disabled
+        # Set without --save: temporary for this WirePlumber instance.
+        ok = _run_capture_text([wpctl, "settings", key, "false"], timeout_s=3.0)
+        if ok is None:
+            return
+        self._wpctl_autoswitch_changed = True
+        print("[voice_call] disabled bt profile autoswitch (wireplumber) for this session")
+
+    def _maybe_restore_bt_autoswitch(self) -> None:
+        """Restore WirePlumber bluetooth autoswitch if we changed it."""
+        if not self._wpctl_autoswitch_changed:
+            return
+        wpctl = shutil.which("wpctl")
+        if not wpctl:
+            return
+        prev = self._wpctl_prev_autoswitch
+        if prev is None:
+            return
+        key = "bluetooth.autoswitch-to-headset-profile"
+        desired = "true" if prev else "false"
+        _ = _run_capture_text([wpctl, "settings", key, desired], timeout_s=3.0)
+        self._wpctl_autoswitch_changed = False
+        print("[voice_call] restored bt profile autoswitch setting")
 
     def _vad_threshold(self) -> int:
         # Convert dBFS to 16-bit linear amplitude threshold.
@@ -896,28 +1054,34 @@ class VoiceCallManager:
 
     def _start_local_player(self) -> None:
         """Start local audio player process for downlink audio."""
-        if self._player_proc and self._player_proc.poll() is None:
-            return
+        # If an old process exists (running or exited), ensure it doesn't linger as a zombie.
+        if self._player_proc:
+            if self._player_proc.poll() is None:
+                return
+            self._stop_local_player()
 
         ffplay = shutil.which("ffplay")
         mpv = shutil.which("mpv")
-        cmd = None
         backend = self.playback_backend
 
-        # mpv tends to be more reliable for long stdin streams.
-        if backend in ("auto", "mpv") and mpv:
-            cmd = [
+        def build_mpv_cmd() -> list[str] | None:
+            if not mpv:
+                return None
+            # Avoid --really-quiet: it can suppress the errors that explain why playback died.
+            return [
                 mpv,
                 "--no-video",
-                "--really-quiet",
+                "--msg-level=all=warn",
                 "--cache=yes",
                 f"--cache-secs={self.mpv_cache_secs}",
                 f"--demuxer-readahead-secs={self.mpv_readahead_secs}",
                 "--demuxer-max-bytes=4M",
                 "-",
             ]
-            self._player_name = "mpv"
-        elif backend in ("auto", "ffplay") and ffplay:
+
+        def build_ffplay_cmd() -> list[str] | None:
+            if not ffplay:
+                return None
             # Moshi sends OGG/Opus pages; ffplay can decode directly from stdin.
             # Use moderate buffering for better audio quality (lower crackle).
             cmd = [
@@ -941,32 +1105,69 @@ class VoiceCallManager:
                 "-i",
                 "pipe:0",
             ])
-            self._player_name = "ffplay"
+            return cmd
 
-        if not cmd:
+        candidates: list[tuple[str, list[str]]] = []
+        if backend in ("auto", "mpv"):
+            cmd = build_mpv_cmd()
+            if cmd:
+                candidates.append(("mpv", cmd))
+            cmd = build_ffplay_cmd()
+            if cmd:
+                candidates.append(("ffplay", cmd))
+        elif backend == "ffplay":
+            cmd = build_ffplay_cmd()
+            if cmd:
+                candidates.append(("ffplay", cmd))
+            cmd = build_mpv_cmd()
+            if cmd:
+                candidates.append(("mpv", cmd))
+        else:
+            cmd = build_mpv_cmd()
+            if cmd:
+                candidates.append(("mpv", cmd))
+            cmd = build_ffplay_cmd()
+            if cmd:
+                candidates.append(("ffplay", cmd))
+
+        if not candidates:
             print("[voice_call] no local player found (install ffplay or mpv)")
             return
 
-        try:
-            self._player_proc = subprocess.Popen(
-                cmd,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-            )
-            self._player_bytes = 0
-            self._playback_restart_count += 1
-            self._player_stderr_thread = threading.Thread(
-                target=self._drain_player_stderr,
-                args=(self._player_proc,),
-                daemon=True,
-            )
-            self._player_stderr_thread.start()
-            self._playback_frame_counter = 0
-            print(f"[voice_call] local playback enabled via {self._player_name}")
-        except Exception as e:
-            self._player_proc = None
-            print(f"[voice_call] failed to start local player: {e}")
+        last_err: object | None = None
+        for name, cmd in candidates:
+            try:
+                proc = subprocess.Popen(
+                    cmd,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                )
+                # Give the player a moment to fail fast (common when the sink/profile flips).
+                time.sleep(0.15)
+                if proc.poll() is not None:
+                    last_err = RuntimeError(f"{name} exited immediately (code={proc.returncode})")
+                    self._reap_process(proc)
+                    continue
+
+                self._player_proc = proc
+                self._player_name = name
+                self._player_bytes = 0
+                self._playback_restart_count += 1
+                self._player_stderr_thread = threading.Thread(
+                    target=self._drain_player_stderr,
+                    args=(proc,),
+                    daemon=True,
+                )
+                self._player_stderr_thread.start()
+                self._playback_frame_counter = 0
+                print(f"[voice_call] local playback enabled via {name}")
+                return
+            except Exception as e:
+                last_err = e
+                continue
+
+        print(f"[voice_call] failed to start local player: {last_err}")
 
     def _drain_player_stderr(self, proc: subprocess.Popen) -> None:
         """Surface player diagnostics instead of swallowing silent failures."""
@@ -1011,12 +1212,27 @@ class VoiceCallManager:
         self._player_proc = None
         if not proc:
             return
+        self._reap_process(proc)
+
+    @staticmethod
+    def _reap_process(proc: subprocess.Popen) -> None:
+        """Terminate and wait() on a subprocess so it doesn't linger as a zombie."""
         try:
             if proc.stdin:
                 proc.stdin.close()
         except Exception:
             pass
         try:
-            proc.terminate()
+            if proc.poll() is None:
+                proc.terminate()
         except Exception:
             pass
+        try:
+            proc.wait(timeout=0.8)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            with contextlib.suppress(Exception):
+                proc.wait(timeout=0.8)
